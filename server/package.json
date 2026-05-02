@@ -1,0 +1,10 @@
+{
+  "name": "webchat-server",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "ws": "^8.17.0"
+  }
+}

@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Danylo Lykov
+
+# Deploy webchat to example.com
+set -euo pipefail
+
+REMOTE="example.com"
+REMOTE_DIR="/home/<user>/webchat"
+DOMAIN="chat.example.com"
+
+rsync -az --delete --exclude={node_modules,client/dist,.env} \
+  "$(dirname "$0")/" "${REMOTE}:${REMOTE_DIR}/"
+
+ssh "$REMOTE" bash <<ENVSSH
+set -e
+if [ ! -f "${REMOTE_DIR}/.env" ]; then
+  p=\$(openssl rand -hex 16); j=\$(openssl rand -hex 32)
+  h=\$(openssl rand -hex 32); r=\$(openssl rand -hex 32)
+  printf 'CHAT_USERNAME=admin\nCHAT_PASSWORD=%s\nJWT_SECRET=%s\nHOST_KEY=%s\n    "\$p" "\$j" "\$h" "\$r" > "${REMOTE_DIR}/.env"
+  echo "==> .env created:"; cat "${REMOTE_DIR}/.env"
+fi
+cd "${REMOTE_DIR}" && docker-compose down && docker-compose up -d --build server
+ENVSSH
+
+echo "==> verifying"
+for i in 1 2 3 4 5; do
+  code=$(curl -so /dev/null -w "%{http_code}" --max-time 5 "https://${DOMAIN}/api/login" \
+    -X POST -H "Content-Type: application/json" -d '{}' 2>/dev/null || echo 0)
+  [ "$code" = "401" ] && break
+  echo "  attempt $i: got $code, retrying…"; sleep 3
+done
+if [ "$code" = "401" ]; then
+  echo "OK https://${DOMAIN} (login endpoint responds)"
+else
+  echo "WARN: login endpoint returned $code — containers may still be starting"
+fi
+
+echo "Host: HOST_KEY=<from ${REMOTE_DIR}/.env> SERVER_URL=wss://${DOMAIN} node host/index.js"
