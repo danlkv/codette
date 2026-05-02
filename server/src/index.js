@@ -55,6 +55,7 @@ const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
 let hostWs = null;
+let lastClaudeSessionId = null;
 const clients = new Set();
 
 wss.on('connection', (ws, req) => {
@@ -67,13 +68,23 @@ wss.on('connection', (ws, req) => {
     }
     hostWs = ws;
     console.log('[server] host connected');
-    historyLines = [];
-    saveHistory();
     broadcast({ type: 'status', host: 'connected' });
-    broadcast({ type: 'clear' });
 
     ws.on('message', (data) => {
       const line = data.toString();
+      // detect new Claude session via system init event
+      try {
+        const ev = JSON.parse(line);
+        if (ev.type === 'system' && ev.subtype === 'init' && ev.session_id) {
+          if (ev.session_id !== lastClaudeSessionId) {
+            lastClaudeSessionId = ev.session_id;
+            historyLines = [];
+            saveHistory();
+            broadcast({ type: 'clear' });
+            console.log('[server] new claude session:', ev.session_id.slice(0, 8));
+          }
+        }
+      } catch {}
       historyLines.push(line);
       saveHistory();
       broadcast({ type: 'claude_line', line });

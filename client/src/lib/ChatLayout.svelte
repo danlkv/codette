@@ -3,7 +3,7 @@
 
 <script>
   import { onMount, onDestroy, createEventDispatcher } from 'svelte';
-  import { messages, lastCost, hostStatus, wsOk, highContrast } from '../store.js';
+  import { messages, lastCost, lastUsage, hostStatus, wsOk, highContrast } from '../store.js';
   import { toolSummary } from '../utils/tools.js';
   import MessageList from './MessageList.svelte';
   import ChatInput from './ChatInput.svelte';
@@ -150,6 +150,7 @@
         m.role === 'tool' && m.running ? { ...m, running: false } : m
       ));
       if (ev.total_cost_usd != null) lastCost.set(ev.total_cost_usd);
+      if (ev.usage != null) lastUsage.set(ev.usage);
       seenToolIds = new Set();
     }
   }
@@ -175,10 +176,20 @@
         sysMsg(`host: ${h}  ·  websocket: ${w ? 'connected' : 'disconnected'}`);
         return true;
       }
-      case '/usage': {
-        let c;
+      case '/usage':
+      case '/context': {
+        let c, u;
         lastCost.subscribe(v => c = v)();
-        sysMsg(c != null ? `session cost so far: $${c.toFixed(4)}` : 'no cost data yet — complete a turn first');
+        lastUsage.subscribe(v => u = v)();
+        const lines = [];
+        if (u) {
+          const total = (u.input_tokens ?? 0) + (u.output_tokens ?? 0);
+          lines.push(`tokens  in:${u.input_tokens ?? '?'}  out:${u.output_tokens ?? '?'}  total:${total}`);
+          if (u.cache_read_input_tokens) lines.push(`cache read: ${u.cache_read_input_tokens}`);
+          if (u.cache_creation_input_tokens) lines.push(`cache write: ${u.cache_creation_input_tokens}`);
+        }
+        if (c != null) lines.push(`cost: $${c.toFixed(4)}`);
+        sysMsg(lines.length ? lines.join('  ·  ') : 'no usage data yet — complete a turn first');
         return true;
       }
       case '/btw':

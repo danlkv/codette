@@ -11,14 +11,21 @@
   let el;
 
   const SLASH_CMDS = [
-    { cmd: '/clear',  desc: 'clear display' },
-    { cmd: '/status', desc: 'connection status' },
-    { cmd: '/usage',  desc: 'session cost' },
-    { cmd: '/btw',    desc: 'side question (not in history)' },
+    { cmd: '/clear',   desc: 'clear conversation' },
+    { cmd: '/context', desc: 'token usage + cost' },
+    { cmd: '/status',  desc: 'connection status' },
+    { cmd: '/btw',     desc: 'side message (not in history)' },
   ];
-  $: hint = value.startsWith('/')
-    ? SLASH_CMDS.find(c => c.cmd.startsWith(value.split(' ')[0]))
-    : null;
+
+  $: prefix = value.split(' ')[0];
+  $: matches = value.startsWith('/')
+    ? SLASH_CMDS.filter(c => c.cmd.startsWith(prefix))
+    : [];
+
+  function complete(cmd) {
+    value = cmd + ' ';
+    el?.focus();
+  }
 
   function send() {
     const text = value.trim();
@@ -30,6 +37,10 @@
 
   function keydown(e) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    if (e.key === 'Tab' && matches.length) {
+      e.preventDefault();
+      complete(matches[0].cmd);
+    }
   }
 
   function resize() {
@@ -40,8 +51,15 @@
 </script>
 
 <div class="wrap">
-  {#if hint}
-    <div class="hint"><span class="cmd">{hint.cmd}</span> — {hint.desc}</div>
+  {#if matches.length}
+    <div class="cmds">
+      {#each matches as m}
+        <button class="cmd-item" on:click={() => complete(m.cmd)}>
+          <span class="cmd">{m.cmd}</span>
+          <span class="desc">{m.desc}</span>
+        </button>
+      {/each}
+    </div>
   {/if}
   <div class="bar">
     <textarea
@@ -84,9 +102,19 @@
   }
   button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-light); }
   button:disabled { opacity: .25; cursor: default; }
-  .hint {
+
+  .cmds {
     max-width: 740px; margin: 0 auto 6px;
-    font-size: .75rem; color: var(--text-muted);
+    display: flex; flex-direction: column; gap: 2px;
   }
-  .cmd { color: var(--accent-light); }
+  .cmd-item {
+    display: flex; align-items: baseline; gap: 10px;
+    background: none; border: none; border-radius: 4px;
+    padding: 3px 6px; cursor: pointer; text-align: left;
+    font: inherit; width: 100%;
+    transition: background .1s;
+  }
+  .cmd-item:hover { background: var(--bg-elevated); }
+  .cmd  { color: var(--accent-light); font-size: .8rem; min-width: 80px; }
+  .desc { color: var(--text-dim); font-size: .75rem; }
 </style>
