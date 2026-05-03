@@ -40,14 +40,23 @@
           ? 'Message Claude… (/ for commands)'
           : 'Send to start… (/ for commands)');
 
+  function onPopState() {
+    const id = location.hash.slice(1) || null;
+    if (!id || id === get(currentSessionId)) return;
+    if (id === 'new') { handleNewSession(null); return; }
+    switchSession(id);
+  }
+
   onMount(async () => {
     sidebarOpen = window.innerWidth > 640;
     window.addEventListener('beforeunload', saveCurrentCache);
+    window.addEventListener('popstate', onPopState);
     await initSessions();
     connect();
   });
   onDestroy(() => {
     window.removeEventListener('beforeunload', saveCurrentCache);
+    window.removeEventListener('popstate', onPopState);
     ws?.close();
   });
 
@@ -68,9 +77,13 @@
     } catch (e) {}
 
     if (sessionList.length === 0) return;
-    const first = sessionList[0];
-    currentSessionId.set(first.id);
-    await loadSessionHistory(first.id);
+    const hashId = location.hash.slice(1) || null;
+    const target = (hashId && hashId !== 'new' && sessionList.find(s => s.id === hashId))
+      ? hashId
+      : sessionList[0].id;
+    history.replaceState(null, '', '#' + target);
+    currentSessionId.set(target);
+    await loadSessionHistory(target);
   }
 
   // Summarize old lines to save space:
@@ -248,6 +261,7 @@
 
   async function switchSession(id) {
     if (id === get(currentSessionId)) return;
+    history.pushState(null, '', '#' + id);
 
     fileViewPath = null;
     diffViewCommit = null;
@@ -355,6 +369,7 @@
     fileViewPath = null;
     diffViewCommit = null;
     saveCurrentCache();
+    history.pushState(null, '', '#new');
     currentSessionId.set('__new__');
     currentLines = [];
     messages.set([]);
