@@ -25,15 +25,14 @@ function appendLog(entry) {
   if (logBuffer.length > LOG_MAX) logBuffer.shift();
 }
 
-// ── Session state ─────────────────────────────────────────────────────────────
-// Server is stateless w.r.t. history — host owns session files.
-// streaming: true while Claude is generating (first assistant → session_snapshot)
-// pendingHistory: clients waiting for snapshot from host (connected while not streaming,
-//                 or connected while streaming and then streaming ended)
-let streaming             = false;
-let lastClaudeSessionId   = null;
-let pendingResumeSessionId = null;   // set when a client requests resume; skip 'clear' for this id
-const pendingHistory      = new Set(); // waiting for request_snapshot reply
+// ── Server state ──────────────────────────────────────────────────────────────
+let hostWs = null;
+const clients = new Set();
+const agents = new Map();               // sessionId → { active: bool, streaming: bool }
+let sessionCache = [];                  // from last session_list from host
+let hostCwd = null;                     // host's process.cwd() from last session_list
+const pendingHistoryHttp = new Map();   // sessionId → res[]
+const pendingDeleteHttp = new Map();    // sessionId → res
 
 const app = express();
 app.use(express.json());
@@ -41,6 +40,15 @@ app.use(express.json());
 const clientDist = path.resolve(__dirname, '../../client/dist');
 app.use(express.static(clientDist));
 
+// ── JWT auth helper ───────────────────────────────────────────────────────────
+function requireJwt(req, res, next) {
+  const auth = req.headers.authorization || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : req.query.token;
+  try { jwt.verify(token, JWT_SECRET); next(); }
+  catch { res.status(401).json({ error: 'Unauthorized' }); }
+}
+
+// ── Login ─────────────────────────────────────────────────────────────────────
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body || {};
   if (username === USERNAME && password === PASSWORD) {
@@ -51,7 +59,77 @@ app.post('/api/login', (req, res) => {
   }
 });
 
+// ── Sessions list ─────────────────────────────────────────────────────────────
+app.get('/api/sessions', requireJwt, (_req, res) => {
+  res.json({ sessions: sessionCache, hostCwd });
+});
 
+// ── Session history ───────────────────────────────────────────────────────────
+app.get('/api/sessions/:id/history', requireJwt, (req, res) => {
+  const id = req.params.id;
+  const offsetStr = req.query.offset;
+  const offset = offsetStr !== undefined ? Number(offsetStr) : null;
+
+  // Set a 30s timeout to avoid hanging forever if host doesn't reply
+  const timer = setTimeout(() => {
+    const pending = pendingHistoryHttp.get(id);
+    if (pending) {
+      const idx = pending.indexOf(res);
+      if (idx !== -1) pending.splice(idx, 1);
+      if (pending.length === 0) pendingHistoryHttp.delete(id);
+    }
+    if (!res.headersSent) res.status(504).json({ error: 'History request timed out' });
+  }, 30000);
+
+  res.on('close', () => clearTimeout(timer));
+
+  // incremental = we sent an offset, so client should merge rather than replace
+  const entry = { res, incremental: offset !== null && offset > 0 };
+
+  if (pendingHistoryHttp.has(id)) {
+    // Coalesce: another request already in flight for this sessionId
+    pendingHistoryHttp.get(id).push(entry);
+    // Do NOT send duplicate WS message to host
+  } else {
+    pendingHistoryHttp.set(id, [entry]);
+    if (hostWs?.readyState === WebSocket.OPEN) {
+      hostWs.send(JSON.stringify({
+        type: 'get_session_history',
+        sessionId: id,
+        offset: offset !== null && offset > 0 ? offset : undefined,
+      }));
+    }
+  }
+});
+
+// ── Create session ────────────────────────────────────────────────────────────
+app.post('/api/sessions', requireJwt, (req, res) => {
+  const { cwd, firstMessage } = req.body || {};
+  if (hostWs?.readyState === WebSocket.OPEN) {
+    hostWs.send(JSON.stringify({ type: 'new_session', cwd, firstMessage }));
+  }
+  res.status(202).json({});
+});
+
+// ── Delete session ────────────────────────────────────────────────────────────
+app.delete('/api/sessions/:id', requireJwt, (req, res) => {
+  const id = req.params.id;
+  pendingDeleteHttp.set(id, res);
+  if (hostWs?.readyState === WebSocket.OPEN) {
+    hostWs.send(JSON.stringify({ type: 'delete_session', sessionId: id }));
+  }
+
+  // Timeout guard in case host never replies
+  const timer = setTimeout(() => {
+    if (pendingDeleteHttp.get(id) === res) {
+      pendingDeleteHttp.delete(id);
+      if (!res.headersSent) res.status(504).json({ error: 'Delete timed out' });
+    }
+  }, 30000);
+  res.on('close', () => clearTimeout(timer));
+});
+
+// ── Logs ──────────────────────────────────────────────────────────────────────
 app.get('/api/logs', (req, res) => {
   const key = req.query.key || req.headers['x-host-key'];
   if (key !== HOST_KEY) return res.status(401).json({ error: 'Unauthorized' });
@@ -66,21 +144,18 @@ app.get('/api/logs', (req, res) => {
   res.json(logBuffer);
 });
 
+// ── SPA fallback ──────────────────────────────────────────────────────────────
 app.get('*', (_req, res) => res.sendFile(path.join(clientDist, 'index.html')));
 
+// ── WebSocket server ──────────────────────────────────────────────────────────
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
-let hostWs = null;
-const clients = new Set();
-
-function requestSnapshot(ws) {
-  // Park client and ask host to send current session snapshot
-  pendingHistory.add(ws);
-  if (hostWs?.readyState === WebSocket.OPEN) {
-    hostWs.send(JSON.stringify({ type: 'request_snapshot' }));
+function broadcast(obj) {
+  const msg = JSON.stringify(obj);
+  for (const ws of clients) {
+    if (ws.readyState === WebSocket.OPEN) ws.send(msg);
   }
-  // If host not connected yet, client stays parked until host connects and snapshot arrives
 }
 
 wss.on('connection', (ws, req) => {
@@ -91,87 +166,73 @@ wss.on('connection', (ws, req) => {
     if (url.searchParams.get('key') !== HOST_KEY) { ws.close(1008, 'Unauthorized'); return; }
     hostWs = ws;
     console.log('[server] host connected');
-    broadcast({ type: 'status', host: 'connected' });
 
-    // Any parked clients waiting for history — ask host immediately
-    if (pendingHistory.size > 0) {
-      hostWs.send(JSON.stringify({ type: 'request_snapshot' }));
-    }
-    // Populate sidebars of connected clients
+    // Ask host to populate session cache immediately
     hostWs.send(JSON.stringify({ type: 'list_sessions' }));
+    broadcast({ type: 'host_status', connected: true });
 
     ws.on('message', (data) => {
-      const line = data.toString();
       let ev;
-      try { ev = JSON.parse(line); } catch {}
+      try { ev = JSON.parse(data.toString()); } catch {}
 
-      // Host → server control messages (not forwarded as claude_lines)
       if (ev?.type === 'log') {
         appendLog(ev);
         return;
       }
 
-      if (ev?.type === 'session_snapshot') {
-        streaming = false;
-        const histMsg = JSON.stringify({ type: 'history', lines: ev.lines || [] });
-        const openClients = [...clients].filter(w => w.readyState === WebSocket.OPEN).length;
-        appendLog({ level: 'info', msg: 'snapshot handler', data: { resume: ev.resume, lines: ev.lines?.length ?? 0, pendingHistory: pendingHistory.size, clients: clients.size, openClients } });
-        // Promote parked clients and send history
-        for (const pws of pendingHistory) {
-          if (pws.readyState === WebSocket.OPEN) {
-            clients.add(pws);
-            pws.send(histMsg);
-          }
-        }
-        pendingHistory.clear();
-        // Push to already-active clients only for resume-triggered snapshots
-        if (ev.resume) {
-          for (const pws of clients) {
-            if (pws.readyState === WebSocket.OPEN) pws.send(histMsg);
-          }
-        }
-        console.log('[server] snapshot dispatched (%d lines)', ev.lines?.length ?? 0);
-        hostWs.send(JSON.stringify({ type: 'list_sessions' }));
+      if (ev?.type === 'claude_line') {
+        // Broadcast per-session line to all WS clients
+        broadcast({ type: 'claude_line', sessionId: ev.sessionId, line: ev.line });
+        return;
+      }
+
+      if (ev?.type === 'agent_event') {
+        const { sessionId, event } = ev;
+        const current = agents.get(sessionId) || { active: false, streaming: false };
+        agents.set(sessionId, {
+          active: event === 'started' || event === 'streaming' || event === 'idle',
+          streaming: event === 'streaming',
+        });
+        appendLog({ level: 'info', msg: 'agent_event', data: { sessionId: String(sessionId).slice(0, 8), event } });
+        broadcast({ type: 'agent_event', sessionId, event });
         return;
       }
 
       if (ev?.type === 'session_list') {
-        broadcast({ type: 'session_list', sessions: ev.sessions });
+        sessionCache = ev.sessions || [];
+        if (ev.hostCwd) hostCwd = ev.hostCwd;
+        broadcast({ type: 'session_list', sessions: sessionCache, hostCwd });
+        // Drain pending DELETE responses only for sessions confirmed gone
+        const remainingIds = new Set(sessionCache.map(s => s.id));
+        for (const [sessionId, res] of pendingDeleteHttp) {
+          if (!remainingIds.has(sessionId)) {
+            if (!res.headersSent) res.status(204).send();
+            pendingDeleteHttp.delete(sessionId);
+          }
+        }
         return;
       }
 
-      // Detect new Claude session → clear all clients (skip for intentional resumes)
-      if (ev?.type === 'system' && ev.subtype === 'init' && ev.session_id) {
-        if (ev.session_id !== lastClaudeSessionId) {
-          const isResume = pendingResumeSessionId &&
-            ev.session_id.startsWith(pendingResumeSessionId);
-          appendLog({ level: 'info', msg: 'system.init', data: { session: ev.session_id.slice(0, 8), pendingResumeSessionId: pendingResumeSessionId?.slice(0, 8) ?? null, isResume: !!isResume } });
-          pendingResumeSessionId = null;
-          lastClaudeSessionId = ev.session_id;
-          streaming = false;
-          if (!isResume) {
-            broadcast({ type: 'clear' });
-            console.log('[server] new claude session:', ev.session_id.slice(0, 8));
-          } else {
-            console.log('[server] resumed claude session:', ev.session_id.slice(0, 8));
+      if (ev?.type === 'history') {
+        const { sessionId, lines } = ev;
+        const pending = pendingHistoryHttp.get(sessionId);
+        if (pending) {
+          for (const { res, incremental } of pending) {
+            if (!res.headersSent) {
+              res.json({ lines: lines || [], incremental });
+            }
           }
+          pendingHistoryHttp.delete(sessionId);
         }
+        return;
       }
-
-      if (ev?.type === 'assistant') streaming = true;
-
-      // When a turn ends, promote any clients that connected mid-stream
-      if (ev?.type === 'result' && pendingHistory.size > 0) {
-        hostWs.send(JSON.stringify({ type: 'request_snapshot' }));
-      }
-
-      broadcast({ type: 'claude_line', line });
     });
 
     ws.on('close', () => {
       hostWs = null;
+      agents.clear();
       console.log('[server] host disconnected');
-      broadcast({ type: 'status', host: 'disconnected' });
+      broadcast({ type: 'host_status', connected: false });
     });
     ws.on('error', (e) => console.error('[server] host error:', e.message));
 
@@ -180,45 +241,47 @@ wss.on('connection', (ws, req) => {
     try { jwt.verify(url.searchParams.get('token'), JWT_SECRET); }
     catch { ws.close(1008, 'Unauthorized'); return; }
 
-    ws.send(JSON.stringify({ type: 'status', host: hostWs ? 'connected' : 'disconnected', streaming }));
-
-    if (streaming) {
-      // Claude is mid-response: park until streaming ends, then request snapshot
-      pendingHistory.add(ws);
-      console.log('[server] client parked (streaming) (%d pending)', pendingHistory.size);
-    } else {
-      // Not streaming: request snapshot from host (host reads from disk)
-      requestSnapshot(ws);
-      console.log('[server] client requesting snapshot (%d pending)', pendingHistory.size);
-    }
+    clients.add(ws);
+    ws.send(JSON.stringify({ type: 'host_status', connected: !!hostWs }));
+    console.log('[server] client connected (%d total)', clients.size);
 
     ws.on('message', (data) => {
       let msg;
       try { msg = JSON.parse(data.toString()); } catch { return; }
-      const logData = { type: msg.type, clients: clients.size, pendingHistory: pendingHistory.size };
+
+      const logData = { type: msg.type, clients: clients.size };
       if (msg.sessionId) logData.sessionId = String(msg.sessionId).slice(0, 8);
       if (msg.type === 'user') logData.preview = String(msg.message?.content || '').slice(0, 60);
       appendLog({ level: 'info', msg: 'client→server', data: logData });
-      if (msg.type === 'resume' && msg.sessionId) {
-        pendingResumeSessionId = msg.sessionId;
+
+      if (msg.type === 'user') {
+        // Broadcast user echo to all clients as a claude_line immediately
+        broadcast({
+          type: 'claude_line',
+          sessionId: msg.sessionId,
+          line: JSON.stringify({ type: 'user', message: msg.message }),
+        });
+        // Then forward to host
+        if (hostWs?.readyState === WebSocket.OPEN) hostWs.send(data.toString());
+        return;
       }
-      // resume and other control messages go to host, not Claude stdin
-      if (hostWs?.readyState === WebSocket.OPEN) hostWs.send(data.toString());
+
+      if (msg.type === 'agent_ctl') {
+        // Forward to host
+        if (hostWs?.readyState === WebSocket.OPEN) hostWs.send(data.toString());
+        return;
+      }
     });
 
-    ws.on('close', () => { clients.delete(ws); pendingHistory.delete(ws); });
+    ws.on('close', () => {
+      clients.delete(ws);
+      console.log('[server] client disconnected (%d remaining)', clients.size);
+    });
     ws.on('error', (e) => console.error('[server] client error:', e.message));
 
   } else {
     ws.close(1008, 'Unknown path');
   }
 });
-
-function broadcast(obj) {
-  const msg = JSON.stringify(obj);
-  for (const ws of clients) {
-    if (ws.readyState === WebSocket.OPEN) ws.send(msg);
-  }
-}
 
 server.listen(PORT, () => console.log('[server] listening on port', PORT));

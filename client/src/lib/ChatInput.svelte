@@ -6,6 +6,7 @@
   const dispatch = createEventDispatcher();
   export let disabled = false;
   export let placeholder = 'Message Claude…';
+  export let sendLabel = 'send';
 
   let value = '';
   let el;
@@ -67,7 +68,7 @@
       on:keydown={keydown} on:input={resize}
       {placeholder} {disabled} rows="1"
     ></textarea>
-    <button on:click={send} disabled={!value.trim() || disabled}>send</button>
+    <button on:click={send} disabled={!value.trim() || disabled}>{sendLabel}</button>
   </div>
 </div>
 

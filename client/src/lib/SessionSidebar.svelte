@@ -3,14 +3,19 @@
 
 <script>
   import { createEventDispatcher } from 'svelte';
-  export let sessions = [];   // [{id, title, ts, active}]
+  export let sessions = [];   // [{id, title, ts, msgCount, agentActive, cwd}]
   export let currentId = null;
   export let open = true;
+  export let hostCwd = null;
 
   const dispatch = createEventDispatcher();
 
   let confirmingId = null;
   let confirmTimer = null;
+  let showNew = false;
+  let newCwd = '';
+
+  $: if (showNew && !newCwd && hostCwd) newCwd = hostCwd;
 
   function fmt(ts) {
     const d = new Date(ts);
@@ -26,6 +31,12 @@
     dispatch('resume', id);
   }
 
+  function startNew() {
+    dispatch('new_session', newCwd.trim() || null);
+    showNew = false;
+    newCwd = hostCwd || '';
+  }
+
   function tryDelete(e, id) {
     e.stopPropagation();
     if (confirmingId === id) {
@@ -38,27 +49,66 @@
       confirmTimer = setTimeout(() => confirmingId = null, 4000);
     }
   }
+
+  function interrupt(e, id) {
+    e.stopPropagation();
+    dispatch('agent_ctl', { id, event: 'interrupt' });
+  }
+
+  function stop(e, id) {
+    e.stopPropagation();
+    dispatch('agent_ctl', { id, event: 'stop' });
+  }
 </script>
 
 <aside class="sidebar" class:hidden={!open}>
-  <div class="sidebar-header">Sessions</div>
+  <div class="sidebar-header">
+    <span>Sessions</span>
+    <button class="new-btn" on:click={() => showNew = !showNew} title="New session" aria-pressed={showNew}>+</button>
+  </div>
+  {#if showNew}
+    <form class="new-form" on:submit|preventDefault={startNew}>
+      <input class="new-input" bind:value={newCwd} placeholder="/path/to/project" autofocus />
+      <button class="new-start" type="submit">Start</button>
+    </form>
+  {/if}
   <div class="list">
     {#each sessions as s (s.id)}
       <div class="session-row" class:active={s.id === currentId}>
         <button class="session" on:click={() => resume(s.id)} title={s.id}>
           <span class="meta">
-            {#if s.id === currentId}<span class="dot"></span>{/if}
+            {#if s.agentActive}
+              <span class="dot pulse"></span>
+            {:else if s.id === currentId}
+              <span class="dot"></span>
+            {/if}
             <span class="time">{fmt(s.ts)}</span>
             {#if s.msgCount}<span class="count">{s.msgCount}</span>{/if}
           </span>
           <span class="title">{s.title || s.id.slice(0, 8)}</span>
         </button>
-        <button
-          class="del" class:confirming={confirmingId === s.id}
-          on:click={(e) => tryDelete(e, s.id)}
-          title="Delete session"
-          aria-label="Delete session"
-        >{confirmingId === s.id ? '?' : '×'}</button>
+
+        {#if s.agentActive}
+          <button
+            class="ctl interrupt"
+            on:click={(e) => interrupt(e, s.id)}
+            title="Interrupt agent"
+            aria-label="Interrupt agent"
+          >⊘</button>
+          <button
+            class="ctl stop"
+            on:click={(e) => stop(e, s.id)}
+            title="Stop agent"
+            aria-label="Stop agent"
+          >■</button>
+        {:else}
+          <button
+            class="del" class:confirming={confirmingId === s.id}
+            on:click={(e) => tryDelete(e, s.id)}
+            title="Delete session"
+            aria-label="Delete session"
+          >{confirmingId === s.id ? '?' : '×'}</button>
+        {/if}
       </div>
     {/each}
     {#if sessions.length === 0}
@@ -78,6 +128,21 @@
     border-right: 1px solid var(--border);
     overflow: hidden;
   }
+  @media (max-width: 640px) {
+    .sidebar, .sidebar.hidden {
+      display: flex;
+      position: absolute;
+      top: 0; left: 0;
+      height: 100%;
+      z-index: 50;
+      transform: translateX(-100%);
+      transition: transform .04s ease;
+      box-shadow: 2px 0 12px rgba(0,0,0,.4);
+    }
+    .sidebar:not(.hidden) {
+      transform: translateX(0);
+    }
+  }
   .sidebar-header {
     padding: 10px 12px 6px;
     font-size: .7rem;
@@ -87,7 +152,33 @@
     color: var(--text-muted);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
+  .new-btn {
+    background: none; border: none; cursor: pointer;
+    color: var(--text-dim); font-size: 1.1rem; line-height: 1;
+    padding: 0 2px; transition: color .15s;
+  }
+  .new-btn:hover, .new-btn[aria-pressed="true"] { color: var(--accent-light); }
+  .new-form {
+    display: flex; gap: 4px; padding: 6px 8px;
+    border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .new-input {
+    flex: 1; min-width: 0;
+    background: var(--bg-elevated); border: 1px solid var(--border);
+    border-radius: 4px; color: var(--text); font: inherit; font-size: .75rem;
+    padding: 4px 7px; outline: none;
+  }
+  .new-input:focus { border-color: var(--accent-light); }
+  .new-start {
+    background: var(--accent); border: none; border-radius: 4px;
+    color: #fff; cursor: pointer; font: inherit; font-size: .72rem;
+    padding: 4px 8px; flex-shrink: 0; transition: opacity .15s;
+  }
+  .new-start:hover { opacity: .85; }
   .list {
     flex: 1;
     overflow-y: auto;
@@ -140,6 +231,26 @@
   .del:active { color: var(--text-muted); }
   .del.confirming { color: #e06c75; font-weight: 700; }
 
+  /* Agent control buttons */
+  .ctl {
+    flex-shrink: 0;
+    width: 28px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: .85rem;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: color .15s;
+  }
+  .ctl.interrupt { color: var(--text-dim); }
+  .ctl.interrupt:hover { color: #e5c07b; }
+  .ctl.stop { color: var(--text-dim); }
+  .ctl.stop:hover { color: #e06c75; }
+
   .meta {
     display: flex;
     align-items: center;
@@ -151,6 +262,17 @@
     background: var(--accent-light);
     flex-shrink: 0;
   }
+  /* Pulsing dot for active agents */
+  .dot.pulse {
+    animation: pulse 1.4s ease-in-out infinite;
+    background: #5a5;
+  }
+  @keyframes pulse {
+    0%   { opacity: 1;   transform: scale(1); }
+    50%  { opacity: .45; transform: scale(1.35); }
+    100% { opacity: 1;   transform: scale(1); }
+  }
+
   .time { font-size: .7rem; color: var(--text-dim); }
   .count { font-size: .65rem; color: var(--text-dim); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 0 5px; }
   .title {

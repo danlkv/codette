@@ -3,7 +3,8 @@
 
 <script>
   import { onMount, onDestroy, createEventDispatcher } from 'svelte';
-  import { messages, lastCost, lastUsage, hostStatus, wsOk, highContrast } from '../store.js';
+  import { messages, lastCost, lastUsage, hostStatus, wsOk, highContrast,
+           sessions, currentSessionId, sessionData } from '../store.js';
   import { toolSummary } from '../utils/tools.js';
   import MessageList from './MessageList.svelte';
   import ChatInput from './ChatInput.svelte';
@@ -15,20 +16,124 @@
   let msgCounter = 0;
   const uid = () => ++msgCounter;
 
-  let sessions = [];
-  let currentSessionId = null;
   let sidebarOpen = true;
+  let hostCwd = null;
+  let currentLines = [];       // raw jsonl lines for current session (for cache writes)
+  let awaitingNewSession = false; // auto-switch on next agent_event: started
+  let pendingCwd = null;         // cwd for the pending __new__ session
 
-  // per-turn tracking
+  // per-turn tracking (always for the active session)
   let seenToolIds = new Set();
   let liveClaudeId = null;  // ev.message.id of the assistant message being streamed
   let liveUid = null;       // our messages[] id for that row
 
-  onMount(() => {
+  // Derived: is the current session's agent active?
+  $: currentAgentActive = $sessions.find(s => s.id === $currentSessionId)?.agentActive ?? false;
+
+  onMount(async () => {
     sidebarOpen = window.innerWidth > 640;
+    window.addEventListener('beforeunload', saveCurrentCache);
+    await initSessions();
     connect();
   });
-  onDestroy(() => ws?.close());
+  onDestroy(() => {
+    window.removeEventListener('beforeunload', saveCurrentCache);
+    ws?.close();
+  });
+
+  // ── Startup: load sessions, pick most recent, load history, then connect WS ──
+
+  async function initSessions() {
+    let sessionList = [];
+    try {
+      const res = await fetch('/api/sessions', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        sessionList = data.sessions ?? data;
+        if (data.hostCwd) hostCwd = data.hostCwd;
+        sessions.set(sessionList);
+      }
+    } catch (e) {
+      // network error — will retry via WS
+    }
+
+    if (sessionList.length === 0) return;
+
+    // Pick most recent (index 0, server returns desc by ts)
+    const first = sessionList[0];
+    currentSessionId.set(first.id);
+    await loadSessionHistory(first.id);
+  }
+
+  // ── localStorage cache ───────────────────────────────────────────────────────
+  // Format: { lines: string[], lineCount: number }
+  // Incremental fetch uses ?offset=lineCount — host returns raw.slice(offset).
+  // No clock comparison needed; line count is always correct and monotonically grows.
+
+  function saveCurrentCache() {
+    const id = $currentSessionId;
+    if (!id || currentLines.length === 0) return;
+    try {
+      localStorage.setItem('history_' + id, JSON.stringify({
+        lines: currentLines,
+        lineCount: currentLines.length,
+      }));
+    } catch {}
+  }
+
+  async function loadSessionHistory(id) {
+    if (!id || id === '__new__') return;
+    const cacheKey = 'history_' + id;
+    let cached = null;
+    try {
+      const raw = localStorage.getItem(cacheKey);
+      if (raw) {
+        cached = JSON.parse(raw);
+        if (!('lineCount' in cached)) cached = null; // discard old format
+      }
+    } catch {}
+
+    // Show cached lines immediately for instant display
+    if (cached) applyHistoryLines(cached.lines);
+
+    // Always fetch to pick up any new lines since cache was written
+    await fetchAndApplyHistory(id, cached, cacheKey);
+  }
+
+  async function fetchAndApplyHistory(id, cached, cacheKey) {
+    try {
+      const offset = cached ? cached.lineCount : null;
+      const params = offset ? `?offset=${offset}` : '';
+      const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/history${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const lines = data.lines ?? [];
+
+      if (data.incremental && cached) {
+        if (lines.length === 0) return; // nothing new, cache already displayed
+        const merged = [...cached.lines, ...lines];
+        applyHistoryLines(merged);
+        try { localStorage.setItem(cacheKey, JSON.stringify({ lines: merged, lineCount: merged.length })); } catch {}
+      } else {
+        applyHistoryLines(lines);
+        try { localStorage.setItem(cacheKey, JSON.stringify({ lines, lineCount: lines.length })); } catch {}
+      }
+    } catch {}
+  }
+
+  function applyHistoryLines(lines) {
+    currentLines = [...lines];
+    messages.set([]);
+    resetTurnState();
+    for (const line of lines) parseLine(line, false);
+    finalizeIncomplete();
+  }
+
+  // ── WebSocket ────────────────────────────────────────────────────────────────
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -37,17 +142,46 @@
     ws.onclose = () => { wsOk.set(false); setTimeout(connect, 3000); };
     ws.onerror = () => {};
     ws.onmessage = ({ data }) => {
-      const msg = JSON.parse(data);
-      if (msg.type === 'status') {
-        hostStatus.set(msg.host);
-        if (msg.host === 'disconnected') finalizeIncomplete();
+      let msg;
+      try { msg = JSON.parse(data); } catch { return; }
+
+      if (msg.type === 'session_list') {
+        sessions.set(msg.sessions ?? []);
+        if (msg.hostCwd) hostCwd = msg.hostCwd;
       }
-      else if (msg.type === 'clear')        { messages.set([]); lastCost.set(null); resetTurnState(); }
-      else if (msg.type === 'claude_line') parseLine(msg.line);
-      else if (msg.type === 'history')     loadHistory(msg.lines);
-      else if (msg.type === 'session_list') sessions = msg.sessions ?? [];
+      else if (msg.type === 'claude_line') {
+        const { sessionId, line } = msg;
+        if (sessionId === $currentSessionId) {
+          currentLines.push(line);
+          parseLine(line, true);
+        } else {
+          // Store in background session cache
+          if (!sessionData.has(sessionId)) sessionData.set(sessionId, []);
+          // We keep raw lines in background; when switching we replay full history anyway
+          // But to keep live accumulation useful we store parsed messages.
+          // Since we don't want to parse without a turn-state per session, buffer raw lines.
+          sessionData.get(sessionId).push(line);
+        }
+      }
+      else if (msg.type === 'agent_event') {
+        const { sessionId, event } = msg;
+        const active = event === 'started' || event === 'streaming' || event === 'idle';
+        sessions.update(list => list.map(s =>
+          s.id === sessionId ? { ...s, agentActive: active } : s
+        ));
+        if (awaitingNewSession && event === 'started' && sessionId !== $currentSessionId) {
+          awaitingNewSession = false;
+          switchSession(sessionId);
+        }
+      }
+      else if (msg.type === 'host_status') {
+        hostStatus.set(msg.connected ? 'connected' : 'disconnected');
+        if (!msg.connected) { finalizeIncomplete(); }
+      }
     };
   }
+
+  // ── Turn state helpers ───────────────────────────────────────────────────────
 
   function resetTurnState() {
     seenToolIds = new Set(); liveClaudeId = null; liveUid = null;
@@ -59,13 +193,6 @@
     }
     messages.update(ms => ms.map(m => m.running ? { ...m, running: false } : m));
     resetTurnState();
-  }
-
-  function loadHistory(lines) {
-    messages.set([]);
-    resetTurnState();
-    for (const line of lines) parseLine(line);
-    finalizeIncomplete(); // in case history ends mid-turn
   }
 
   function commitTool(b) {
@@ -89,24 +216,25 @@
     }
   }
 
-  function parseLine(line) {
+  function parseLine(line, live = false) {
     let ev;
     try { ev = JSON.parse(line); } catch { return; }
 
     if (ev.type === 'system' && ev.subtype === 'init' && ev.session_id) {
-      currentSessionId = ev.session_id;
+      // If this is a new session we don't know about yet, update currentSessionId
+      if (!$currentSessionId) currentSessionId.set(ev.session_id);
       return;
     }
 
     if (ev.type === 'user') {
       const content = ev.message?.content;
       if (typeof content === 'string' && content.trim())
-        messages.update(ms => [...ms, { id: uid(), role: 'user', text: content }]);
+        messages.update(ms => [...ms, { id: uid(), role: 'user', text: content, ts: ev.timestamp ?? null }]);
       return;
     }
 
     if (ev.type === 'user_message') {
-      messages.update(ms => [...ms, { id: uid(), role: 'user', text: ev.text }]);
+      messages.update(ms => [...ms, { id: uid(), role: 'user', text: ev.text, ts: ev.timestamp ?? null }]);
       return;
     }
 
@@ -124,7 +252,6 @@
       const content = Array.isArray(ev.message?.content) ? ev.message.content : [];
       const claudeId = ev.message?.id ?? null;
 
-      // extract accumulated text for this message
       let text = '';
       for (const b of content) {
         if (b.type === 'text') text += b.text;
@@ -132,12 +259,10 @@
 
       if (text) {
         if (claudeId && claudeId === liveClaudeId && liveUid !== null) {
-          // same Claude message — update text in place
           messages.update(ms => ms.map(m =>
             m.id === liveUid ? { ...m, text } : m
           ));
         } else {
-          // new Claude message — finalize previous if any, open new row
           if (liveUid !== null) {
             messages.update(ms => ms.map(m =>
               m.id === liveUid ? { ...m, streaming: false } : m
@@ -145,11 +270,10 @@
           }
           liveClaudeId = claudeId;
           liveUid = uid();
-          messages.update(ms => [...ms, { id: liveUid, role: 'assistant', text, streaming: true }]);
+          messages.update(ms => [...ms, { id: liveUid, role: 'assistant', text, streaming: live, ts: ev.timestamp ?? null }]);
         }
       }
 
-      // commit each new tool_use as its own row immediately
       for (const b of content) {
         if (b.type === 'tool_use' && !seenToolIds.has(b.id)) {
           seenToolIds.add(b.id);
@@ -158,7 +282,6 @@
       }
 
     } else if (ev.type === 'result') {
-      // finalize live assistant message
       if (liveUid !== null) {
         messages.update(ms => ms.map(m =>
           m.id === liveUid ? { ...m, streaming: false } : m
@@ -166,7 +289,6 @@
         liveUid = null;
         liveClaudeId = null;
       }
-      // mark all running tools done
       messages.update(ms => ms.map(m =>
         m.role === 'tool' && m.running ? { ...m, running: false } : m
       ));
@@ -176,7 +298,34 @@
     }
   }
 
-  // ── Slash commands (client-side only) ────────────────────────────────────
+  // ── Session switching ────────────────────────────────────────────────────────
+
+  async function switchSession(id) {
+    if (id === $currentSessionId) return;
+
+    // Persist current session's lines to localStorage before switching
+    saveCurrentCache();
+
+    // Save raw lines to in-memory cache (background handler also pushes raw lines here)
+    if ($currentSessionId) sessionData.set($currentSessionId, [...currentLines]);
+
+    currentSessionId.set(id);
+    currentLines = [];
+    messages.set([]);
+    resetTurnState();
+
+    // Quick restore from in-memory raw-line cache (replay is fast, avoids type mismatch)
+    const cached = sessionData.get(id);
+    if (cached?.length > 0) {
+      for (const line of cached) parseLine(line, false);
+      currentLines = [...cached];
+    }
+
+    await loadSessionHistory(id);
+  }
+
+  // ── Slash commands ───────────────────────────────────────────────────────────
+
   function sysMsg(text) {
     messages.update(ms => [...ms, { id: uid(), role: 'system', text }]);
   }
@@ -215,36 +364,93 @@
       }
       case '/btw':
         if (arg && ws?.readyState === 1)
-          ws.send(JSON.stringify({ type: 'user', message: { role: 'user', content: arg } }));
+          ws.send(JSON.stringify({
+            type: 'user',
+            sessionId: $currentSessionId,
+            message: { role: 'user', content: arg },
+          }));
         return true;
       default:
         return false;
     }
   }
 
-  function onSend(e) {
+  // ── Send ─────────────────────────────────────────────────────────────────────
+
+  async function onSend(e) {
     const text = e.detail;
     if (text.startsWith('/') && handleSlash(text)) return;
+
+    if ($currentSessionId === '__new__') {
+      // Set flag BEFORE the POST — agent_event: started can arrive before HTTP response
+      awaitingNewSession = true;
+      try {
+        await fetch('/api/sessions', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cwd: pendingCwd, firstMessage: text }),
+        });
+      } catch { awaitingNewSession = false; }
+      return;
+    }
+
     if (ws?.readyState !== 1) return;
-    messages.update(ms => [...ms, { id: uid(), role: 'user', text }]);
-    ws.send(JSON.stringify({ type: 'user', message: { role: 'user', content: text } }));
+    // Do NOT optimistically add — server echoes as claude_line immediately
+    ws.send(JSON.stringify({
+      type: 'user',
+      sessionId: $currentSessionId,
+      message: { role: 'user', content: text },
+    }));
   }
 
-  function sidebarResume(e) {
+  // ── Sidebar event handlers ───────────────────────────────────────────────────
+
+  function onResume(e) {
     const id = e.detail;
-    if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'resume', sessionId: id }));
+    switchSession(id);
     if (window.innerWidth <= 640) sidebarOpen = false;
   }
 
-  function sidebarDelete(e) {
-    const id = e.detail;
-    if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'delete_session', sessionId: id }));
+  function onNewSession(e) {
+    pendingCwd = e.detail || null;
+    saveCurrentCache();
+    currentSessionId.set('__new__');
+    currentLines = [];
+    messages.set([]);
+    resetTurnState();
+    if (window.innerWidth <= 640) sidebarOpen = false;
   }
 
+  async function onDelete(e) {
+    const id = e.detail;
+    try {
+      await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      // Server broadcasts updated session_list — no need to update locally
+    } catch {}
+  }
+
+  function onAgentCtl(e) {
+    const { id, event } = e.detail;
+    if (ws?.readyState === 1) {
+      ws.send(JSON.stringify({ type: 'agent_ctl', sessionId: id, event }));
+    }
+  }
+
+  // ── Derived UI state ─────────────────────────────────────────────────────────
+
   $: inputDisabled = !$wsOk;
-  $: inputPlaceholder = !$wsOk ? 'Connecting…'
-    : $hostStatus !== 'connected' ? 'Waiting for host…'
-    : 'Message Claude… (/ for commands)';
+  $: inputPlaceholder = $currentSessionId === '__new__'
+    ? 'Type your first message to start the session…'
+    : !$wsOk
+      ? 'Connecting…'
+      : $hostStatus !== 'connected'
+        ? 'Waiting for host…'
+        : currentAgentActive
+          ? 'Message Claude… (/ for commands)'
+          : 'Send to start… (/ for commands)';
 </script>
 
 <div class="layout">
@@ -255,6 +461,7 @@
     <div class="indicators">
       <span class="dot" class:on={$hostStatus === 'connected'}>host</span>
       <span class="dot" class:on={$wsOk}>ws</span>
+      <span class="dot ai" class:on={currentAgentActive}>ai</span>
       {#if $lastCost != null}
         <span class="cost">${$lastCost.toFixed(4)}</span>
       {/if}
@@ -265,12 +472,22 @@
   </header>
 
   <div class="body">
-    <SessionSidebar {sessions} currentId={currentSessionId} open={sidebarOpen} on:resume={sidebarResume} on:delete={sidebarDelete} />
+    <SessionSidebar
+      sessions={$sessions}
+      currentId={$currentSessionId}
+      open={sidebarOpen}
+      {hostCwd}
+      on:resume={onResume}
+      on:delete={onDelete}
+      on:new_session={onNewSession}
+      on:agent_ctl={onAgentCtl}
+    />
     <div class="chat">
       <MessageList hostStatus={$hostStatus} />
       <ChatInput
         disabled={inputDisabled}
         placeholder={inputPlaceholder}
+        sendLabel={currentAgentActive ? 'send' : 'send & start'}
         on:send={onSend}
       />
     </div>
@@ -279,7 +496,7 @@
 
 <style>
   .layout { display: flex; flex-direction: column; height: var(--app-height, 100dvh); }
-  .body { display: flex; flex: 1; overflow: hidden; }
+  .body { display: flex; flex: 1; overflow: hidden; position: relative; }
   .chat { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
 
   header {
@@ -300,6 +517,7 @@
   .indicators { display: flex; align-items: center; gap: 8px; }
   .dot { font-size: .72rem; color: var(--text-dim); }
   .dot.on { color: #5a5; }
+  .dot.ai.on { color: var(--accent-light); }
   .cost { font-size: .72rem; color: var(--text-dim); }
   .logout {
     background: none; border: none; color: var(--text-dim);

@@ -8,6 +8,11 @@
   import TodoBlock from './TodoBlock.svelte';
   export let msg;
   export let isStreaming = false;
+
+  function fmtTime(ts) {
+    if (!ts) return '';
+    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
 </script>
 
 {#if msg.role === 'system'}
@@ -27,7 +32,7 @@
 
 {:else}
   <div class="row {msg.role}">
-    <span class="label">{msg.role === 'user' ? 'you' : 'claude'}</span>
+    <span class="label">{msg.role === 'user' ? 'you' : 'claude'}{#if msg.ts}<span class="msg-time">{fmtTime(msg.ts)}</span>{/if}</span>
     <div class="body">
       {#if msg.role === 'user'}
         <p class="user-text">{msg.text}</p>
@@ -56,9 +61,10 @@
   .tool-row :global(.tool) { flex: 1; margin-top: 0; }
 
   .row { display: flex; flex-direction: column; gap: 3px; }
-  .label { font-size: .72rem; color: var(--text-dim); }
+  .label { font-size: .72rem; color: var(--text-dim); display: flex; align-items: baseline; gap: 5px; }
   .row.user .label      { color: var(--user-color); }
   .row.assistant .label { color: var(--accent-light); }
+  .msg-time { font-size: .6rem; color: var(--text-dim); opacity: 0.7; font-weight: 400; }
 
   .user-text {
     color: var(--text-muted); line-height: 1.6;
