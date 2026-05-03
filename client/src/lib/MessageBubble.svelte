@@ -48,7 +48,7 @@
   }
 
   .tool-row {
-    display: flex; gap: 12px; align-items: flex-start;
+    display: flex; gap: 4px; align-items: flex-start;
   }
   .tool-row .label {
     font-size: .75rem; width: 44px; flex-shrink: 0;
