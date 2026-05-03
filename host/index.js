@@ -382,17 +382,19 @@ function connect() {
       const { sessionId, offset } = msg;
       const file = findSessionFile(sessionId);
       let lines = [];
+      let totalLines = 0;
       if (file) {
         try {
           const raw = readFileSync(file, 'utf8').trim().split('\n').filter(Boolean);
           lines = (offset != null && offset > 0) ? raw.slice(offset) : raw;
-          log('info', `history sent (${lines.length} lines, offset ${offset ?? 0})`, { sessionId: String(sessionId).slice(0, 8) });
+          totalLines = raw.length;
+          log('info', `history sent (${lines.length} lines, offset ${offset ?? 0}, total ${totalLines})`, { sessionId: String(sessionId).slice(0, 8) });
         } catch (e) { log('error', `history read error: ${e.message}`); }
       } else {
         log('warn', `session file not found`, { sessionId: String(sessionId).slice(0, 8) });
       }
       if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'history', sessionId, lines }));
+        ws.send(JSON.stringify({ type: 'history', sessionId, lines, totalLines }));
       }
       return;
     }

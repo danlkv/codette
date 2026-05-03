@@ -116,7 +116,13 @@
       const lines = data.lines ?? [];
 
       if (data.incremental && cached) {
-        if (lines.length === 0) return; // nothing new, cache already displayed
+        if (lines.length === 0) {
+          // Detect compaction: offset overflowed (e.g. /compact rewrote the file)
+          if (data.totalLines !== undefined && cached.lineCount > data.totalLines) {
+            await fetchAndApplyHistory(id, null, cacheKey);
+          }
+          return; // nothing new, cache already displayed
+        }
         const merged = [...cached.lines, ...lines];
         applyHistoryLines(merged);
         try { localStorage.setItem(cacheKey, JSON.stringify({ lines: merged, lineCount: merged.length })); } catch {}

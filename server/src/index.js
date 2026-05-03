@@ -39,6 +39,22 @@ const pendingFileHttp   = new Map();   // key → res
 const app = express();
 app.use(express.json());
 
+// ── REST request logging ───────────────────────────────────────────────────────
+app.use((req, res, next) => {
+  res.on('finish', () => {
+    if (req.path.startsWith('/api/')) {
+      const data = { method: req.method, path: req.path, status: res.statusCode };
+      const sessionMatch = req.path.match(/\/sessions\/([^/]+)/);
+      if (sessionMatch) data.sessionId = sessionMatch[1].slice(0, 8);
+      if (Object.keys(req.query).length) data.query = req.query;
+      appendLog({ level: 'info', msg: 'rest', data });
+      const qs = Object.keys(req.query).length ? '?' + new URLSearchParams(req.query).toString() : '';
+      console.log('[rest]', data.method, data.path + qs, data.status, data.sessionId ?? '');
+    }
+  });
+  next();
+});
+
 const clientDist = path.resolve(__dirname, '../../client/dist');
 app.use(express.static(clientDist));
 
@@ -249,6 +265,8 @@ wss.on('connection', (ws, req) => {
 
       if (ev?.type === 'log') {
         appendLog(ev);
+        const data = ev.data ? ' ' + JSON.stringify(ev.data) : '';
+        console.log(`[host][${ev.level}] ${ev.msg}${data}`);
         return;
       }
 
@@ -286,12 +304,12 @@ wss.on('connection', (ws, req) => {
       }
 
       if (ev?.type === 'history') {
-        const { sessionId, lines } = ev;
+        const { sessionId, lines, totalLines } = ev;
         const pending = pendingHistoryHttp.get(sessionId);
         if (pending) {
           for (const { res, incremental } of pending) {
             if (!res.headersSent) {
-              res.json({ lines: lines || [], incremental });
+              res.json({ lines: lines || [], incremental, totalLines });
             }
           }
           pendingHistoryHttp.delete(sessionId);
