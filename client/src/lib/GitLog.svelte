@@ -3,6 +3,7 @@
 
 <script>
   import { createEventDispatcher } from 'svelte';
+  import { relativeTime } from '../utils/time.js';
 
   export let sessionId = null;
   export let sessionCwd = null;
@@ -28,18 +29,6 @@
     }
   }
 
-  function relativeTime(dateStr) {
-    const then = new Date(dateStr).getTime();
-    const diffMs = Date.now() - then;
-    const diffMin = Math.floor(diffMs / 60_000);
-    const diffH = Math.floor(diffMs / 3_600_000);
-    const diffD = Math.floor(diffMs / 86_400_000);
-    if (diffMin < 60) return `${diffMin}m ago`;
-    if (diffH < 24) return `${diffH}h ago`;
-    if (diffD < 7) return `${diffD}d ago`;
-    const d = new Date(dateStr);
-    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-  }
 
   async function fetchLog() {
     if (!sessionId || !token) return;

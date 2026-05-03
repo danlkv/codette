@@ -3,16 +3,12 @@
 
 <script>
   import { renderMd } from '../utils/markdown.js';
+  import { fmtTime } from '../utils/time.js';
   import ToolBlock from './ToolBlock.svelte';
   import QuestionBlock from './QuestionBlock.svelte';
   import TodoBlock from './TodoBlock.svelte';
   export let msg;
   export let isStreaming = false;
-
-  function fmtTime(ts) {
-    if (!ts) return '';
-    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  }
 </script>
 
 {#if msg.role === 'system'}
@@ -68,11 +64,11 @@
   .msg-time { font-size: .6rem; color: var(--text-muted); font-weight: 400; }
 
   .user-text {
-    color: var(--text-muted); line-height: 1.6;
+    color: var(--text-muted); line-height: 1.5;
     white-space: pre-wrap; word-break: break-word; margin: 0;
   }
 
-  .prose { color: var(--text); line-height: 1.7; }
+  .prose { color: var(--text); line-height: 1.5; }
   .prose :global(p)            { margin: 0 0 .6em; }
   .prose :global(p:last-child) { margin-bottom: 0; }
   .prose :global(h1),.prose :global(h2),.prose :global(h3),

@@ -3,11 +3,8 @@
 
 <script>
   import { createEventDispatcher } from 'svelte';
-  import { marked } from 'marked';
-  import DOMPurify from 'dompurify';
+  import { renderMd } from '../utils/markdown.js';
   import { sessions, currentSessionId } from '../store.js';
-
-  marked.use({ breaks: true });
 
   export let sessionId = null;
   export let path = '';
@@ -26,9 +23,7 @@
     : path;
 
   $: isMarkdown = /\.md$/i.test(path);
-  $: renderedHtml = isMarkdown && content
-    ? DOMPurify.sanitize(marked.parse(content))
-    : null;
+  $: renderedHtml = isMarkdown && content ? renderMd(content) : null;
 
   $: if (path) fetchFile();
 

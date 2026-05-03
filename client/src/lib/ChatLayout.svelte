@@ -174,16 +174,21 @@
         }
       }
       else if (msg.type === 'agent_event') {
-        const { sessionId, event } = msg;
-        const agentState = event === 'idle' ? 'idle'
-                         : (event === 'started' || event === 'streaming') ? 'running'
-                         : null;
-        sessions.update(list => list.map(s =>
-          s.id === sessionId ? { ...s, agentState } : s
-        ));
-        if (awaitingNewSession && event === 'started' && sessionId !== $currentSessionId) {
-          awaitingNewSession = false;
-          switchSession(sessionId);
+        const toState = ev => ev === 'idle' ? 'idle' : (ev === 'started' || ev === 'streaming') ? 'running' : null;
+        if (msg.states) {
+          // Batch form
+          sessions.update(list => list.map(s =>
+            msg.states[s.id] !== undefined ? { ...s, agentState: toState(msg.states[s.id]) } : s
+          ));
+        } else {
+          const { sessionId, event } = msg;
+          sessions.update(list => list.map(s =>
+            s.id === sessionId ? { ...s, agentState: toState(event) } : s
+          ));
+          if (awaitingNewSession && event === 'started' && sessionId !== $currentSessionId) {
+            awaitingNewSession = false;
+            switchSession(sessionId);
+          }
         }
       }
       else if (msg.type === 'host_status') {
@@ -420,8 +425,10 @@
 
   // ── Sidebar event handlers ───────────────────────────────────────────────────
 
-  function onResume(e) {
+  function onSelect(e) {
     const id = e.detail;
+    fileViewPath = null;
+    diffViewCommit = null;
     switchSession(id);
     if (window.innerWidth <= 640) sidebarOpen = false;
   }
@@ -509,7 +516,7 @@
       {hostCwd}
       sessionId={$currentSessionId}
       {token}
-      on:resume={onResume}
+      on:select={onSelect}
       on:delete={onDelete}
       on:new_session={onNewSession}
       on:agent_ctl={onAgentCtl}

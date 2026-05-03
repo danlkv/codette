@@ -2,7 +2,7 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
-  import { createEventDispatcher, onMount } from 'svelte';
+  import { createEventDispatcher } from 'svelte';
 
   export let sessionId = null;
   export let commit = null;
@@ -40,12 +40,10 @@
       } else {
         return `<span>${esc}</span>`;
       }
-    }).join('\n');
+    }).join('');
   }
 
-  onMount(() => {
-    fetchDiff();
-  });
+  $: commit, sessionId, fetchDiff();
 
   async function fetchDiff() {
     if (!sessionId || !commit || !token) return;

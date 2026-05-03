@@ -3,6 +3,7 @@
 
 <script>
   import { createEventDispatcher } from 'svelte';
+  import { fmtAge } from '../utils/time.js';
   import FileExplorer from './FileExplorer.svelte';
   import GitLog from './GitLog.svelte';
 
@@ -24,18 +25,10 @@
 
   $: if (showNew && !newCwd && hostCwd) newCwd = hostCwd;
 
-  function fmt(ts) {
-    const d = new Date(ts);
-    const now = Date.now();
-    const diff = now - ts;
-    if (diff < 86_400_000)  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    if (diff < 7*86_400_000) return d.toLocaleDateString([], { weekday: 'short' });
-    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-  }
 
-  function resume(id) {
+  function select(id) {
     confirmingId = null;
-    dispatch('resume', id);
+    dispatch('select', id);
   }
 
   function startNew() {
@@ -82,14 +75,14 @@
   <div class="list">
     {#each sessions as s (s.id)}
       <div class="session-row" class:active={s.id === currentId}>
-        <button class="session" on:click={() => resume(s.id)} title={s.id}>
+        <button class="session" on:click={() => select(s.id)} title={s.id}>
           <span class="meta">
             {#if s.agentState === 'idle'}
               <span class="dot standby"></span>
             {:else if s.agentState === 'running'}
               <span class="dot running"></span>
             {/if}
-            <span class="time">{fmt(s.ts)}</span>
+            <span class="time">{fmtAge(s.ts)}</span>
             {#if s.msgCount}<span class="count">{s.msgCount}</span>{/if}
           </span>
           <span class="title">{s.title || s.id.slice(0, 8)}</span>

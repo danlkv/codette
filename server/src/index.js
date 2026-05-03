@@ -314,16 +314,28 @@ wss.on('connection', (ws, req) => {
       }
 
       if (ev?.type === 'agent_event') {
-        const { sessionId, event } = ev;
-        const current = agents.get(sessionId) || { active: false, streaming: false };
-        agents.set(sessionId, {
-          active: event === 'started' || event === 'streaming' || event === 'idle',
-          streaming: event === 'streaming',
-        });
-        appendLog({ level: 'info', msg: 'agent_event', data: { sessionId: String(sessionId).slice(0, 8), event } });
-        broadcast({ type: 'agent_event', sessionId, event });
+        if (ev.states) {
+          // Batch form: { type: 'agent_event', states: { sessionId: event, ... } }
+          for (const [sessionId, event] of Object.entries(ev.states)) {
+            agents.set(sessionId, {
+              active: event === 'started' || event === 'streaming' || event === 'idle',
+              streaming: event === 'streaming',
+            });
+          }
+          broadcast({ type: 'agent_event', states: ev.states });
+        } else {
+          // Single form: { type: 'agent_event', sessionId, event }
+          const { sessionId, event } = ev;
+          agents.set(sessionId, {
+            active: event === 'started' || event === 'streaming' || event === 'idle',
+            streaming: event === 'streaming',
+          });
+          appendLog({ level: 'info', msg: 'agent_event', data: { sessionId: String(sessionId).slice(0, 8), event } });
+          broadcast({ type: 'agent_event', sessionId, event });
+        }
         return;
       }
+
 
       if (ev?.type === 'session_list') {
         sessionCache = ev.sessions || [];
@@ -402,7 +414,8 @@ wss.on('connection', (ws, req) => {
 
     ws.on('close', () => {
       hostWs = null;
-      agents.clear();
+      // Keep agents map — host process may still be alive (transient WS drop).
+      // States will be corrected by agent_event messages when host reconnects.
       console.log('[server] host disconnected');
       broadcast({ type: 'host_status', connected: false });
     });

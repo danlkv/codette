@@ -319,6 +319,12 @@ function connect() {
     hr();
     log('info', 'host connected to server', { url: SERVER_URL });
     sendSessionList();
+    // Re-announce agent states in one batch so server map is correct after reconnect/restart
+    const states = {};
+    for (const [sessionId, entry] of agents) {
+      if (sessionId) states[sessionId] = entry.streaming ? 'streaming' : 'idle';
+    }
+    if (Object.keys(states).length > 0) ws.send(JSON.stringify({ type: 'agent_event', states }));
   });
 
   ws.on('message', (data) => {
