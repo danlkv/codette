@@ -7,6 +7,7 @@ import { WebSocket } from 'ws';
 import { readFileSync, readdirSync, statSync, unlinkSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
+import { ClaudeRenderer, toolSummary } from './renderer.js';
 
 const SERVER_URL = process.env.SERVER_URL || 'ws://localhost:3000';
 const HOST_KEY   = process.env.HOST_KEY   || 'host-key-change-me';
@@ -35,24 +36,6 @@ function log(level, msg, data = null) {
   }
 }
 
-function toolSummary(name, input) {
-  if (!input) return '';
-  switch (name) {
-    case 'Bash': {
-      const first = (input.command || '').split('\n')
-        .find(l => l.trim() && !l.trim().startsWith('#'));
-      return first?.trim().slice(0, 80) || '';
-    }
-    case 'WebSearch':
-    case 'web_search':  return input.query    || '';
-    case 'Read':
-    case 'Write':
-    case 'Edit':        return input.file_path || input.path || '';
-    case 'Grep':        return input.pattern   || '';
-    case 'LS':          return input.path       || '';
-    default:            return '';
-  }
-}
 
 // ── Session tracking ──────────────────────────────────────────────────────────
 const sessionMetaCache = new Map(); // filePath → { mtime, title, msgCount }
@@ -133,7 +116,7 @@ function sendSessionList() {
 }
 
 // ── Agent registry ────────────────────────────────────────────────────────────
-// Map<sessionId, { proc, buf, streaming, prevText, seenTools, inTurn }>
+// Map<sessionId, { proc, buf, streaming, renderer, sessionId }>
 const agents = new Map();
 
 function sendAgentEvent(sessionId, event) {
@@ -143,40 +126,10 @@ function sendAgentEvent(sessionId, event) {
 
 // ── Streaming / terminal rendering ───────────────────────────────────────────
 function renderLine(line, agentEntry) {
-  let ev;
-  try { ev = JSON.parse(line); } catch { return; }
-
-  // When multiple agents are running, prefix each line with a short session tag
   const sid = agentEntry.sessionId?.slice(0, 6) ?? '??????';
   const tag = agents.size > 1 ? `${A.gray}[${sid}]${A.reset} ` : '';
-
-  if (ev.type === 'assistant') {
-    const content = Array.isArray(ev.message?.content) ? ev.message.content : [];
-    let text = '';
-    for (const b of content) {
-      if (b.type === 'text') text += b.text;
-      if (b.type === 'tool_use' && !agentEntry.seenTools.has(b.id)) {
-        agentEntry.seenTools.add(b.id);
-        if (!agentEntry.inTurn) { w(`\n${tag}${A.bold}${A.green}claude${A.reset}  `); agentEntry.inTurn = true; }
-        const sum = toolSummary(b.name, b.input);
-        w(`\n${tag}${A.yellow}⚙ ${b.name}${A.reset}${sum ? `  ${A.dim}${sum}${A.reset}` : ''}`);
-      }
-    }
-    if (text) {
-      if (!agentEntry.inTurn) { w(`\n${tag}${A.bold}${A.green}claude${A.reset}  `); agentEntry.inTurn = true; }
-      if (text.length > agentEntry.prevText.length) w(`${A.white}${text.slice(agentEntry.prevText.length)}${A.reset}`);
-      agentEntry.prevText = text;
-    }
-    return;
-  }
-
-  if (ev.type === 'result') {
-    const cost = ev.total_cost_usd;
-    w(`\n${tag}${A.gray}— ${cost != null ? `$${cost.toFixed(4)}` : ev.subtype} —${A.reset}\n`);
-    hr();
-    agentEntry.prevText = ''; agentEntry.seenTools = new Set(); agentEntry.inTurn = false;
-    return;
-  }
+  const out = agentEntry.renderer.feed(line, tag);
+  if (out) w(out);
 }
 
 // ── spawnClaude ───────────────────────────────────────────────────────────────
@@ -204,9 +157,7 @@ function spawnClaude(extraArgs = [], sessionIdHint = null, overrideCwd = null) {
     proc,
     buf: '',
     streaming: false,
-    prevText: '',
-    seenTools: new Set(),
-    inTurn: false,
+    renderer: new ClaudeRenderer({ summarize: toolSummary }),
     sessionId: sessionIdHint,  // may be null for new sessions
   };
 
@@ -333,6 +284,7 @@ function connect() {
     try { msg = JSON.parse(raw); } catch { return; }
 
     if (msg.type === 'list_sessions') {
+      log('info', 'list_sessions requested');
       sendSessionList();
       return;
     }
@@ -419,8 +371,10 @@ function connect() {
             if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
             return a.name.localeCompare(b.name);
           });
+        log('info', 'get_fs', { path, entries: entries.length });
         ws.send(JSON.stringify({ type: 'fs_result', sessionId: msg.sessionId, path, entries }));
       } catch (e) {
+        log('error', `get_fs failed: ${e.message}`, { path });
         ws.send(JSON.stringify({ type: 'fs_result', sessionId: msg.sessionId, path, entries: [], error: e.message }));
       }
       return;
@@ -434,13 +388,17 @@ function connect() {
         }
         const buf = readFileSync(msg.path);
         if (buf.length > 512 * 1024) {
+          log('warn', `get_file: file too large`, { path: msg.path, size: buf.length });
           ws.send(JSON.stringify({ type: 'file_result', sessionId: msg.sessionId, path: msg.path, content: null, error: 'file too large' }));
         } else if (buf.includes(0)) {
+          log('warn', `get_file: binary file`, { path: msg.path });
           ws.send(JSON.stringify({ type: 'file_result', sessionId: msg.sessionId, path: msg.path, content: null, error: 'binary file' }));
         } else {
+          log('info', 'get_file', { path: msg.path, size: buf.length });
           ws.send(JSON.stringify({ type: 'file_result', sessionId: msg.sessionId, path: msg.path, content: buf.toString('utf8') }));
         }
       } catch (e) {
+        log('error', `get_file failed: ${e.message}`, { path: msg.path });
         ws.send(JSON.stringify({ type: 'file_result', sessionId: msg.sessionId, path: msg.path, content: null, error: e.message }));
       }
       return;
@@ -457,8 +415,10 @@ function connect() {
         }) : [];
         let branch = null;
         try { branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: sessionCwd }).toString().trim(); } catch {}
+        log('info', 'get_git_log', { commits: commits.length, branch });
         ws.send(JSON.stringify({ type: 'git_log_result', sessionId: msg.sessionId, commits, branch }));
       } catch (e) {
+        log('error', `get_git_log failed: ${e.message}`);
         ws.send(JSON.stringify({ type: 'git_log_result', sessionId: msg.sessionId, commits: [], error: e.message }));
       }
       return;
@@ -470,8 +430,10 @@ function connect() {
         if (!sessionCwd) throw new Error('no cwd for session');
         const MAX = 256 * 1024;
         const diff = execSync(`git show --unified=3 ${msg.commit}`, { cwd: sessionCwd, maxBuffer: MAX + 1 }).toString();
+        log('info', 'get_git_diff', { commit: msg.commit, size: diff.length });
         ws.send(JSON.stringify({ type: 'git_diff_result', sessionId: msg.sessionId, commit: msg.commit, diff: diff.slice(0, MAX) }));
       } catch (e) {
+        log('error', `get_git_diff failed: ${e.message}`, { commit: msg.commit });
         ws.send(JSON.stringify({ type: 'git_diff_result', sessionId: msg.sessionId, commit: msg.commit, diff: null, error: e.message }));
       }
       return;

@@ -48,24 +48,26 @@
   }
 
   .tool-row {
-    display: flex; gap: 4px; align-items: flex-start;
+    display: flex; gap: 8px; align-items: flex-start;
   }
   .tool-row .label {
-    font-size: .75rem; width: 44px; flex-shrink: 0;
+    font-size: .75rem; flex-shrink: 0;
     padding-top: 8px; text-align: right; color: var(--text-dim);
   }
   .tool-row :global(.tool) { flex: 1; margin-top: 0; }
 
   .row { display: flex; flex-direction: column; gap: 3px; }
-  .row.user { padding-top: 10px; }
+  .row.user { padding-top: 16px; }
   .label { font-size: .72rem; color: var(--text-dim); display: flex; align-items: baseline; gap: 5px; }
   .row.user .label      { color: var(--user-color); }
   .row.assistant .label { color: var(--accent-light); }
   .msg-time { font-size: .6rem; color: var(--text-muted); font-weight: 400; }
 
   .user-text {
-    color: var(--text-muted); line-height: 1.5;
+    color: #000; line-height: 1.5;
     white-space: pre-wrap; word-break: break-word; margin: 0;
+    border: 1px solid var(--accent);
+    border-radius: 4px; padding: 7px 10px;
   }
 
   .prose { color: var(--text); line-height: 1.5; }

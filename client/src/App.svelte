@@ -140,4 +140,21 @@
   :global(::-webkit-scrollbar) { width: 6px; }
   :global(::-webkit-scrollbar-track) { background: transparent; }
   :global(::-webkit-scrollbar-thumb) { background: var(--bg-elevated); border-radius: 3px; }
+
+  :global(.mermaid-wrap) { position: relative; display: inline-block; max-width: 100%; }
+  :global(.mermaid-toggle) {
+    position: absolute; top: 4px; right: 4px;
+    background: var(--bg-elevated); border: 1px solid var(--border);
+    color: var(--text-dim); font-size: .65rem; font-family: inherit;
+    padding: 1px 6px; border-radius: 3px; cursor: pointer; opacity: 0;
+    transition: opacity .15s;
+  }
+  :global(.mermaid-wrap:hover .mermaid-toggle) { opacity: 1; }
+  :global(.mermaid-toggle:hover) { color: var(--text); border-color: var(--text-muted); }
+  :global(.mermaid-source) {
+    background: var(--bg-elevated); border: 1px solid var(--border);
+    border-radius: 4px; padding: 10px 14px; font-size: .78rem;
+    color: var(--text-muted); white-space: pre; overflow-x: auto;
+    margin: .4em 0; font-family: monospace;
+  }
 </style>
