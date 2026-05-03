@@ -7,8 +7,7 @@
   import ToolBlock from './ToolBlock.svelte';
   import QuestionBlock from './QuestionBlock.svelte';
   import TodoBlock from './TodoBlock.svelte';
-  export let msg;
-  export let isStreaming = false;
+  let { msg, isStreaming = false } = $props();
 </script>
 
 {#if msg.role === 'system'}

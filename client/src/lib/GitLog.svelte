@@ -2,24 +2,19 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
-  import { createEventDispatcher } from 'svelte';
   import { relativeTime } from '../utils/time.js';
 
-  export let sessionId = null;
-  export let sessionCwd = null;
-  export let token = null;
+  let { sessionId = null, sessionCwd = null, token = null, onDiffOpen } = $props();
 
-  const dispatch = createEventDispatcher();
-
-  let sectionOpen = false;
-  let loading = false;
-  let error = null;
-  let commits = [];
-  let branch = null;
+  let sectionOpen = $state(false);
+  let loading = $state(false);
+  let error = $state(null);
+  let commits = $state([]);
+  let branch = $state(null);
 
   // Reset when sessionId changes
   let prevSessionId = null;
-  $: {
+  $effect(() => {
     if (sessionId !== prevSessionId) {
       prevSessionId = sessionId;
       commits = [];
@@ -27,8 +22,7 @@
       error = null;
       sectionOpen = false;
     }
-  }
-
+  });
 
   async function fetchLog() {
     if (!sessionId || !token) return;
@@ -69,21 +63,21 @@
   }
 
   function openDiff(c) {
-    dispatch('diff-open', { sessionId, commit: c.hash });
+    onDiffOpen?.({ sessionId, commit: c.hash });
   }
 </script>
 
 {#if sessionCwd}
   <div class="git-log">
     <div class="gl-header-row">
-      <button class="gl-header" on:click={toggleSection}>
+      <button class="gl-header" onclick={toggleSection}>
         <span class="toggle">{sectionOpen ? '▼' : '▶'}</span>
         <span class="label">Git</span>
         {#if branch}
           <span class="branch">{branch}</span>
         {/if}
       </button>
-      <button class="gl-refresh" on:click={refresh} title="Refresh git log" aria-label="Refresh">↺</button>
+      <button class="gl-refresh" onclick={refresh} title="Refresh git log" aria-label="Refresh">↺</button>
     </div>
 
     {#if sectionOpen}
@@ -94,7 +88,7 @@
           <span class="info dim">{error === 'no commits' ? 'no commits' : 'not a git repo'}</span>
         {:else}
           {#each commits as c (c.hash)}
-            <button class="commit-row" on:click={() => openDiff(c)}>
+            <button class="commit-row" onclick={() => openDiff(c)}>
               <span class="hash">{c.hash.slice(0, 7)}</span>
               <span class="subject">{c.subject}</span>
               <span class="date">{relativeTime(c.date)}</span>

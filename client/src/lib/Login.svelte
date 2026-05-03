@@ -2,9 +2,8 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
-  import { createEventDispatcher } from 'svelte';
-  const dispatch = createEventDispatcher();
-  let username = '', password = '', error = '', loading = false;
+  let { onLogin } = $props();
+  let username = $state(''), password = $state(''), error = $state(''), loading = $state(false);
 
   async function submit() {
     loading = true; error = '';
@@ -14,7 +13,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
       });
-      if (res.ok) dispatch('login', (await res.json()).token);
+      if (res.ok) onLogin?.((await res.json()).token);
       else error = 'Invalid credentials';
     } catch { error = 'Connection error'; }
     finally { loading = false; }
@@ -24,7 +23,7 @@
 <div class="wrap">
   <div class="card">
     <div class="brand">claude</div>
-    <form on:submit|preventDefault={submit}>
+    <form onsubmit={(e) => { e.preventDefault(); submit(); }}>
       <label>
         <span>Username</span>
         <input bind:value={username} autocomplete="username" required />

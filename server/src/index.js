@@ -279,6 +279,7 @@ wss.on('connection', (ws, req) => {
   if (url.pathname === '/host') {
     if (url.searchParams.get('key') !== HOST_KEY) { ws.close(1008, 'Unauthorized'); return; }
     hostWs = ws;
+    agents.clear();  // clear stale state; host will re-announce its live agents
     console.log('[server] host connected');
 
     // Ask host to populate session cache immediately

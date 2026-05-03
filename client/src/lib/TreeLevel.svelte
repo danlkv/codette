@@ -2,32 +2,9 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
-  import { createEventDispatcher } from 'svelte';
-
-  export let entries = [];
-  export let treeNodes = {};
-  export let indent = 0;
-
-  const dispatch = createEventDispatcher();
-
-  // Import self — Svelte supports this for recursive components
   import Self from './TreeLevel.svelte';
 
-  function toggleDir(path) {
-    dispatch('toggle-dir', path);
-  }
-
-  function openFile(path) {
-    dispatch('open-file', path);
-  }
-
-  function forwardToggleDir(e) {
-    dispatch('toggle-dir', e.detail);
-  }
-
-  function forwardOpenFile(e) {
-    dispatch('open-file', e.detail);
-  }
+  let { entries = [], treeNodes = {}, indent = 0, onToggleDir, onOpenFile } = $props();
 </script>
 
 {#each entries as entry (entry.path)}
@@ -37,7 +14,7 @@
     <button
       class="node dir"
       style="padding-left: {12 + indent * 12}px"
-      on:click={() => toggleDir(entry.path)}
+      onclick={() => onToggleDir?.(entry.path)}
       title={entry.path}
     >
       <span class="icon">{isOpen ? '▼' : '▶'}</span>
@@ -50,15 +27,15 @@
         entries={node.entries}
         {treeNodes}
         indent={indent + 1}
-        on:toggle-dir={forwardToggleDir}
-        on:open-file={forwardOpenFile}
+        {onToggleDir}
+        {onOpenFile}
       />
     {/if}
   {:else}
     <button
       class="node file"
       style="padding-left: {12 + indent * 12}px"
-      on:click={() => openFile(entry.path)}
+      onclick={() => onOpenFile?.(entry.path)}
       title={entry.path}
     >
       <span class="name">{entry.name}</span>

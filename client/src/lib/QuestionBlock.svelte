@@ -2,7 +2,7 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
-  export let msg; // { questions: [{question, header, options, multiSelect}] }
+  let { msg } = $props(); // { questions: [{question, header, options, multiSelect}] }
 </script>
 
 <div class="qblock">

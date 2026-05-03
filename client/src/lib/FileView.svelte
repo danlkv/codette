@@ -2,30 +2,25 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
-  import { createEventDispatcher } from 'svelte';
   import { renderMd } from '../utils/markdown.js';
   import { sessions, currentSessionId } from '../store.js';
 
-  export let sessionId = null;
-  export let path = '';
-  export let token = null;
+  let { sessionId = null, path = '', token = null, onClose } = $props();
 
-  const dispatch = createEventDispatcher();
+  let content = $state(null);
+  let error = $state(null);
+  let loading = $state(true);
 
-  let content = null;
-  let error = null;
-  let loading = true;
-
-  // Derive relative path from store
-  $: sessionCwd = $sessions.find(s => s.id === $currentSessionId)?.cwd ?? null;
-  $: relativePath = (sessionCwd && path.startsWith(sessionCwd))
+  let sessionCwd = $derived($sessions.find(s => s.id === $currentSessionId)?.cwd ?? null);
+  let relativePath = $derived((sessionCwd && path.startsWith(sessionCwd))
     ? path.slice(sessionCwd.length).replace(/^\//, '')
-    : path;
+    : path);
+  let isMarkdown = $derived(/\.md$/i.test(path));
+  let renderedHtml = $derived(isMarkdown && content ? renderMd(content) : null);
 
-  $: isMarkdown = /\.md$/i.test(path);
-  $: renderedHtml = isMarkdown && content ? renderMd(content) : null;
-
-  $: if (path) fetchFile();
+  $effect(() => {
+    if (path) fetchFile();
+  });
 
   async function fetchFile() {
     loading = true;
@@ -50,16 +45,12 @@
       loading = false;
     }
   }
-
-  function close() {
-    dispatch('close');
-  }
 </script>
 
 <div class="file-view">
   <div class="fv-header">
     <span class="fv-path" title={path}>{relativePath}</span>
-    <button class="fv-close" on:click={close} title="Close file view" aria-label="Close">×</button>
+    <button class="fv-close" onclick={onClose} title="Close file view" aria-label="Close">×</button>
   </div>
 
   <div class="fv-body">

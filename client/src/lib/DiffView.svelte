@@ -2,21 +2,14 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
-  import { createEventDispatcher } from 'svelte';
+  let { sessionId = null, commit = null, token = null, onClose } = $props();
 
-  export let sessionId = null;
-  export let commit = null;
-  export let token = null;
+  let loading = $state(true);
+  let error = $state(null);
+  let diffText = $state(null);
 
-  const dispatch = createEventDispatcher();
-
-  let loading = true;
-  let error = null;
-  let diffText = null;
-
-  $: shortHash = commit ? commit.slice(0, 7) : '';
-
-  $: diffHtml = diffText ? buildDiffHtml(diffText) : '';
+  let shortHash = $derived(commit ? commit.slice(0, 7) : '');
+  let diffHtml = $derived(diffText ? buildDiffHtml(diffText) : '');
 
   function escapeHtml(str) {
     return str
@@ -43,7 +36,9 @@
     }).join('');
   }
 
-  $: commit, sessionId, fetchDiff();
+  $effect(() => {
+    fetchDiff();
+  });
 
   async function fetchDiff() {
     if (!sessionId || !commit || !token) return;
@@ -67,16 +62,12 @@
       loading = false;
     }
   }
-
-  function close() {
-    dispatch('close');
-  }
 </script>
 
 <div class="diff-view">
   <div class="dv-header">
     <span class="dv-commit" title={commit}>{shortHash}</span>
-    <button class="dv-close" on:click={close} title="Close diff view" aria-label="Close">×</button>
+    <button class="dv-close" onclick={onClose} title="Close diff view" aria-label="Close">×</button>
   </div>
 
   <div class="dv-body">

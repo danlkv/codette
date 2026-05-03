@@ -2,15 +2,15 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
-  import { afterUpdate } from 'svelte';
   import { messages } from '../store.js';
   import MessageBubble from './MessageBubble.svelte';
-  export let hostStatus;
+  let { hostStatus } = $props();
 
-  let el;
-  let pinned = true;
+  let el = $state();
+  let pinned = $state(true);
 
-  afterUpdate(() => {
+  $effect(() => {
+    void $messages;
     if (pinned && el) el.scrollTop = el.scrollHeight;
   });
 
@@ -27,7 +27,7 @@
 </script>
 
 <div class="wrap">
-  <div class="list" bind:this={el} on:scroll={onScroll}>
+  <div class="list" bind:this={el} onscroll={onScroll}>
     <div class="inner">
       {#if $messages.length === 0}
         <div class="empty">
@@ -47,7 +47,7 @@
   </div>
 
   {#if !pinned}
-    <button class="scroll-btn" on:click={scrollToBottom} title="Scroll to bottom">↓</button>
+    <button class="scroll-btn" onclick={scrollToBottom} title="Scroll to bottom">↓</button>
   {/if}
 </div>
 

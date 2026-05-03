@@ -2,22 +2,23 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
-  import { onMount }  from 'svelte';
+  import { onMount } from 'svelte';
   import Login        from './lib/Login.svelte';
   import ChatLayout   from './lib/ChatLayout.svelte';
   import { highContrast } from './store.js';
 
-  let token = localStorage.getItem('chat_token') || '';
-  function onLogin(e)  { token = e.detail; localStorage.setItem('chat_token', token); }
-  function onLogout()  { token = '';       localStorage.removeItem('chat_token'); }
+  let token = $state(localStorage.getItem('chat_token') || '');
+
+  function handleLogin(t)  { token = t; localStorage.setItem('chat_token', token); }
+  function handleLogout()  { token = ''; localStorage.removeItem('chat_token'); }
 
   // Persist high-contrast preference and apply class to <html>
-  $: {
+  $effect(() => {
     if (typeof document !== 'undefined') {
       document.documentElement.classList.toggle('high-contrast', $highContrast);
       localStorage.setItem('hc', $highContrast ? '1' : '0');
     }
-  }
+  });
 
   // Fix mobile keyboard shrinking the viewport
   onMount(() => {
@@ -36,9 +37,9 @@
 </script>
 
 {#if token}
-  <ChatLayout {token} on:logout={onLogout} />
+  <ChatLayout {token} onLogout={handleLogout} />
 {:else}
-  <Login on:login={onLogin} />
+  <Login onLogin={handleLogin} />
 {/if}
 
 <style>
@@ -91,7 +92,6 @@
       --cursor:       #36c;
     }
   }
-  /* High contrast — dark theme variant */
   :global(.high-contrast) {
     --border:       #888888;
     --text:         #ffffff;
@@ -109,7 +109,6 @@
     --tool-name:    #ffcc44;
     --cursor:       #66ccff;
   }
-  /* High contrast — light theme variant */
   @media (prefers-color-scheme: light) {
     :global(.high-contrast) {
       --border:       #555555;

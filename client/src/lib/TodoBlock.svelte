@@ -2,7 +2,7 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
-  export let msg; // { todos: [{id, content, status, priority}] }
+  let { msg } = $props(); // { todos: [{id, content, status, priority}] }
 
   const STATUS_ICON = { completed: '✓', 'in-progress': '◐', pending: '○' };
   const PRIORITY_COLOR = { high: '#f87171', medium: '#fbbf24', low: '#6b7280' };
@@ -15,7 +15,7 @@
     <span class="count">{msg.todos.length}</span>
   </div>
   <div class="list">
-    {#each msg.todos as t (t.id)}
+    {#each msg.todos as t, i (t.id ?? i)}
       <div class="item" class:done={t.status === 'completed'}>
         <span class="status">{STATUS_ICON[t.status] ?? '○'}</span>
         <span class="content">{t.content}</span>

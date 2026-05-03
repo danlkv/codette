@@ -2,14 +2,10 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
-  import { createEventDispatcher } from 'svelte';
-  const dispatch = createEventDispatcher();
-  export let disabled = false;
-  export let placeholder = 'Message Claude…';
-  export let sendLabel = 'send';
+  let { disabled = false, placeholder = 'Message Claude…', sendLabel = 'send', onSend } = $props();
 
-  let value = '';
-  let el;
+  let value = $state('');
+  let el = $state();
 
   const SLASH_CMDS = [
     { cmd: '/clear',   desc: 'clear conversation' },
@@ -18,10 +14,10 @@
     { cmd: '/btw',     desc: 'side message (not in history)' },
   ];
 
-  $: prefix = value.split(' ')[0];
-  $: matches = value.startsWith('/')
+  let prefix = $derived(value.split(' ')[0]);
+  let matches = $derived(value.startsWith('/')
     ? SLASH_CMDS.filter(c => c.cmd.startsWith(prefix))
-    : [];
+    : []);
 
   function complete(cmd) {
     value = cmd + ' ';
@@ -33,7 +29,7 @@
     if (!text) return;
     value = '';
     resize();
-    dispatch('send', text);
+    onSend?.(text);
   }
 
   function keydown(e) {
@@ -55,7 +51,7 @@
   {#if matches.length}
     <div class="cmds">
       {#each matches as m}
-        <button class="cmd-item" on:click={() => complete(m.cmd)}>
+        <button class="cmd-item" onclick={() => complete(m.cmd)}>
           <span class="cmd">{m.cmd}</span>
           <span class="desc">{m.desc}</span>
         </button>
@@ -65,10 +61,10 @@
   <div class="bar">
     <textarea
       bind:this={el} bind:value
-      on:keydown={keydown} on:input={resize}
+      onkeydown={keydown} oninput={resize}
       {placeholder} {disabled} rows="1"
     ></textarea>
-    <button on:click={send} disabled={!value.trim() || disabled}>{sendLabel}</button>
+    <button onclick={send} disabled={!value.trim() || disabled}>{sendLabel}</button>
   </div>
 </div>
 

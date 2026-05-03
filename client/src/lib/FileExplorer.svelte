@@ -2,25 +2,18 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
-  import { createEventDispatcher } from 'svelte';
   import TreeLevel from './TreeLevel.svelte';
 
-  export let sessionId = null;
-  export let sessionCwd = null;
-  export let token = null;
+  let { sessionId = null, sessionCwd = null, token = null, onFileOpen } = $props();
 
-  const dispatch = createEventDispatcher();
+  let sectionOpen = $state(true);
+  let treeNodes = $state({});
 
-  let sectionOpen = true;
+  let cwdBasename = $derived(sessionCwd ? (sessionCwd.split('/').filter(Boolean).pop() || sessionCwd) : '');
 
-  // Tree state: Record<absPath, { entries: Entry[], open: boolean, loading: boolean, error: string|null }>
-  let treeNodes = {};
-
-  $: cwdBasename = sessionCwd ? (sessionCwd.split('/').filter(Boolean).pop() || sessionCwd) : '';
-
-  // When sessionCwd or sessionId changes, reset and auto-load root if open
+  // Reset when sessionId changes
   let prevSessionId = null;
-  $: {
+  $effect(() => {
     if (sessionId !== prevSessionId) {
       prevSessionId = sessionId;
       treeNodes = {};
@@ -28,11 +21,14 @@
         loadDir(sessionCwd);
       }
     }
-  }
+  });
 
-  $: if (sessionCwd && sectionOpen && !treeNodes[sessionCwd]) {
-    loadDir(sessionCwd);
-  }
+  // Auto-load root when section opens or cwd changes
+  $effect(() => {
+    if (sessionCwd && sectionOpen && !treeNodes[sessionCwd]) {
+      loadDir(sessionCwd);
+    }
+  });
 
   async function loadDir(path) {
     if (!sessionId || !token || !path) return;
@@ -76,29 +72,26 @@
     }
   }
 
-  function handleToggleDir(e) {
-    const path = e.detail;
+  function handleToggleDir(path) {
     const node = treeNodes[path];
     if (!node || (!node.entries.length && !node.loading && !node.error)) {
-      // Not loaded yet — fetch
       loadDir(path);
       return;
     }
-    // Toggle open/closed
     treeNodes = {
       ...treeNodes,
       [path]: { ...node, open: !node.open },
     };
   }
 
-  function handleOpenFile(e) {
-    dispatch('file-open', { sessionId, path: e.detail });
+  function handleOpenFile(path) {
+    onFileOpen?.({ sessionId, path });
   }
 </script>
 
 {#if sessionCwd}
   <div class="file-explorer">
-    <button class="fe-header" on:click={toggleSection}>
+    <button class="fe-header" onclick={toggleSection}>
       <span class="toggle">{sectionOpen ? '▼' : '▶'}</span>
       <span class="label">Files</span>
       <span class="cwd-name">{cwdBasename}</span>
@@ -117,8 +110,8 @@
             entries={treeNodes[sessionCwd].entries}
             {treeNodes}
             indent={0}
-            on:toggle-dir={handleToggleDir}
-            on:open-file={handleOpenFile}
+            onToggleDir={handleToggleDir}
+            onOpenFile={handleOpenFile}
           />
           {#if treeNodes[sessionCwd].entries.length === 0}
             <span class="info">empty directory</span>

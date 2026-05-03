@@ -13,15 +13,5 @@ services:
       - server-data:/data
     restart: unless-stopped
 
-  anth-ui:
-    build:
-      context: ./ref-ui/web
-    ports:
-      - "127.0.0.1:3001:3000"
-    environment:
-      RELAY_URL:  "http://server:3000"
-      NODE_ENV:   production
-    restart: unless-stopped
-
 volumes:
   server-data:

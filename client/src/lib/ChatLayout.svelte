@@ -2,7 +2,8 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
-  import { onMount, onDestroy, createEventDispatcher } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
+  import { get } from 'svelte/store';
   import { messages, lastCost, lastUsage, hostStatus, wsOk, highContrast,
            sessions, currentSessionId, sessionData } from '../store.js';
   import { toolSummary } from '../utils/tools.js';
@@ -11,28 +12,37 @@
   import SessionSidebar from './SessionSidebar.svelte';
   import FileView from './FileView.svelte';
   import DiffView from './DiffView.svelte';
-  export let token;
-  const dispatch = createEventDispatcher();
+
+  let { token, onLogout } = $props();
 
   let ws;
   let msgCounter = 0;
   const uid = () => ++msgCounter;
 
-  let sidebarOpen = true;
-  let hostCwd = null;
-  let fileViewPath = null;
-  let diffViewCommit = null;
+  let sidebarOpen = $state(true);
+  let hostCwd = $state(null);
+  let fileViewPath = $state(null);
+  let diffViewCommit = $state(null);
   let currentLines = [];       // raw jsonl lines for current session (for cache writes)
-  let awaitingNewSession = false; // auto-switch on next agent_event: started
-  let pendingCwd = null;         // cwd for the pending __new__ session
+  let awaitingNewSession = false;
+  let pendingCwd = null;
 
-  // per-turn tracking (always for the active session)
+  // per-turn tracking
   let seenToolIds = new Set();
-  let liveClaudeId = null;  // ev.message.id of the assistant message being streamed
-  let liveUid = null;       // our messages[] id for that row
+  let liveClaudeId = null;
+  let liveUid = null;
 
-  // Derived: is the current session's agent active?
-  $: currentAgentActive = !!$sessions.find(s => s.id === $currentSessionId)?.agentState;
+  let currentAgentActive = $derived(!!$sessions.find(s => s.id === $currentSessionId)?.agentState);
+  let inputDisabled = $derived(!$wsOk);
+  let inputPlaceholder = $derived($currentSessionId === '__new__'
+    ? 'Type your first message to start the session…'
+    : !$wsOk
+      ? 'Connecting…'
+      : $hostStatus !== 'connected'
+        ? 'Waiting for host…'
+        : currentAgentActive
+          ? 'Message Claude… (/ for commands)'
+          : 'Send to start… (/ for commands)');
 
   onMount(async () => {
     sidebarOpen = window.innerWidth > 640;
@@ -45,7 +55,7 @@
     ws?.close();
   });
 
-  // ── Startup: load sessions, pick most recent, load history, then connect WS ──
+  const dedupById = arr => [...new Map(arr.map(s => [s.id, s])).values()];
 
   async function initSessions() {
     let sessionList = [];
@@ -57,27 +67,18 @@
         const data = await res.json();
         sessionList = data.sessions ?? data;
         if (data.hostCwd) hostCwd = data.hostCwd;
-        sessions.set(sessionList);
+        sessions.set(dedupById(sessionList));
       }
-    } catch (e) {
-      // network error — will retry via WS
-    }
+    } catch (e) {}
 
     if (sessionList.length === 0) return;
-
-    // Pick most recent (index 0, server returns desc by ts)
     const first = sessionList[0];
     currentSessionId.set(first.id);
     await loadSessionHistory(first.id);
   }
 
-  // ── localStorage cache ───────────────────────────────────────────────────────
-  // Format: { lines: string[], lineCount: number }
-  // Incremental fetch uses ?offset=lineCount — host returns raw.slice(offset).
-  // No clock comparison needed; line count is always correct and monotonically grows.
-
   function saveCurrentCache() {
-    const id = $currentSessionId;
+    const id = get(currentSessionId);
     if (!id || currentLines.length === 0) return;
     try {
       localStorage.setItem('history_' + id, JSON.stringify({
@@ -95,14 +96,11 @@
       const raw = localStorage.getItem(cacheKey);
       if (raw) {
         cached = JSON.parse(raw);
-        if (!('lineCount' in cached)) cached = null; // discard old format
+        if (!('lineCount' in cached)) cached = null;
       }
     } catch {}
 
-    // Show cached lines immediately for instant display
     if (cached) applyHistoryLines(cached.lines);
-
-    // Always fetch to pick up any new lines since cache was written
     await fetchAndApplyHistory(id, cached, cacheKey);
   }
 
@@ -119,11 +117,10 @@
 
       if (data.incremental && cached) {
         if (lines.length === 0) {
-          // Detect compaction: offset overflowed (e.g. /compact rewrote the file)
           if (data.totalLines !== undefined && cached.lineCount > data.totalLines) {
             await fetchAndApplyHistory(id, null, cacheKey);
           }
-          return; // nothing new, cache already displayed
+          return;
         }
         const merged = [...cached.lines, ...lines];
         applyHistoryLines(merged);
@@ -143,8 +140,6 @@
     finalizeIncomplete();
   }
 
-  // ── WebSocket ────────────────────────────────────────────────────────────────
-
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${proto}//${location.host}/ws?token=${encodeURIComponent(token)}`);
@@ -156,27 +151,22 @@
       try { msg = JSON.parse(data); } catch { return; }
 
       if (msg.type === 'session_list') {
-        sessions.set(msg.sessions ?? []);
+        sessions.set(dedupById(msg.sessions ?? []));
         if (msg.hostCwd) hostCwd = msg.hostCwd;
       }
       else if (msg.type === 'claude_line') {
         const { sessionId, line } = msg;
-        if (sessionId === $currentSessionId) {
+        if (sessionId === get(currentSessionId)) {
           currentLines.push(line);
           parseLine(line, true);
         } else {
-          // Store in background session cache
           if (!sessionData.has(sessionId)) sessionData.set(sessionId, []);
-          // We keep raw lines in background; when switching we replay full history anyway
-          // But to keep live accumulation useful we store parsed messages.
-          // Since we don't want to parse without a turn-state per session, buffer raw lines.
           sessionData.get(sessionId).push(line);
         }
       }
       else if (msg.type === 'agent_event') {
         const toState = ev => ev === 'idle' ? 'idle' : (ev === 'started' || ev === 'streaming') ? 'running' : null;
         if (msg.states) {
-          // Batch form
           sessions.update(list => list.map(s =>
             msg.states[s.id] !== undefined ? { ...s, agentState: toState(msg.states[s.id]) } : s
           ));
@@ -185,7 +175,7 @@
           sessions.update(list => list.map(s =>
             s.id === sessionId ? { ...s, agentState: toState(event) } : s
           ));
-          if (awaitingNewSession && event === 'started' && sessionId !== $currentSessionId) {
+          if (awaitingNewSession && event === 'started' && sessionId !== get(currentSessionId)) {
             awaitingNewSession = false;
             switchSession(sessionId);
           }
@@ -197,8 +187,6 @@
       }
     };
   }
-
-  // ── Turn state helpers ───────────────────────────────────────────────────────
 
   function resetTurnState() {
     seenToolIds = new Set(); liveClaudeId = null; liveUid = null;
@@ -238,8 +226,7 @@
     try { ev = JSON.parse(line); } catch { return; }
 
     if (ev.type === 'system' && ev.subtype === 'init' && ev.session_id) {
-      // If this is a new session we don't know about yet, update currentSessionId
-      if (!$currentSessionId) currentSessionId.set(ev.session_id);
+      if (!get(currentSessionId)) currentSessionId.set(ev.session_id);
       return;
     }
 
@@ -315,26 +302,20 @@
     }
   }
 
-  // ── Session switching ────────────────────────────────────────────────────────
-
   async function switchSession(id) {
-    if (id === $currentSessionId) return;
+    if (id === get(currentSessionId)) return;
 
     fileViewPath = null;
     diffViewCommit = null;
-
-    // Persist current session's lines to localStorage before switching
     saveCurrentCache();
 
-    // Save raw lines to in-memory cache (background handler also pushes raw lines here)
-    if ($currentSessionId) sessionData.set($currentSessionId, [...currentLines]);
+    if (get(currentSessionId)) sessionData.set(get(currentSessionId), [...currentLines]);
 
     currentSessionId.set(id);
     currentLines = [];
     messages.set([]);
     resetTurnState();
 
-    // Quick restore from in-memory raw-line cache (replay is fast, avoids type mismatch)
     const cached = sessionData.get(id);
     if (cached?.length > 0) {
       for (const line of cached) parseLine(line, false);
@@ -343,8 +324,6 @@
 
     await loadSessionHistory(id);
   }
-
-  // ── Slash commands ───────────────────────────────────────────────────────────
 
   function sysMsg(text) {
     messages.update(ms => [...ms, { id: uid(), role: 'system', text }]);
@@ -360,17 +339,15 @@
         if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'clear' }));
         return true;
       case '/status': {
-        let h, w;
-        hostStatus.subscribe(v => h = v)();
-        wsOk.subscribe(v => w = v)();
+        const h = get(hostStatus);
+        const w = get(wsOk);
         sysMsg(`host: ${h}  ·  websocket: ${w ? 'connected' : 'disconnected'}`);
         return true;
       }
       case '/usage':
       case '/context': {
-        let c, u;
-        lastCost.subscribe(v => c = v)();
-        lastUsage.subscribe(v => u = v)();
+        const c = get(lastCost);
+        const u = get(lastUsage);
         const lines = [];
         if (u) {
           const total = (u.input_tokens ?? 0) + (u.output_tokens ?? 0);
@@ -386,7 +363,7 @@
         if (arg && ws?.readyState === 1)
           ws.send(JSON.stringify({
             type: 'user',
-            sessionId: $currentSessionId,
+            sessionId: get(currentSessionId),
             message: { role: 'user', content: arg },
           }));
         return true;
@@ -395,14 +372,10 @@
     }
   }
 
-  // ── Send ─────────────────────────────────────────────────────────────────────
-
-  async function onSend(e) {
-    const text = e.detail;
+  async function handleSend(text) {
     if (text.startsWith('/') && handleSlash(text)) return;
 
-    if ($currentSessionId === '__new__') {
-      // Set flag BEFORE the POST — agent_event: started can arrive before HTTP response
+    if (get(currentSessionId) === '__new__') {
       awaitingNewSession = true;
       try {
         await fetch('/api/sessions', {
@@ -415,26 +388,22 @@
     }
 
     if (ws?.readyState !== 1) return;
-    // Do NOT optimistically add — server echoes as claude_line immediately
     ws.send(JSON.stringify({
       type: 'user',
-      sessionId: $currentSessionId,
+      sessionId: get(currentSessionId),
       message: { role: 'user', content: text },
     }));
   }
 
-  // ── Sidebar event handlers ───────────────────────────────────────────────────
-
-  function onSelect(e) {
-    const id = e.detail;
+  function handleSelect(id) {
     fileViewPath = null;
     diffViewCommit = null;
     switchSession(id);
     if (window.innerWidth <= 640) sidebarOpen = false;
   }
 
-  function onNewSession(e) {
-    pendingCwd = e.detail || null;
+  function handleNewSession(cwd) {
+    pendingCwd = cwd || null;
     fileViewPath = null;
     diffViewCommit = null;
     saveCurrentCache();
@@ -445,51 +414,35 @@
     if (window.innerWidth <= 640) sidebarOpen = false;
   }
 
-  async function onDelete(e) {
-    const id = e.detail;
+  async function handleDelete(id) {
     try {
       await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
-      // Server broadcasts updated session_list — no need to update locally
     } catch {}
   }
 
-  function onAgentCtl(e) {
-    const { id, event } = e.detail;
+  function handleAgentCtl({ id, event }) {
     if (ws?.readyState === 1) {
       ws.send(JSON.stringify({ type: 'agent_ctl', sessionId: id, event }));
     }
   }
 
-  function onFileOpen(e) {
-    fileViewPath = e.detail.path;
+  function handleFileOpen({ path }) {
+    fileViewPath = path;
     diffViewCommit = null;
   }
 
-  function onDiffOpen(e) {
-    diffViewCommit = e.detail.commit;
+  function handleDiffOpen({ commit }) {
+    diffViewCommit = commit;
     fileViewPath = null;
   }
-
-  // ── Derived UI state ─────────────────────────────────────────────────────────
-
-  $: inputDisabled = !$wsOk;
-  $: inputPlaceholder = $currentSessionId === '__new__'
-    ? 'Type your first message to start the session…'
-    : !$wsOk
-      ? 'Connecting…'
-      : $hostStatus !== 'connected'
-        ? 'Waiting for host…'
-        : currentAgentActive
-          ? 'Message Claude… (/ for commands)'
-          : 'Send to start… (/ for commands)';
 </script>
 
 <div class="layout">
   <header>
-    <button class="sidebar-toggle" on:click={() => sidebarOpen = !sidebarOpen}
+    <button class="sidebar-toggle" onclick={() => sidebarOpen = !sidebarOpen}
       title="Toggle sessions" aria-pressed={sidebarOpen}>☰</button>
     <span class="brand">claude</span>
     <div class="indicators">
@@ -500,14 +453,14 @@
         <span class="cost">${$lastCost.toFixed(4)}</span>
       {/if}
     </div>
-    <button class="hc-toggle" on:click={() => highContrast.update(v => !v)}
+    <button class="hc-toggle" onclick={() => highContrast.update(v => !v)}
       title="Toggle high contrast" aria-pressed={$highContrast}>HC</button>
-    <button class="logout" on:click={() => dispatch('logout')}>logout</button>
+    <button class="logout" onclick={onLogout}>logout</button>
   </header>
 
   <div class="body">
     {#if sidebarOpen}
-      <div class="backdrop" on:click={() => sidebarOpen = false} aria-hidden="true"></div>
+      <div class="backdrop" onclick={() => sidebarOpen = false} aria-hidden="true"></div>
     {/if}
     <SessionSidebar
       sessions={$sessions}
@@ -516,12 +469,12 @@
       {hostCwd}
       sessionId={$currentSessionId}
       {token}
-      on:select={onSelect}
-      on:delete={onDelete}
-      on:new_session={onNewSession}
-      on:agent_ctl={onAgentCtl}
-      on:file-open={onFileOpen}
-      on:diff-open={onDiffOpen}
+      onSelect={handleSelect}
+      onDelete={handleDelete}
+      onNewSession={handleNewSession}
+      onAgentCtl={handleAgentCtl}
+      onFileOpen={handleFileOpen}
+      onDiffOpen={handleDiffOpen}
     />
     <div class="chat">
       {#if diffViewCommit}
@@ -529,14 +482,14 @@
           sessionId={$currentSessionId}
           commit={diffViewCommit}
           {token}
-          on:close={() => diffViewCommit = null}
+          onClose={() => diffViewCommit = null}
         />
       {:else if fileViewPath}
         <FileView
           sessionId={$currentSessionId}
           path={fileViewPath}
           {token}
-          on:close={() => fileViewPath = null}
+          onClose={() => fileViewPath = null}
         />
       {:else}
         <MessageList hostStatus={$hostStatus} />
@@ -544,7 +497,7 @@
           disabled={inputDisabled}
           placeholder={inputPlaceholder}
           sendLabel={currentAgentActive ? 'send' : 'send & start'}
-          on:send={onSend}
+          onSend={handleSend}
         />
       {/if}
     </div>

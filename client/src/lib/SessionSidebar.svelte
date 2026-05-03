@@ -2,37 +2,43 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
-  import { createEventDispatcher } from 'svelte';
   import { fmtAge } from '../utils/time.js';
   import FileExplorer from './FileExplorer.svelte';
   import GitLog from './GitLog.svelte';
 
-  export let sessions = [];   // [{id, title, ts, msgCount, agentActive, cwd}]
-  export let currentId = null;
-  export let open = true;
-  export let hostCwd = null;
-  export let sessionId = null;
-  export let token = null;
+  let {
+    sessions = [],
+    currentId = null,
+    open = true,
+    hostCwd = null,
+    sessionId = null,
+    token = null,
+    onSelect,
+    onDelete,
+    onNewSession,
+    onAgentCtl,
+    onFileOpen,
+    onDiffOpen,
+  } = $props();
 
-  $: currentSessionCwd = sessions.find(s => s.id === currentId)?.cwd ?? null;
+  let currentSessionCwd = $derived(sessions.find(s => s.id === currentId)?.cwd ?? null);
 
-  const dispatch = createEventDispatcher();
+  let confirmingId = $state(null);
+  let confirmTimer = $state(null);
+  let showNew = $state(false);
+  let newCwd = $state('');
 
-  let confirmingId = null;
-  let confirmTimer = null;
-  let showNew = false;
-  let newCwd = '';
-
-  $: if (showNew && !newCwd && hostCwd) newCwd = hostCwd;
-
+  $effect(() => {
+    if (showNew && !newCwd && hostCwd) newCwd = hostCwd;
+  });
 
   function select(id) {
     confirmingId = null;
-    dispatch('select', id);
+    onSelect?.(id);
   }
 
   function startNew() {
-    dispatch('new_session', newCwd.trim() || null);
+    onNewSession?.(newCwd.trim() || null);
     showNew = false;
     newCwd = hostCwd || '';
   }
@@ -42,7 +48,7 @@
     if (confirmingId === id) {
       clearTimeout(confirmTimer);
       confirmingId = null;
-      dispatch('delete', id);
+      onDelete?.(id);
     } else {
       confirmingId = id;
       clearTimeout(confirmTimer);
@@ -52,22 +58,22 @@
 
   function interrupt(e, id) {
     e.stopPropagation();
-    dispatch('agent_ctl', { id, event: 'interrupt' });
+    onAgentCtl?.({ id, event: 'interrupt' });
   }
 
   function stop(e, id) {
     e.stopPropagation();
-    dispatch('agent_ctl', { id, event: 'stop' });
+    onAgentCtl?.({ id, event: 'stop' });
   }
 </script>
 
 <aside class="sidebar" class:hidden={!open}>
   <div class="sidebar-header">
     <span>Sessions</span>
-    <button class="new-btn" on:click={() => showNew = !showNew} title="New session" aria-pressed={showNew}>+</button>
+    <button class="new-btn" onclick={() => showNew = !showNew} title="New session" aria-pressed={showNew}>+</button>
   </div>
   {#if showNew}
-    <form class="new-form" on:submit|preventDefault={startNew}>
+    <form class="new-form" onsubmit={(e) => { e.preventDefault(); startNew(); }}>
       <input class="new-input" bind:value={newCwd} placeholder="/path/to/project" autofocus />
       <button class="new-start" type="submit">Start</button>
     </form>
@@ -75,7 +81,7 @@
   <div class="list">
     {#each sessions as s (s.id)}
       <div class="session-row" class:active={s.id === currentId}>
-        <button class="session" on:click={() => select(s.id)} title={s.id}>
+        <button class="session" onclick={() => select(s.id)} title={s.id}>
           <span class="meta">
             {#if s.agentState === 'idle'}
               <span class="dot standby"></span>
@@ -91,20 +97,20 @@
         {#if s.agentState}
           <button
             class="ctl interrupt"
-            on:click={(e) => interrupt(e, s.id)}
+            onclick={(e) => interrupt(e, s.id)}
             title="Interrupt agent"
             aria-label="Interrupt agent"
           >⊘</button>
           <button
             class="ctl stop"
-            on:click={(e) => stop(e, s.id)}
+            onclick={(e) => stop(e, s.id)}
             title="Stop agent"
             aria-label="Stop agent"
           >■</button>
         {:else}
           <button
             class="del" class:confirming={confirmingId === s.id}
-            on:click={(e) => tryDelete(e, s.id)}
+            onclick={(e) => tryDelete(e, s.id)}
             title="Delete session"
             aria-label="Delete session"
           >{confirmingId === s.id ? '?' : '×'}</button>
@@ -120,14 +126,14 @@
     {sessionId}
     sessionCwd={currentSessionCwd}
     {token}
-    on:file-open
+    {onFileOpen}
   />
 
   <GitLog
     {sessionId}
     sessionCwd={currentSessionCwd}
     {token}
-    on:diff-open
+    {onDiffOpen}
   />
 </aside>
 

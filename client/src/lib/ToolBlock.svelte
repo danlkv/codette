@@ -4,10 +4,9 @@
 <script>
   import { toolIcon } from '../utils/tools.js';
   import { sessionCwd } from '../store.js';
-  export let tool;       // { name, summary, input, id }
-  export let running = false;
+  let { tool, running = false } = $props(); // tool: { name, summary, input, id }
 
-  let open = false;
+  let open = $state(false);
 
   function rel(path) {
     if (!path || !$sessionCwd) return path;
@@ -24,7 +23,7 @@
 </script>
 
 <div class="tool" class:open>
-  <button class="header" on:click={() => open = !open} title="Click to {open ? 'collapse' : 'expand'}">
+  <button class="header" onclick={() => open = !open} title="Click to {open ? 'collapse' : 'expand'}">
     <span class="icon">{toolIcon(tool.name)}</span>
     <span class="name">{tool.name}</span>
     {#if tool.summary}
