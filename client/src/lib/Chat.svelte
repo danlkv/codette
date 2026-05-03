@@ -5,6 +5,7 @@
   import { onMount, onDestroy, tick, createEventDispatcher } from 'svelte';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
+  import SessionSidebar from './SessionSidebar.svelte';
   export let token;
   const dispatch = createEventDispatcher();
 
@@ -12,6 +13,12 @@
 
   function renderMd(text) {
     return DOMPurify.sanitize(marked.parse(text || ''));
+  }
+
+  function fmtTime(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
 
   function toolSummary(name, input) {
@@ -35,10 +42,13 @@
   }
 
   let ws, wsOk = false, hostStatus = 'disconnected';
-  let messages = [];    // { role, text, tools: {name, summary}[], system?: true }
-  let streaming = null; // partial in-flight assistant message
+  let messages = [];       // { role, text, tools: {name, summary}[], system?: true }
+  let streaming = null;    // partial in-flight assistant message
+  let serverStreaming = false; // server-reported: Claude is mid-response, history pending
   let input = '', scrollEl;
   let lastCost = null;  // from result events
+  let sessions = [];       // [{id, title, ts, active}] for sidebar
+  let currentSessionId = null;
 
   onMount(connect);
   onDestroy(() => ws?.close());
@@ -55,14 +65,53 @@
   function handle(msg) {
     if (msg.type === 'status') {
       hostStatus = msg.host;
+      if (msg.streaming) serverStreaming = true;
+    } else if (msg.type === 'clear') {
+      messages = []; streaming = null; lastCost = null; serverStreaming = false;
+    } else if (msg.type === 'history') {
+      messages = []; streaming = null; lastCost = null; serverStreaming = false;
+      for (const line of (msg.lines || [])) ingestEvent(line);
+      scrollBottom();
+    } else if (msg.type === 'session_list') {
+      sessions = msg.sessions || [];
+      currentSessionId = sessions.find(s => s.active)?.id ?? currentSessionId;
     } else if (msg.type === 'claude_line') {
-      parseLine(msg.line);
+      serverStreaming = false;
+      ingestEvent(msg.line);
     }
   }
 
-  function parseLine(line) {
+  function sidebarResume(e) {
+    const id = e.detail;
+    if (!wsOk) return;
+    ws.send(JSON.stringify({ type: 'resume', sessionId: id }));
+    messages = []; streaming = null; lastCost = null; serverStreaming = true;
+    // Optimistically move to top and mark active
+    sessions = [
+      { ...sessions.find(s => s.id === id), active: true },
+      ...sessions.filter(s => s.id !== id).map(s => ({ ...s, active: false }))
+    ].filter(Boolean);
+    currentSessionId = id;
+    scrollBottom();
+  }
+
+  function ingestEvent(line) {
     let ev;
     try { ev = JSON.parse(line); } catch { return; }
+
+    if (ev.type === 'system' && ev.subtype === 'init' && ev.session_id) {
+      currentSessionId = ev.session_id;
+      return;
+    }
+
+    if (ev.type === 'user') {
+      // plain user text (not tool_result arrays)
+      const content = ev.message?.content;
+      if (typeof content === 'string' && content.trim()) {
+        messages = [...messages, { role: 'user', text: content, tools: [], ts: ev.timestamp }];
+      }
+      return;
+    }
 
     if (ev.type === 'assistant') {
       const content = Array.isArray(ev.message?.content) ? ev.message.content : [];
@@ -73,7 +122,7 @@
         if (b.type === 'tool_use') tools.push({ name: b.name, summary: toolSummary(b.name, b.input) });
       }
       if (ev.message?.stop_reason) {
-        messages = [...messages, { role: 'assistant', text, tools }];
+        messages = [...messages, { role: 'assistant', text, tools, ts: ev.timestamp }];
         streaming = null;
       } else {
         streaming = { text, tools };
@@ -109,8 +158,13 @@
         // send but don't add to local history
         if (wsOk && arg) ws.send(JSON.stringify({ type: 'user', message: { role: 'user', content: `/btw ${arg}` } }));
         return true;
-      case '/compact':
       case '/resume':
+        if (!arg) { sysMsg('usage: /resume <session-id>'); return true; }
+        if (wsOk) ws.send(JSON.stringify({ type: 'resume', sessionId: arg }));
+        messages = []; streaming = null; lastCost = null; serverStreaming = true;
+        scrollBottom();
+        return true;
+      case '/compact':
       case '/model':
         // forward as a claude slash command
         if (wsOk) ws.send(JSON.stringify({ type: 'user', message: { role: 'user', content: raw } }));
@@ -146,6 +200,8 @@
   $: placeholder = !wsOk ? 'Connecting…' : hostStatus !== 'connected' ? 'Waiting for host…' : 'Message (Enter ↵)';
 </script>
 
+<div class="layout">
+<SessionSidebar {sessions} currentId={currentSessionId} on:resume={sidebarResume} />
 <div class="chat">
   <header>
     <span class="title">Claude</span>
@@ -162,7 +218,7 @@
         <p class="sys-msg">{m.text}</p>
       {:else}
         <div class="msg {m.role}">
-          <span class="label">{m.role === 'user' ? 'you' : 'claude'}</span>
+          <span class="label">{m.role === 'user' ? 'you' : 'claude'}{#if m.ts}<span class="msg-time">{fmtTime(m.ts)}</span>{/if}</span>
           <div class="body">
             {#if m.role === 'user'}
               <p class="user-text">{m.text}</p>
@@ -197,7 +253,14 @@
       </div>
     {/if}
 
-    {#if messages.length === 0 && !streaming}
+    {#if serverStreaming && !streaming}
+      <div class="msg assistant">
+        <span class="label">claude</span>
+        <div class="body"><span class="waiting">responding<span class="cur">▌</span></span></div>
+      </div>
+    {/if}
+
+    {#if messages.length === 0 && !streaming && !serverStreaming}
       <p class="empty">
         {#if hostStatus !== 'connected'}Start the host: <code>node host/index.js</code>{:else}Say something…{/if}
       </p>
@@ -209,9 +272,11 @@
     <button on:click={send} disabled={!canSend}>↵</button>
   </div>
 </div>
+</div>
 
 <style>
-  .chat { display: flex; flex-direction: column; height: 100dvh; }
+  .layout { display: flex; height: 100dvh; overflow: hidden; }
+  .chat { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 
   header {
     display: flex; align-items: center; gap: 8px;
@@ -236,9 +301,10 @@
   .msg { display: flex; gap: 10px; }
   .label {
     font-size: .75rem; color: var(--text-muted); width: 44px; flex-shrink: 0;
-    padding-top: 3px; text-align: right;
+    padding-top: 3px; text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
   }
   .msg.user .label { color: var(--user-label); }
+  .msg-time { font-size: .6rem; color: var(--text-dim); font-weight: 400; }
   .body { flex: 1; min-width: 0; }
 
   /* user messages: plain text */
@@ -299,6 +365,7 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60ch;
   }
 
+  .waiting { color: var(--text-muted); font-style: italic; font-size: .9rem; }
   .cur { color: var(--cursor); animation: blink .7s step-end infinite; display: inline; }
   @keyframes blink { 50% { opacity: 0; } }
 

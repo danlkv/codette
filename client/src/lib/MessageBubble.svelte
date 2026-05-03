@@ -55,14 +55,10 @@
   }
   .tool-row :global(.tool) { flex: 1; margin-top: 0; }
 
-  .row { display: flex; gap: 12px; }
-  .label {
-    font-size: .75rem; width: 44px; flex-shrink: 0;
-    padding-top: 1px; text-align: right; color: var(--text-dim);
-  }
+  .row { display: flex; flex-direction: column; gap: 3px; }
+  .label { font-size: .72rem; color: var(--text-dim); }
   .row.user .label      { color: var(--user-color); }
   .row.assistant .label { color: var(--accent-light); }
-  .body { flex: 1; min-width: 0; }
 
   .user-text {
     color: var(--text-muted); line-height: 1.6;

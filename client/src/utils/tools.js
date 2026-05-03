@@ -5,9 +5,12 @@ export function toolSummary(name, input) {
   if (!input) return '';
   switch (name) {
     case 'Bash': {
-      const first = (input.command || '').split('\n')
-        .find(l => l.trim() && !l.trim().startsWith('#'));
-      return first?.trim().slice(0, 100) || '';
+      const cmd = input.command || '';
+      const first = cmd.split('\n').find(l => l.trim() && !l.trim().startsWith('#'))?.trim() || '';
+      if (input.description && (first.length > 60 || cmd.includes('\n'))) {
+        return input.description;
+      }
+      return first.slice(0, 100);
     }
     case 'WebSearch':
     case 'web_search':  return input.query    || '';

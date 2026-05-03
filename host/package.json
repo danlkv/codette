@@ -2,6 +2,9 @@
   "name": "webchat-host",
   "version": "1.0.0",
   "type": "module",
+  "scripts": {
+    "dev": "node --watch index.js"
+  },
   "dependencies": {
     "ws": "^8.17.0"
   }

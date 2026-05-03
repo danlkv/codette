@@ -8,9 +8,17 @@ set -euo pipefail
 REMOTE="example.com"
 REMOTE_DIR="/home/<user>/webchat"
 DOMAIN="chat.example.com"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
 
-rsync -az --delete --exclude={node_modules,client/dist,.env} \
-  "$(dirname "$0")/" "${REMOTE}:${REMOTE_DIR}/"
+# ── 1. Build client locally ───────────────────────────────────────────────────
+echo "==> building client"
+npm --prefix "${ROOT}/client" install --silent
+npm --prefix "${ROOT}/client" run build
+
+# ── 2. Sync source + pre-built dist ──────────────────────────────────────────
+echo "==> syncing to ${REMOTE}:${REMOTE_DIR}"
+rsync -az --delete --exclude={node_modules,.env} \
+  "${ROOT}/" "${REMOTE}:${REMOTE_DIR}/"
 
 ssh "$REMOTE" bash <<ENVSSH
 set -e
@@ -36,4 +44,5 @@ else
   echo "WARN: login endpoint returned $code — containers may still be starting"
 fi
 
-echo "Host: HOST_KEY=<from ${REMOTE_DIR}/.env> SERVER_URL=wss://${DOMAIN} node host/index.js"
+echo "==> host launch command:"
+ssh "$REMOTE" "source ${REMOTE_DIR}/.env && echo \"HOST_KEY=\${HOST_KEY} SERVER_URL=wss://${DOMAIN} node host/index.js\""

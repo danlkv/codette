@@ -7,6 +7,7 @@
   import { toolSummary } from '../utils/tools.js';
   import MessageList from './MessageList.svelte';
   import ChatInput from './ChatInput.svelte';
+  import SessionSidebar from './SessionSidebar.svelte';
   export let token;
   const dispatch = createEventDispatcher();
 
@@ -14,12 +15,19 @@
   let msgCounter = 0;
   const uid = () => ++msgCounter;
 
+  let sessions = [];
+  let currentSessionId = null;
+  let sidebarOpen = true;
+
   // per-turn tracking
   let seenToolIds = new Set();
   let liveClaudeId = null;  // ev.message.id of the assistant message being streamed
   let liveUid = null;       // our messages[] id for that row
 
-  onMount(connect);
+  onMount(() => {
+    sidebarOpen = window.innerWidth > 640;
+    connect();
+  });
   onDestroy(() => ws?.close());
 
   function connect() {
@@ -34,9 +42,10 @@
         hostStatus.set(msg.host);
         if (msg.host === 'disconnected') finalizeIncomplete();
       }
-      else if (msg.type === 'clear')       { messages.set([]); lastCost.set(null); resetTurnState(); }
+      else if (msg.type === 'clear')        { messages.set([]); lastCost.set(null); resetTurnState(); }
       else if (msg.type === 'claude_line') parseLine(msg.line);
       else if (msg.type === 'history')     loadHistory(msg.lines);
+      else if (msg.type === 'session_list') sessions = msg.sessions ?? [];
     };
   }
 
@@ -83,6 +92,18 @@
   function parseLine(line) {
     let ev;
     try { ev = JSON.parse(line); } catch { return; }
+
+    if (ev.type === 'system' && ev.subtype === 'init' && ev.session_id) {
+      currentSessionId = ev.session_id;
+      return;
+    }
+
+    if (ev.type === 'user') {
+      const content = ev.message?.content;
+      if (typeof content === 'string' && content.trim())
+        messages.update(ms => [...ms, { id: uid(), role: 'user', text: content }]);
+      return;
+    }
 
     if (ev.type === 'user_message') {
       messages.update(ms => [...ms, { id: uid(), role: 'user', text: ev.text }]);
@@ -209,6 +230,17 @@
     ws.send(JSON.stringify({ type: 'user', message: { role: 'user', content: text } }));
   }
 
+  function sidebarResume(e) {
+    const id = e.detail;
+    if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'resume', sessionId: id }));
+    if (window.innerWidth <= 640) sidebarOpen = false;
+  }
+
+  function sidebarDelete(e) {
+    const id = e.detail;
+    if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'delete_session', sessionId: id }));
+  }
+
   $: inputDisabled = !$wsOk;
   $: inputPlaceholder = !$wsOk ? 'Connecting…'
     : $hostStatus !== 'connected' ? 'Waiting for host…'
@@ -217,6 +249,8 @@
 
 <div class="layout">
   <header>
+    <button class="sidebar-toggle" on:click={() => sidebarOpen = !sidebarOpen}
+      title="Toggle sessions" aria-pressed={sidebarOpen}>☰</button>
     <span class="brand">claude</span>
     <div class="indicators">
       <span class="dot" class:on={$hostStatus === 'connected'}>host</span>
@@ -230,17 +264,23 @@
     <button class="logout" on:click={() => dispatch('logout')}>logout</button>
   </header>
 
-  <MessageList hostStatus={$hostStatus} />
-
-  <ChatInput
-    disabled={inputDisabled}
-    placeholder={inputPlaceholder}
-    on:send={onSend}
-  />
+  <div class="body">
+    <SessionSidebar {sessions} currentId={currentSessionId} open={sidebarOpen} on:resume={sidebarResume} on:delete={sidebarDelete} />
+    <div class="chat">
+      <MessageList hostStatus={$hostStatus} />
+      <ChatInput
+        disabled={inputDisabled}
+        placeholder={inputPlaceholder}
+        on:send={onSend}
+      />
+    </div>
+  </div>
 </div>
 
 <style>
   .layout { display: flex; flex-direction: column; height: var(--app-height, 100dvh); }
+  .body { display: flex; flex: 1; overflow: hidden; }
+  .chat { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
 
   header {
     display: flex; align-items: center; gap: 12px;
@@ -249,6 +289,13 @@
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
+  .sidebar-toggle {
+    background: none; border: none; color: var(--text-dim);
+    cursor: pointer; font: inherit; font-size: 1rem;
+    padding: 0 4px; line-height: 1; flex-shrink: 0;
+  }
+  .sidebar-toggle:hover { color: var(--text-muted); }
+  .sidebar-toggle[aria-pressed="true"] { color: var(--accent); }
   .brand { color: var(--accent); font-weight: 600; font-size: .88rem; flex: 1; }
   .indicators { display: flex; align-items: center; gap: 8px; }
   .dot { font-size: .72rem; color: var(--text-dim); }
