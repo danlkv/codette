@@ -3,6 +3,7 @@
 
 <script>
   import { renderMd } from '../utils/markdown.js';
+  import { mermaidRender } from '../utils/mermaid-action.js';
   import { fmtTime } from '../utils/time.js';
   import ToolBlock from './ToolBlock.svelte';
   import QuestionBlock from './QuestionBlock.svelte';
@@ -32,7 +33,7 @@
       {#if msg.role === 'user'}
         <p class="user-text">{msg.text}</p>
       {:else}
-        <div class="prose">
+        <div class="prose" use:mermaidRender={msg.text}>
           {@html renderMd(msg.text)}{#if isStreaming}<span class="cur">▌</span>{/if}
         </div>
       {/if}
