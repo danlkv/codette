@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Danylo Lykov
 
-import { writable } from 'svelte/store';
+import { writable, derived } from 'svelte/store';
 
 export const messages       = writable([]);
 export const lastCost       = writable(null);
@@ -13,6 +13,12 @@ export const highContrast   = writable(localStorage.getItem('hc') === '1');
 // Multi-session support
 export const sessions         = writable([]);    // Session[] list from server
 export const currentSessionId = writable(null);  // currently displayed session id
+
+// Derived: cwd of the currently displayed session
+export const sessionCwd = derived(
+  [sessions, currentSessionId],
+  ([$sessions, $id]) => $sessions.find(s => s.id === $id)?.cwd ?? null
+);
 
 // Background cache: sessionId -> messages[]
 // Not a Svelte store — plain mutable map, only the active session uses `messages`

@@ -3,10 +3,17 @@
 
 <script>
   import { toolIcon } from '../utils/tools.js';
+  import { sessionCwd } from '../store.js';
   export let tool;       // { name, summary, input, id }
   export let running = false;
 
   let open = false;
+
+  function rel(path) {
+    if (!path || !$sessionCwd) return path;
+    const prefix = $sessionCwd.endsWith('/') ? $sessionCwd : $sessionCwd + '/';
+    return path.startsWith(prefix) ? path.slice(prefix.length) : path;
+  }
 
   function editDiff(input) {
     if (!input?.old_string && !input?.new_string) return null;
@@ -22,7 +29,7 @@
     <span class="name">{tool.name}</span>
     {#if tool.summary}
       <span class="sep">›</span>
-      <span class="arg">{tool.summary}</span>
+      <span class="arg">{rel(tool.summary)}</span>
     {/if}
     <span class="spacer"></span>
     {#if running}
@@ -37,7 +44,7 @@
       {#if tool.name === 'Edit' && editDiff(tool.input)}
         {@const diff = editDiff(tool.input)}
         {#if tool.input.file_path}
-          <div class="diff-path">{tool.input.file_path}</div>
+          <div class="diff-path">{rel(tool.input.file_path)}</div>
         {/if}
         <div class="diff">
           {#each diff.oldLines as line}
@@ -49,7 +56,7 @@
         </div>
       {:else if tool.name === 'Write' && tool.input?.content != null}
         {#if tool.input.file_path}
-          <div class="diff-path">{tool.input.file_path}</div>
+          <div class="diff-path">{rel(tool.input.file_path)}</div>
         {/if}
         <div class="diff">
           {#each tool.input.content.split('\n') as line}

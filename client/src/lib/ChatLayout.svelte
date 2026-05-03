@@ -474,6 +474,9 @@
   </header>
 
   <div class="body">
+    {#if sidebarOpen}
+      <div class="backdrop" on:click={() => sidebarOpen = false} aria-hidden="true"></div>
+    {/if}
     <SessionSidebar
       sessions={$sessions}
       currentId={$currentSessionId}
@@ -500,6 +503,15 @@
   .layout { display: flex; flex-direction: column; height: var(--app-height, 100dvh); }
   .body { display: flex; flex: 1; overflow: hidden; position: relative; }
   .chat { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+
+  .backdrop { display: none; }
+  @media (max-width: 640px) {
+    .backdrop {
+      display: block;
+      position: absolute; inset: 0; z-index: 40;
+      background: rgba(0,0,0,.35);
+    }
+  }
 
   header {
     display: flex; align-items: center; gap: 12px;
