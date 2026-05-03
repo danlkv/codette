@@ -59,9 +59,23 @@ app.post('/api/login', (req, res) => {
   }
 });
 
+// ── Agent state helpers ───────────────────────────────────────────────────────
+function agentStateFor(sessionId) {
+  const a = agents.get(sessionId);
+  if (!a?.active) return null;
+  return a.streaming ? 'running' : 'idle';
+}
+
+function enrichSessions(sessions) {
+  return sessions.map(s => {
+    const state = agentStateFor(s.id);
+    return state ? { ...s, agentState: state } : s;
+  });
+}
+
 // ── Sessions list ─────────────────────────────────────────────────────────────
 app.get('/api/sessions', requireJwt, (_req, res) => {
-  res.json({ sessions: sessionCache, hostCwd });
+  res.json({ sessions: enrichSessions(sessionCache), hostCwd });
 });
 
 // ── Session history ───────────────────────────────────────────────────────────
@@ -201,7 +215,7 @@ wss.on('connection', (ws, req) => {
       if (ev?.type === 'session_list') {
         sessionCache = ev.sessions || [];
         if (ev.hostCwd) hostCwd = ev.hostCwd;
-        broadcast({ type: 'session_list', sessions: sessionCache, hostCwd });
+        broadcast({ type: 'session_list', sessions: enrichSessions(sessionCache), hostCwd });
         // Drain pending DELETE responses only for sessions confirmed gone
         const remainingIds = new Set(sessionCache.map(s => s.id));
         for (const [sessionId, res] of pendingDeleteHttp) {
