@@ -33,6 +33,8 @@ let sessionCache = [];                  // from last session_list from host
 let hostCwd = null;                     // host's process.cwd() from last session_list
 const pendingHistoryHttp = new Map();   // sessionId → res[]
 const pendingDeleteHttp = new Map();    // sessionId → res
+const pendingFsHttp     = new Map();   // key → res
+const pendingFileHttp   = new Map();   // key → res
 
 const app = express();
 app.use(express.json());
@@ -115,6 +117,50 @@ app.get('/api/sessions/:id/history', requireJwt, (req, res) => {
     }
     // else: host down — will be re-sent on host reconnect
   }
+});
+
+// ── File system listing ───────────────────────────────────────────────────────
+app.get('/api/sessions/:id/fs', requireJwt, (req, res) => {
+  const id = req.params.id;
+  const queryPath = req.query.path || null;
+  const key = id + ':' + (queryPath || '');
+
+  if (!hostWs || hostWs.readyState !== WebSocket.OPEN) {
+    return res.status(503).json({ error: 'Host not connected' });
+  }
+
+  const timer = setTimeout(() => {
+    if (pendingFsHttp.get(key) === res) {
+      pendingFsHttp.delete(key);
+      if (!res.headersSent) res.status(504).json({ error: 'fs request timed out' });
+    }
+  }, 30000);
+  res.on('close', () => clearTimeout(timer));
+
+  pendingFsHttp.set(key, res);
+  hostWs.send(JSON.stringify({ type: 'get_fs', sessionId: id, path: queryPath }));
+});
+
+// ── File content ──────────────────────────────────────────────────────────────
+app.get('/api/sessions/:id/file', requireJwt, (req, res) => {
+  const id = req.params.id;
+  const filePath = req.query.path;
+  const key = id + ':' + filePath;
+
+  if (!hostWs || hostWs.readyState !== WebSocket.OPEN) {
+    return res.status(503).json({ error: 'Host not connected' });
+  }
+
+  const timer = setTimeout(() => {
+    if (pendingFileHttp.get(key) === res) {
+      pendingFileHttp.delete(key);
+      if (!res.headersSent) res.status(504).json({ error: 'file request timed out' });
+    }
+  }, 30000);
+  res.on('close', () => clearTimeout(timer));
+
+  pendingFileHttp.set(key, res);
+  hostWs.send(JSON.stringify({ type: 'get_file', sessionId: id, path: filePath }));
 });
 
 // ── Create session ────────────────────────────────────────────────────────────
@@ -249,6 +295,28 @@ wss.on('connection', (ws, req) => {
             }
           }
           pendingHistoryHttp.delete(sessionId);
+        }
+        return;
+      }
+
+      if (ev?.type === 'fs_result') {
+        const key = ev.sessionId + ':' + (ev.path || '');
+        const res = pendingFsHttp.get(key);
+        if (res && !res.headersSent) {
+          ev.error ? res.status(500).json({ error: ev.error }) : res.json({ entries: ev.entries });
+          pendingFsHttp.delete(key);
+        }
+        return;
+      }
+
+      if (ev?.type === 'file_result') {
+        const key = ev.sessionId + ':' + ev.path;
+        const res = pendingFileHttp.get(key);
+        if (res && !res.headersSent) {
+          ev.content !== null
+            ? res.json({ content: ev.content })
+            : res.status(422).json({ error: ev.error || 'unreadable' });
+          pendingFileHttp.delete(key);
         }
         return;
       }

@@ -9,6 +9,7 @@
   import MessageList from './MessageList.svelte';
   import ChatInput from './ChatInput.svelte';
   import SessionSidebar from './SessionSidebar.svelte';
+  import FileView from './FileView.svelte';
   export let token;
   const dispatch = createEventDispatcher();
 
@@ -18,6 +19,7 @@
 
   let sidebarOpen = true;
   let hostCwd = null;
+  let fileViewPath = null;
   let currentLines = [];       // raw jsonl lines for current session (for cache writes)
   let awaitingNewSession = false; // auto-switch on next agent_event: started
   let pendingCwd = null;         // cwd for the pending __new__ session
@@ -305,6 +307,8 @@
   async function switchSession(id) {
     if (id === $currentSessionId) return;
 
+    fileViewPath = null;
+
     // Persist current session's lines to localStorage before switching
     saveCurrentCache();
 
@@ -415,6 +419,7 @@
 
   function onNewSession(e) {
     pendingCwd = e.detail || null;
+    fileViewPath = null;
     saveCurrentCache();
     currentSessionId.set('__new__');
     currentLines = [];
@@ -439,6 +444,10 @@
     if (ws?.readyState === 1) {
       ws.send(JSON.stringify({ type: 'agent_ctl', sessionId: id, event }));
     }
+  }
+
+  function onFileOpen(e) {
+    fileViewPath = e.detail.path;
   }
 
   // ── Derived UI state ─────────────────────────────────────────────────────────
@@ -482,19 +491,31 @@
       currentId={$currentSessionId}
       open={sidebarOpen}
       {hostCwd}
+      sessionId={$currentSessionId}
+      {token}
       on:resume={onResume}
       on:delete={onDelete}
       on:new_session={onNewSession}
       on:agent_ctl={onAgentCtl}
+      on:file-open={onFileOpen}
     />
     <div class="chat">
-      <MessageList hostStatus={$hostStatus} />
-      <ChatInput
-        disabled={inputDisabled}
-        placeholder={inputPlaceholder}
-        sendLabel={currentAgentActive ? 'send' : 'send & start'}
-        on:send={onSend}
-      />
+      {#if fileViewPath}
+        <FileView
+          sessionId={$currentSessionId}
+          path={fileViewPath}
+          {token}
+          on:close={() => fileViewPath = null}
+        />
+      {:else}
+        <MessageList hostStatus={$hostStatus} />
+        <ChatInput
+          disabled={inputDisabled}
+          placeholder={inputPlaceholder}
+          sendLabel={currentAgentActive ? 'send' : 'send & start'}
+          on:send={onSend}
+        />
+      {/if}
     </div>
   </div>
 </div>

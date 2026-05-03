@@ -57,15 +57,16 @@ One persistent connection. Host reconnects on drop.
 **Session object:**
 ```json
 { "id": "string", "title": "string", "ts": 1234567890123,
-  "msgCount": 12, "agentActive": true, "cwd": "/path" }
+  "msgCount": 12, "cwd": "/path", "agentState": "running"|"idle"|null }
 ```
+`agentState` is added by the server's `enrichSessions()` from the `agents` map; `null` means no agent running.
 
 ### Server → Host
 
 | type | key fields | notes |
 |------|-----------|-------|
 | `list_sessions` | — | on host connect; response populates server's session cache |
-| `new_session` | `cwd?: string` | spawn fresh claude |
+| `new_session` | `cwd?: string`, `firstMessage?: string` | spawn fresh claude; if `firstMessage` provided, written to stdin immediately to trigger `system.init` |
 | `delete_session` | `sessionId` | delete `.jsonl` file; host sends updated `session_list` |
 | `agent_ctl` | `sessionId`, `event: 'stop'\|'interrupt'` | `stop`: kill process · `interrupt`: SIGUSR1 |
 | `user` | `sessionId`, `message: {role, content}` | forward to claude stdin; host auto-resumes if no agent running |
@@ -83,7 +84,7 @@ JWT in `Authorization: Bearer <token>` header (obtained from `POST /api/login`).
 | `POST` | `/api/login` | `{username, password}` | `{token}` | no auth |
 | `GET` | `/api/sessions` | — | `{sessions: Session[], hostCwd: string}` | list all sessions; `hostCwd` is host's `process.cwd()` |
 | `GET` | `/api/sessions/:id/history` | `?offset=N` | `{lines: string[], incremental: bool}` | raw JSONL lines; `offset` = line count client already has; host returns `raw.slice(offset)` |
-| `POST` | `/api/sessions` | `{cwd?: string}` | 202 | create session; client listens for `agent_event: started` to auto-switch |
+| `POST` | `/api/sessions` | `{cwd?: string, firstMessage?: string}` | 202 | create session; `firstMessage` bootstraps `system.init`; client auto-switches on `agent_event: started` |
 | `DELETE` | `/api/sessions/:id` | — | 204 | broadcasts new `session_list` from host  over WS |
 | `GET` | `/api/logs` | `?fmt=text` | JSON array or plain text | `x-host-key` auth |
 | `POST` | `/api/relay/chat` | `{messages[]}` | SSE stream | `x-relay-key` auth |
@@ -97,7 +98,7 @@ Push events and stateful commands only.
 
 | type | key fields | notes |
 |------|-----------|-------|
-| `session_list` | `sessions: Session[]`, `hostCwd: string` | any session change |
+| `session_list` | `sessions: Session[]` | any session change; `hostCwd` is REST-only |
 | `claude_line` | `sessionId`, `line` | clients route to per-session message store |
 | `agent_event` | `sessionId`, `event` | clients update `agentActive` |
 | `host_status` | `connected: bool` | host connect/disconnect |
@@ -123,10 +124,16 @@ On load: display cache immediately, then always fetch `?offset=lineCount` for in
 If response is empty (`incremental: true, lines: []`), cache was fresh — no re-render.
 `saveCurrentCache()` called on session switch and `beforeunload` — no clock dependency.
 
-**New session flow:** client POSTs `/api/sessions`, sets `awaitingNewSession = true`, then
-auto-switches when the next `agent_event: started` arrives for an unknown session.
-Host immediately broadcasts a `session_list` with a synthetic entry for the new session on
-`system.init` (before the `.jsonl` file exists), so the sidebar shows it without delay.
+**New session flow:** clicking "+ new" switches client to local `__new__` state (no network call).
+First message send POSTs `{ cwd, firstMessage }` to `/api/sessions` with `awaitingNewSession = true` set
+before the fetch. Host spawns claude and writes `firstMessage` to stdin immediately, triggering `system.init`.
+On `system.init`, host injects a synthetic session entry into the `session_list` broadcast (file may not exist yet).
+Client auto-switches on the next `agent_event: started` for a non-current session.
+After `result`, host calls `sendSessionList()` again with real file data (title, msgCount, cwd).
+
+**504 resilience:** `pendingHistoryHttp` entries store `{ res, incremental, offset }`.
+On host reconnect, server immediately re-sends `get_session_history` for all parked requests,
+preventing them from timing out after 30 s.
 
 **Delete confirmation:** server only resolves pending `DELETE /api/sessions/:id` responses when
 the session id is absent from the host's next `session_list` broadcast.
@@ -160,9 +167,9 @@ sequenceDiagram
     C->>S: GET /api/sessions
     S-->>C: Session[]
     Note over C: pick most recent session
-    C->>S: GET /sessions/:id/history
-    S-->>C: {lines}
-    Note over C: cache in localStorage
+    C->>S: GET /api/sessions/:id/history?offset=0
+    S-->>C: {lines, incremental:false}
+    Note over C: display + cache in localStorage
     C->>S: WS open
     C->>S: user (WS)
     S-->>C: claude_line(user echo)

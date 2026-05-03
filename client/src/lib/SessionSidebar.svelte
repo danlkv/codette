@@ -3,10 +3,16 @@
 
 <script>
   import { createEventDispatcher } from 'svelte';
+  import FileExplorer from './FileExplorer.svelte';
+
   export let sessions = [];   // [{id, title, ts, msgCount, agentActive, cwd}]
   export let currentId = null;
   export let open = true;
   export let hostCwd = null;
+  export let sessionId = null;
+  export let token = null;
+
+  $: currentSessionCwd = sessions.find(s => s.id === currentId)?.cwd ?? null;
 
   const dispatch = createEventDispatcher();
 
@@ -115,6 +121,13 @@
       <p class="empty">No sessions</p>
     {/if}
   </div>
+
+  <FileExplorer
+    {sessionId}
+    sessionCwd={currentSessionCwd}
+    {token}
+    on:file-open
+  />
 </aside>
 
 <style>

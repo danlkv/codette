@@ -84,6 +84,11 @@ no agents running.
 7. New client deletes a session C, once host deletes it, server broadcasts new session list.
 8. Original client's ui stops showing session C in list.
 
+### File management
+
+As a subsection in sidebar below session list section, user can explore directory tree at session's
+home dir. User can click on a file and the main area 
+will render the file instead of chat.
 
 ## Host terminal
 - Colored output: `you` (blue), `claude` (green), tool calls (yellow + dim summary), cost (dim).

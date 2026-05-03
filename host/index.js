@@ -397,6 +397,47 @@ function connect() {
       return;
     }
 
+    if (msg.type === 'get_fs') {
+      const sessionCwd = getSessionCwd(msg.sessionId);
+      const path = msg.path || sessionCwd;
+      try {
+        if (!path || !sessionCwd || !path.startsWith(sessionCwd)) {
+          throw new Error('path outside session cwd');
+        }
+        const rawEntries = readdirSync(path, { withFileTypes: true });
+        const entries = rawEntries
+          .map(entry => ({ name: entry.name, path: join(path, entry.name), isDir: entry.isDirectory() }))
+          .sort((a, b) => {
+            if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+            return a.name.localeCompare(b.name);
+          });
+        ws.send(JSON.stringify({ type: 'fs_result', sessionId: msg.sessionId, path, entries }));
+      } catch (e) {
+        ws.send(JSON.stringify({ type: 'fs_result', sessionId: msg.sessionId, path, entries: [], error: e.message }));
+      }
+      return;
+    }
+
+    if (msg.type === 'get_file') {
+      const sessionCwd = getSessionCwd(msg.sessionId);
+      try {
+        if (!msg.path || !sessionCwd || !msg.path.startsWith(sessionCwd)) {
+          throw new Error('path outside session cwd');
+        }
+        const buf = readFileSync(msg.path);
+        if (buf.length > 512 * 1024) {
+          ws.send(JSON.stringify({ type: 'file_result', sessionId: msg.sessionId, path: msg.path, content: null, error: 'file too large' }));
+        } else if (buf.includes(0)) {
+          ws.send(JSON.stringify({ type: 'file_result', sessionId: msg.sessionId, path: msg.path, content: null, error: 'binary file' }));
+        } else {
+          ws.send(JSON.stringify({ type: 'file_result', sessionId: msg.sessionId, path: msg.path, content: buf.toString('utf8') }));
+        }
+      } catch (e) {
+        ws.send(JSON.stringify({ type: 'file_result', sessionId: msg.sessionId, path: msg.path, content: null, error: e.message }));
+      }
+      return;
+    }
+
     if (msg.type === 'user') {
       const { sessionId, message } = msg;
       if (!sessionId || !message) {

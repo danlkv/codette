@@ -1,7 +1,10 @@
 {
-  "name": "webchat-host",
+  "name": "claudew",
   "version": "1.0.0",
   "type": "module",
+  "bin": {
+    "claudew": "./index.js"
+  },
   "scripts": {
     "dev": "node --watch index.js"
   },
