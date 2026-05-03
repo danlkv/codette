@@ -61,10 +61,11 @@
   .tool-row :global(.tool) { flex: 1; margin-top: 0; }
 
   .row { display: flex; flex-direction: column; gap: 3px; }
+  .row.user { padding-top: 10px; }
   .label { font-size: .72rem; color: var(--text-dim); display: flex; align-items: baseline; gap: 5px; }
   .row.user .label      { color: var(--user-color); }
   .row.assistant .label { color: var(--accent-light); }
-  .msg-time { font-size: .6rem; color: var(--text-dim); opacity: 0.7; font-weight: 400; }
+  .msg-time { font-size: .6rem; color: var(--text-muted); font-weight: 400; }
 
   .user-text {
     color: var(--text-muted); line-height: 1.6;

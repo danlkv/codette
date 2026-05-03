@@ -98,7 +98,7 @@ app.get('/api/sessions/:id/history', requireJwt, (req, res) => {
   res.on('close', () => clearTimeout(timer));
 
   // incremental = we sent an offset, so client should merge rather than replace
-  const entry = { res, incremental: offset !== null && offset > 0 };
+  const entry = { res, incremental: offset !== null && offset > 0, offset };
 
   if (pendingHistoryHttp.has(id)) {
     // Coalesce: another request already in flight for this sessionId
@@ -113,6 +113,7 @@ app.get('/api/sessions/:id/history', requireJwt, (req, res) => {
         offset: offset !== null && offset > 0 ? offset : undefined,
       }));
     }
+    // else: host down — will be re-sent on host reconnect
   }
 });
 
@@ -184,6 +185,17 @@ wss.on('connection', (ws, req) => {
     // Ask host to populate session cache immediately
     hostWs.send(JSON.stringify({ type: 'list_sessions' }));
     broadcast({ type: 'host_status', connected: true });
+
+    // Re-send any history requests that arrived while host was down
+    for (const [sessionId, entries] of pendingHistoryHttp) {
+      if (entries.length === 0) continue;
+      const { offset } = entries[0]; // all coalesced entries share the same request
+      hostWs.send(JSON.stringify({
+        type: 'get_session_history',
+        sessionId,
+        offset: offset !== null && offset > 0 ? offset : undefined,
+      }));
+    }
 
     ws.on('message', (data) => {
       let ev;
