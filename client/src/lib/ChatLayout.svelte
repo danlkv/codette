@@ -28,7 +28,7 @@
   let liveUid = null;       // our messages[] id for that row
 
   // Derived: is the current session's agent active?
-  $: currentAgentActive = $sessions.find(s => s.id === $currentSessionId)?.agentActive ?? false;
+  $: currentAgentActive = !!$sessions.find(s => s.id === $currentSessionId)?.agentState;
 
   onMount(async () => {
     sidebarOpen = window.innerWidth > 640;
@@ -165,9 +165,11 @@
       }
       else if (msg.type === 'agent_event') {
         const { sessionId, event } = msg;
-        const active = event === 'started' || event === 'streaming' || event === 'idle';
+        const agentState = event === 'idle' ? 'idle'
+                         : (event === 'started' || event === 'streaming') ? 'running'
+                         : null;
         sessions.update(list => list.map(s =>
-          s.id === sessionId ? { ...s, agentActive: active } : s
+          s.id === sessionId ? { ...s, agentState } : s
         ));
         if (awaitingNewSession && event === 'started' && sessionId !== $currentSessionId) {
           awaitingNewSession = false;

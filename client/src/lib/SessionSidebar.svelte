@@ -77,10 +77,10 @@
       <div class="session-row" class:active={s.id === currentId}>
         <button class="session" on:click={() => resume(s.id)} title={s.id}>
           <span class="meta">
-            {#if s.agentActive}
-              <span class="dot pulse"></span>
-            {:else if s.id === currentId}
-              <span class="dot"></span>
+            {#if s.agentState === 'idle'}
+              <span class="dot standby"></span>
+            {:else if s.agentState === 'running'}
+              <span class="dot running"></span>
             {/if}
             <span class="time">{fmt(s.ts)}</span>
             {#if s.msgCount}<span class="count">{s.msgCount}</span>{/if}
@@ -88,7 +88,7 @@
           <span class="title">{s.title || s.id.slice(0, 8)}</span>
         </button>
 
-        {#if s.agentActive}
+        {#if s.agentState}
           <button
             class="ctl interrupt"
             on:click={(e) => interrupt(e, s.id)}
@@ -259,13 +259,12 @@
   .dot {
     width: 6px; height: 6px;
     border-radius: 50%;
-    background: var(--accent-light);
     flex-shrink: 0;
   }
-  /* Pulsing dot for active agents */
-  .dot.pulse {
+  .dot.standby { background: #5a5; }
+  .dot.running {
+    background: var(--accent-light);
     animation: pulse 1.4s ease-in-out infinite;
-    background: #5a5;
   }
   @keyframes pulse {
     0%   { opacity: 1;   transform: scale(1); }

@@ -48,8 +48,8 @@ Common flow - active agent up and standby, cold start.
 1. User opens webapp, app loads list of sessions and last message timestamps.
 2. app opens the session, displays a "ai" marker in top bar to indicate agent is up, requests chat
    history.
-   - list of sessions has "active agent" indicator right of active sessions.
-   - Inactive sessions have cross to delete a session instead of active agent.
+   - list of sessions has dot indicator left of session title: green = agent idle/standby, orange pulsing = agent running. No dot for just-selected inactive session.
+   - Active agent sessions show interrupt (⊘) and stop (■) buttons. Inactive sessions show delete (×) button instead.
 3. server forwards request to host, logs message.
 4. host finds jsonl storage corresponding to the session, passes it to client through server
 5. Client loads the messages, caches into local storage.
