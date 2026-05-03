@@ -10,6 +10,20 @@ import path from 'path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Strip thinking blocks from assistant lines — the browser never renders them
+// and they can be hundreds of KB each.
+function stripThinking(lines) {
+  if (!lines?.length) return lines || [];
+  return lines.map(line => {
+    let ev;
+    try { ev = JSON.parse(line); } catch { return line; }
+    if (ev.type !== 'assistant' || !Array.isArray(ev.message?.content)) return line;
+    const filtered = ev.message.content.filter(b => b.type !== 'thinking');
+    if (filtered.length === ev.message.content.length) return line;
+    return JSON.stringify({ ...ev, message: { ...ev.message, content: filtered } });
+  });
+}
+
 const USERNAME   = process.env.CHAT_USERNAME || 'admin';
 const PASSWORD   = process.env.CHAT_PASSWORD || 'changeme';
 const JWT_SECRET = process.env.JWT_SECRET    || 'jwt-secret-change-me';
@@ -359,7 +373,7 @@ wss.on('connection', (ws, req) => {
         if (pending) {
           for (const { res, incremental } of pending) {
             if (!res.headersSent) {
-              res.json({ lines: lines || [], incremental, totalLines });
+              res.json({ lines: stripThinking(lines), incremental, totalLines });
             }
           }
           pendingHistoryHttp.delete(sessionId);
