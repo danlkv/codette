@@ -10,6 +10,7 @@
   import ChatInput from './ChatInput.svelte';
   import SessionSidebar from './SessionSidebar.svelte';
   import FileView from './FileView.svelte';
+  import DiffView from './DiffView.svelte';
   export let token;
   const dispatch = createEventDispatcher();
 
@@ -20,6 +21,7 @@
   let sidebarOpen = true;
   let hostCwd = null;
   let fileViewPath = null;
+  let diffViewCommit = null;
   let currentLines = [];       // raw jsonl lines for current session (for cache writes)
   let awaitingNewSession = false; // auto-switch on next agent_event: started
   let pendingCwd = null;         // cwd for the pending __new__ session
@@ -314,6 +316,7 @@
     if (id === $currentSessionId) return;
 
     fileViewPath = null;
+    diffViewCommit = null;
 
     // Persist current session's lines to localStorage before switching
     saveCurrentCache();
@@ -426,6 +429,7 @@
   function onNewSession(e) {
     pendingCwd = e.detail || null;
     fileViewPath = null;
+    diffViewCommit = null;
     saveCurrentCache();
     currentSessionId.set('__new__');
     currentLines = [];
@@ -454,6 +458,12 @@
 
   function onFileOpen(e) {
     fileViewPath = e.detail.path;
+    diffViewCommit = null;
+  }
+
+  function onDiffOpen(e) {
+    diffViewCommit = e.detail.commit;
+    fileViewPath = null;
   }
 
   // ── Derived UI state ─────────────────────────────────────────────────────────
@@ -504,9 +514,17 @@
       on:new_session={onNewSession}
       on:agent_ctl={onAgentCtl}
       on:file-open={onFileOpen}
+      on:diff-open={onDiffOpen}
     />
     <div class="chat">
-      {#if fileViewPath}
+      {#if diffViewCommit}
+        <DiffView
+          sessionId={$currentSessionId}
+          commit={diffViewCommit}
+          {token}
+          on:close={() => diffViewCommit = null}
+        />
+      {:else if fileViewPath}
         <FileView
           sessionId={$currentSessionId}
           path={fileViewPath}

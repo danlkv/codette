@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Danylo Lykov
 
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import { WebSocket } from 'ws';
 import { readFileSync, readdirSync, statSync, unlinkSync } from 'fs';
 import { homedir } from 'os';
@@ -436,6 +436,37 @@ function connect() {
         }
       } catch (e) {
         ws.send(JSON.stringify({ type: 'file_result', sessionId: msg.sessionId, path: msg.path, content: null, error: e.message }));
+      }
+      return;
+    }
+
+    if (msg.type === 'get_git_log') {
+      const sessionCwd = getSessionCwd(msg.sessionId);
+      try {
+        if (!sessionCwd) throw new Error('no cwd for session');
+        const logOut = execSync('git log --format="%H|%s|%aI|%an" -50', { cwd: sessionCwd }).toString().trim();
+        const commits = logOut ? logOut.split('\n').map(line => {
+          const [hash, subject, date, author] = line.split('|');
+          return { hash: hash?.slice(0, 7), subject, date, author };
+        }) : [];
+        let branch = null;
+        try { branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: sessionCwd }).toString().trim(); } catch {}
+        ws.send(JSON.stringify({ type: 'git_log_result', sessionId: msg.sessionId, commits, branch }));
+      } catch (e) {
+        ws.send(JSON.stringify({ type: 'git_log_result', sessionId: msg.sessionId, commits: [], error: e.message }));
+      }
+      return;
+    }
+
+    if (msg.type === 'get_git_diff') {
+      const sessionCwd = getSessionCwd(msg.sessionId);
+      try {
+        if (!sessionCwd) throw new Error('no cwd for session');
+        const MAX = 256 * 1024;
+        const diff = execSync(`git show --unified=3 ${msg.commit}`, { cwd: sessionCwd, maxBuffer: MAX + 1 }).toString();
+        ws.send(JSON.stringify({ type: 'git_diff_result', sessionId: msg.sessionId, commit: msg.commit, diff: diff.slice(0, MAX) }));
+      } catch (e) {
+        ws.send(JSON.stringify({ type: 'git_diff_result', sessionId: msg.sessionId, commit: msg.commit, diff: null, error: e.message }));
       }
       return;
     }

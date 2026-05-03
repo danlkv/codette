@@ -35,6 +35,8 @@ const pendingHistoryHttp = new Map();   // sessionId → res[]
 const pendingDeleteHttp = new Map();    // sessionId → res
 const pendingFsHttp     = new Map();   // key → res
 const pendingFileHttp   = new Map();   // key → res
+const pendingGitLogHttp  = new Map();  // sessionId → res
+const pendingGitDiffHttp = new Map();  // key → res  (key = sessionId+':'+commit)
 
 const app = express();
 app.use(express.json());
@@ -177,6 +179,41 @@ app.get('/api/sessions/:id/file', requireJwt, (req, res) => {
 
   pendingFileHttp.set(key, res);
   hostWs.send(JSON.stringify({ type: 'get_file', sessionId: id, path: filePath }));
+});
+
+// ── Git log ───────────────────────────────────────────────────────────────────
+app.get('/api/sessions/:id/git/log', requireJwt, (req, res) => {
+  const id = req.params.id;
+  if (!hostWs || hostWs.readyState !== WebSocket.OPEN)
+    return res.status(503).json({ error: 'Host not connected' });
+  const timer = setTimeout(() => {
+    if (pendingGitLogHttp.get(id) === res) {
+      pendingGitLogHttp.delete(id);
+      if (!res.headersSent) res.status(504).json({ error: 'git log timed out' });
+    }
+  }, 30000);
+  res.on('close', () => clearTimeout(timer));
+  pendingGitLogHttp.set(id, res);
+  hostWs.send(JSON.stringify({ type: 'get_git_log', sessionId: id }));
+});
+
+// ── Git diff ──────────────────────────────────────────────────────────────────
+app.get('/api/sessions/:id/git/diff', requireJwt, (req, res) => {
+  const id = req.params.id;
+  const commit = req.query.commit;
+  if (!commit) return res.status(400).json({ error: 'commit required' });
+  if (!hostWs || hostWs.readyState !== WebSocket.OPEN)
+    return res.status(503).json({ error: 'Host not connected' });
+  const key = id + ':' + commit;
+  const timer = setTimeout(() => {
+    if (pendingGitDiffHttp.get(key) === res) {
+      pendingGitDiffHttp.delete(key);
+      if (!res.headersSent) res.status(504).json({ error: 'git diff timed out' });
+    }
+  }, 30000);
+  res.on('close', () => clearTimeout(timer));
+  pendingGitDiffHttp.set(key, res);
+  hostWs.send(JSON.stringify({ type: 'get_git_diff', sessionId: id, commit }));
 });
 
 // ── Create session ────────────────────────────────────────────────────────────
@@ -335,6 +372,29 @@ wss.on('connection', (ws, req) => {
             ? res.json({ content: ev.content })
             : res.status(422).json({ error: ev.error || 'unreadable' });
           pendingFileHttp.delete(key);
+        }
+        return;
+      }
+
+      if (ev?.type === 'git_log_result') {
+        const res = pendingGitLogHttp.get(ev.sessionId);
+        if (res && !res.headersSent) {
+          ev.error
+            ? res.status(500).json({ error: ev.error })
+            : res.json({ commits: ev.commits, branch: ev.branch ?? null });
+          pendingGitLogHttp.delete(ev.sessionId);
+        }
+        return;
+      }
+
+      if (ev?.type === 'git_diff_result') {
+        const key = ev.sessionId + ':' + ev.commit;
+        const res = pendingGitDiffHttp.get(key);
+        if (res && !res.headersSent) {
+          ev.diff !== null
+            ? res.json({ diff: ev.diff })
+            : res.status(422).json({ error: ev.error || 'diff failed' });
+          pendingGitDiffHttp.delete(key);
         }
         return;
       }

@@ -4,6 +4,7 @@
 <script>
   import { createEventDispatcher } from 'svelte';
   import FileExplorer from './FileExplorer.svelte';
+  import GitLog from './GitLog.svelte';
 
   export let sessions = [];   // [{id, title, ts, msgCount, agentActive, cwd}]
   export let currentId = null;
@@ -127,6 +128,13 @@
     sessionCwd={currentSessionCwd}
     {token}
     on:file-open
+  />
+
+  <GitLog
+    {sessionId}
+    sessionCwd={currentSessionCwd}
+    {token}
+    on:diff-open
   />
 </aside>
 
