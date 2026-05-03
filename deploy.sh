@@ -44,5 +44,5 @@ else
   echo "WARN: login endpoint returned $code — containers may still be starting"
 fi
 
-echo "==> host launch command:"
-ssh "$REMOTE" "source ${REMOTE_DIR}/.env && echo \"HOST_KEY=\${HOST_KEY} SERVER_URL=wss://${DOMAIN} node host/index.js\""
+host_key=$(ssh "$REMOTE" "grep ^HOST_KEY ${REMOTE_DIR}/.env | cut -d= -f2")
+echo "Host: HOST_KEY=${host_key} SERVER_URL=wss://${DOMAIN} node host/index.js"

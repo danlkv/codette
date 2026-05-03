@@ -77,15 +77,59 @@
     await loadSessionHistory(first.id);
   }
 
+  // Summarize old lines to save space: drop tool results, truncate assistant text to 500 chars.
+  function summarizeOldLines(lines) {
+    return lines.flatMap(line => {
+      let ev;
+      try { ev = JSON.parse(line); } catch { return [line]; }
+      // Drop tool results entirely
+      if (ev.type === 'user' && Array.isArray(ev.message?.content)) return [];
+      // Truncate assistant text blocks
+      if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
+        let changed = false;
+        const content = ev.message.content.map(b => {
+          if (b.type !== 'text' || b.text.length <= 500) return b;
+          changed = true;
+          return { ...b, text: b.text.slice(0, 500) + `…[+${b.text.length - 500} chars]` };
+        });
+        return [changed ? JSON.stringify({ ...ev, message: { ...ev.message, content } }) : line];
+      }
+      return [line];
+    });
+  }
+
+  // Try to store history; on QuotaExceededError summarize old lines, then evict other
+  // sessions, retrying at each step. lineCount is always the real count so server
+  // offsets stay correct.
+  function tryStoreHistory(cacheKey, lines, lineCount) {
+    try { localStorage.setItem(cacheKey, JSON.stringify({ lines, lineCount })); return; }
+    catch (e) { if (e.name !== 'QuotaExceededError') { console.error('tryStoreHistory:', e); return; } }
+
+    const KEEP = 500;
+    const summarized = lines.length > KEEP
+      ? [...summarizeOldLines(lines.slice(0, -KEEP)), ...lines.slice(-KEEP)]
+      : summarizeOldLines(lines);
+
+    try { localStorage.setItem(cacheKey, JSON.stringify({ lines: summarized, lineCount })); return; }
+    catch (e) { if (e.name !== 'QuotaExceededError') { console.error('tryStoreHistory after summarize:', e); return; } }
+
+    // Evict all other sessions' history caches then retry
+    const toEvict = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k?.startsWith('history_') && k !== cacheKey) toEvict.push(k);
+    }
+    toEvict.forEach(k => localStorage.removeItem(k));
+    console.warn('tryStoreHistory: evicted', toEvict.length, 'other session(s) to free space');
+
+    try { localStorage.setItem(cacheKey, JSON.stringify({ lines: summarized, lineCount })); }
+    catch (e2) { console.error('tryStoreHistory after evict:', e2); }
+  }
+
   function saveCurrentCache() {
     const id = get(currentSessionId);
     if (!id || currentLines.length === 0) return;
-    try {
-      localStorage.setItem('history_' + id, JSON.stringify({
-        lines: currentLines,
-        lineCount: currentLines.length,
-      }));
-    } catch {}
+    tryStoreHistory('history_' + id, currentLines, currentLines.length);
   }
 
   async function loadSessionHistory(id) {
@@ -98,7 +142,7 @@
         cached = JSON.parse(raw);
         if (!('lineCount' in cached)) cached = null;
       }
-    } catch {}
+    } catch (e) { console.error('loadSessionHistory localStorage read:', e); }
 
     if (cached) applyHistoryLines(cached.lines);
     await fetchAndApplyHistory(id, cached, cacheKey);
@@ -124,20 +168,22 @@
         }
         const merged = [...cached.lines, ...lines];
         applyHistoryLines(merged);
-        try { localStorage.setItem(cacheKey, JSON.stringify({ lines: merged, lineCount: merged.length })); } catch {}
+        tryStoreHistory(cacheKey, merged, merged.length);
       } else {
         applyHistoryLines(lines);
-        try { localStorage.setItem(cacheKey, JSON.stringify({ lines, lineCount: lines.length })); } catch {}
+        tryStoreHistory(cacheKey, lines, lines.length);
       }
-    } catch {}
+    } catch (e) { console.error('fetchAndApplyHistory:', e); }
   }
 
   function applyHistoryLines(lines) {
     currentLines = [...lines];
-    messages.set([]);
+    _batch = [];
     resetTurnState();
     for (const line of lines) parseLine(line, false);
     finalizeIncomplete();
+    messages.set(_batch);
+    _batch = null;
   }
 
   function connect() {
@@ -192,27 +238,34 @@
     seenToolIds = new Set(); liveClaudeId = null; liveUid = null;
   }
 
+  // Batch accumulator: null = use store directly, array = accumulate for atomic set
+  let _batch = null;
+  const mutMsg = fn => {
+    if (_batch !== null) { _batch = fn(_batch); }
+    else { messages.update(fn); }
+  };
+
   function finalizeIncomplete() {
     if (liveUid !== null) {
-      messages.update(ms => ms.map(m => m.id === liveUid ? { ...m, streaming: false } : m));
+      mutMsg(ms => ms.map(m => m.id === liveUid ? { ...m, streaming: false } : m));
     }
-    messages.update(ms => ms.map(m => m.running ? { ...m, running: false } : m));
+    mutMsg(ms => ms.map(m => m.running ? { ...m, running: false } : m));
     resetTurnState();
   }
 
   function commitTool(b) {
     if (b.name === 'AskUserQuestion') {
-      messages.update(ms => [...ms, {
+      mutMsg(ms => [...ms, {
         id: uid(), role: 'user_question',
         toolId: b.id, questions: b.input?.questions ?? [],
       }]);
     } else if (b.name === 'TodoWrite') {
-      messages.update(ms => [...ms, {
+      mutMsg(ms => [...ms, {
         id: uid(), role: 'todo',
         toolId: b.id, todos: b.input?.todos ?? [],
       }]);
     } else {
-      messages.update(ms => [...ms, {
+      mutMsg(ms => [...ms, {
         id: uid(), role: 'tool',
         toolId: b.id, name: b.name,
         input: b.input, summary: toolSummary(b.name, b.input),
@@ -232,23 +285,30 @@
 
     if (ev.type === 'user') {
       const content = ev.message?.content;
-      if (typeof content === 'string' && content.trim())
-        messages.update(ms => [...ms, { id: uid(), role: 'user', text: content, ts: ev.timestamp ?? null }]);
+      if (typeof content === 'string' && content.trim()) {
+        mutMsg(ms => [...ms, { id: uid(), role: 'user', text: content, ts: ev.timestamp ?? null }]);
+      } else if (Array.isArray(content)) {
+        const RESULT_CAP = 2000;
+        const results = content
+          .filter(b => b.type === 'tool_result')
+          .map(b => {
+            const raw = b.content;
+            const full = typeof raw === 'string' ? raw
+              : Array.isArray(raw) ? raw.filter(c => c.type === 'text').map(c => c.text).join('') : '';
+            const capped = full.length > RESULT_CAP;
+            const text = capped ? full.slice(0, RESULT_CAP) + '\n…' : full;
+            return { id: b.tool_use_id, result: { text, total: full.length, capped } };
+          });
+        if (results.length) mutMsg(ms => ms.map(m => {
+          const r = results.find(r => r.id === m.toolId);
+          return m.role === 'tool' && r ? { ...m, running: false, result: r.result } : m;
+        }));
+      }
       return;
     }
 
     if (ev.type === 'user_message') {
-      messages.update(ms => [...ms, { id: uid(), role: 'user', text: ev.text, ts: ev.timestamp ?? null }]);
-      return;
-    }
-
-    if (ev.type === 'tool') {
-      const ids = (ev.content ?? [])
-        .filter(b => b.type === 'tool_result')
-        .map(b => b.tool_use_id);
-      if (ids.length) messages.update(ms => ms.map(m =>
-        m.role === 'tool' && ids.includes(m.toolId) ? { ...m, running: false } : m
-      ));
+      mutMsg(ms => [...ms, { id: uid(), role: 'user', text: ev.text, ts: ev.timestamp ?? null }]);
       return;
     }
 
@@ -263,18 +323,18 @@
 
       if (text) {
         if (claudeId && claudeId === liveClaudeId && liveUid !== null) {
-          messages.update(ms => ms.map(m =>
+          mutMsg(ms => ms.map(m =>
             m.id === liveUid ? { ...m, text } : m
           ));
         } else {
           if (liveUid !== null) {
-            messages.update(ms => ms.map(m =>
+            mutMsg(ms => ms.map(m =>
               m.id === liveUid ? { ...m, streaming: false } : m
             ));
           }
           liveClaudeId = claudeId;
           liveUid = uid();
-          messages.update(ms => [...ms, { id: liveUid, role: 'assistant', text, streaming: live, ts: ev.timestamp ?? null }]);
+          mutMsg(ms => [...ms, { id: liveUid, role: 'assistant', text, streaming: live, ts: ev.timestamp ?? null }]);
         }
       }
 
@@ -287,13 +347,13 @@
 
     } else if (ev.type === 'result') {
       if (liveUid !== null) {
-        messages.update(ms => ms.map(m =>
+        mutMsg(ms => ms.map(m =>
           m.id === liveUid ? { ...m, streaming: false } : m
         ));
         liveUid = null;
         liveClaudeId = null;
       }
-      messages.update(ms => ms.map(m =>
+      mutMsg(ms => ms.map(m =>
         m.role === 'tool' && m.running ? { ...m, running: false } : m
       ));
       if (ev.total_cost_usd != null) lastCost.set(ev.total_cost_usd);
@@ -313,13 +373,20 @@
 
     currentSessionId.set(id);
     currentLines = [];
-    messages.set([]);
     resetTurnState();
 
+    // Show in-memory cache only if there's no localStorage cache that will
+    // immediately replace it — avoids a double-render flash.
     const cached = sessionData.get(id);
-    if (cached?.length > 0) {
+    const hasLocalCache = !!localStorage.getItem('history_' + id);
+    if (cached?.length > 0 && !hasLocalCache) {
+      _batch = [];
       for (const line of cached) parseLine(line, false);
+      messages.set(_batch);
+      _batch = null;
       currentLines = [...cached];
+    } else {
+      messages.set([]);
     }
 
     await loadSessionHistory(id);
@@ -420,7 +487,7 @@
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
-    } catch {}
+    } catch (e) { console.error('handleDelete fetch:', e); }
   }
 
   function handleAgentCtl({ id, event }) {

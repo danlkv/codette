@@ -38,32 +38,41 @@
     {/if}
     <span class="chevron">{open ? '▾' : '▸'}</span>
   </button>
-  {#if open && tool.input}
+  {#if open}
     <div class="detail">
-      {#if tool.name === 'Edit' && editDiff(tool.input)}
-        {@const diff = editDiff(tool.input)}
-        {#if tool.input.file_path}
-          <div class="diff-path">{rel(tool.input.file_path)}</div>
+      {#if tool.input}
+        {#if tool.name === 'Edit' && editDiff(tool.input)}
+          {@const diff = editDiff(tool.input)}
+          {#if tool.input.file_path}
+            <div class="diff-path">{rel(tool.input.file_path)}</div>
+          {/if}
+          <div class="diff">
+            {#each diff.oldLines as line}
+              <div class="diff-line del"><span class="diff-sig">-</span><span class="diff-text">{line}</span></div>
+            {/each}
+            {#each diff.newLines as line}
+              <div class="diff-line add"><span class="diff-sig">+</span><span class="diff-text">{line}</span></div>
+            {/each}
+          </div>
+        {:else if tool.name === 'Write' && tool.input?.content != null}
+          {#if tool.input.file_path}
+            <div class="diff-path">{rel(tool.input.file_path)}</div>
+          {/if}
+          <div class="diff">
+            {#each tool.input.content.split('\n') as line}
+              <div class="diff-line add"><span class="diff-sig">+</span><span class="diff-text">{line}</span></div>
+            {/each}
+          </div>
+        {:else}
+          <pre>{JSON.stringify(tool.input, null, 2)}</pre>
         {/if}
-        <div class="diff">
-          {#each diff.oldLines as line}
-            <div class="diff-line del"><span class="diff-sig">-</span><span class="diff-text">{line}</span></div>
-          {/each}
-          {#each diff.newLines as line}
-            <div class="diff-line add"><span class="diff-sig">+</span><span class="diff-text">{line}</span></div>
-          {/each}
+      {/if}
+      {#if tool.result != null}
+        <div class="result-header">
+          <span class="result-label">result</span>
+          <span class="result-count">{tool.result.total} chars{tool.result.capped ? ' (capped at 2000)' : ''}</span>
         </div>
-      {:else if tool.name === 'Write' && tool.input?.content != null}
-        {#if tool.input.file_path}
-          <div class="diff-path">{rel(tool.input.file_path)}</div>
-        {/if}
-        <div class="diff">
-          {#each tool.input.content.split('\n') as line}
-            <div class="diff-line add"><span class="diff-sig">+</span><span class="diff-text">{line}</span></div>
-          {/each}
-        </div>
-      {:else}
-        <pre>{JSON.stringify(tool.input, null, 2)}</pre>
+        <pre class="result">{tool.result.text}</pre>
       {/if}
     </div>
   {/if}
@@ -103,10 +112,31 @@
   .detail {
     border-top: 1px solid var(--border);
     padding: 8px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
   .detail pre {
     margin: 0; font: .78rem/1.5 'SF Mono', 'Fira Code', monospace;
     color: var(--text-muted); white-space: pre-wrap; word-break: break-all;
+  }
+  .result-header {
+    display: flex; align-items: center; gap: 8px;
+    border-top: 1px solid var(--border);
+    padding-top: 6px;
+    margin-top: 2px;
+  }
+  .result-label {
+    font-size: .68rem; font-weight: 600; letter-spacing: .05em;
+    text-transform: uppercase; color: var(--text-dim);
+  }
+  .result-count {
+    font-size: .68rem; color: var(--text-dim);
+  }
+  pre.result {
+    margin: 0; font: .78rem/1.5 'SF Mono', 'Fira Code', monospace;
+    color: var(--text-muted); white-space: pre-wrap; word-break: break-all;
+    background: var(--pre-bg); border-radius: 4px; padding: 6px 8px;
   }
   .diff-path {
     font: .75rem/1.4 'SF Mono', 'Fira Code', monospace;
