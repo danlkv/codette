@@ -94,7 +94,7 @@
   .scroll-btn:hover { color: var(--text); border-color: var(--text-muted); }
 
   /* on narrow screens where there's no room outside the column, float over text */
-  @media (max-width: calc(760px + 80px)) {
+  @media (max-width: calc(760px + 80px + 300px)) {
     .scroll-btn {
       left: auto;
       right: 16px;
