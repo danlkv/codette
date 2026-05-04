@@ -64,7 +64,7 @@
   .msg-time { font-size: .6rem; color: var(--text-muted); font-weight: 400; }
 
   .user-text {
-    color: #000; line-height: 1.5;
+    color: var(--text); background: var(--bg-elevated); line-height: 1.5;
     white-space: pre-wrap; word-break: break-word; margin: 0;
     border: 1px solid var(--accent);
     border-radius: 4px; padding: 7px 10px;

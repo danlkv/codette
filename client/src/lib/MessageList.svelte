@@ -4,6 +4,8 @@
 <script>
   import { messages } from '../store.js';
   import MessageBubble from './MessageBubble.svelte';
+  import { tweened } from 'svelte/motion';
+  import { cubicOut } from 'svelte/easing';
   let { hostStatus } = $props();
 
   let el = $state();
@@ -23,6 +25,47 @@
     if (!el) return;
     el.scrollTop = el.scrollHeight;
     pinned = true;
+  }
+
+  function getUserMsgEls() {
+    return [...el.querySelectorAll('.row.user')];
+  }
+
+  const scrollAnim = tweened(0, { duration: 70, easing: cubicOut });
+  let animating = false;
+  $effect(() => {
+    return scrollAnim.subscribe(v => { if (animating && el) el.scrollTop = v; });
+  });
+  function animateScroll(target) {
+    animating = true;
+    scrollAnim.set(el.scrollTop, { duration: 0 });
+    scrollAnim.set(target).then(() => { animating = false; });
+  }
+
+  function scrollToPrevUser() {
+    if (!el) return;
+    const containerTop = el.getBoundingClientRect().top;
+    const els = getUserMsgEls();
+    for (let i = els.length - 1; i >= 0; i--) {
+      const msgTop = els[i].getBoundingClientRect().top - containerTop;
+      if (msgTop < -20) {
+        animateScroll(el.scrollTop + msgTop - 8);
+        return;
+      }
+    }
+  }
+
+  function scrollToNextUser() {
+    if (!el) return;
+    const containerTop = el.getBoundingClientRect().top;
+    const els = getUserMsgEls();
+    for (let i = 0; i < els.length; i++) {
+      const msgTop = els[i].getBoundingClientRect().top - containerTop;
+      if (msgTop > 20) {
+        animateScroll(el.scrollTop + msgTop - 8);
+        return;
+      }
+    }
   }
 </script>
 
@@ -44,6 +87,11 @@
         <MessageBubble msg={m} isStreaming={!!m.streaming} />
       {/each}
     </div>
+  </div>
+
+  <div class="nav-btns">
+    <button class="nav-btn" onclick={scrollToPrevUser} title="Previous user message">↑</button>
+    <button class="nav-btn" onclick={scrollToNextUser} title="Next user message">↓</button>
   </div>
 
   {#if !pinned}
@@ -76,10 +124,30 @@
     padding: 4px 10px; border-radius: 6px; font-size: .8rem;
   }
 
+  .nav-btns {
+    position: absolute;
+    bottom: 56px;
+    left: calc(50% + 760px / 2 + 12px);
+    display: flex; flex-direction: column;
+    width: 32px;
+  }
+  .nav-btn {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    width: 32px; height: 32px;
+    font-size: 1rem; line-height: 1;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: color .15s, border-color .15s;
+  }
+  .nav-btn:first-child { border-radius: 4px 4px 0 0; }
+  .nav-btn:last-child  { border-radius: 0 0 4px 4px; border-top: none; }
+  .nav-btn:hover { color: var(--text); border-color: var(--text-muted); }
+
   .scroll-btn {
     position: absolute;
     bottom: 16px;
-    /* sit just outside the content column on wide screens */
     left: calc(50% + 760px / 2 + 12px);
     background: var(--bg-elevated);
     border: 1px solid var(--border);
@@ -93,9 +161,8 @@
   }
   .scroll-btn:hover { color: var(--text); border-color: var(--text-muted); }
 
-  /* on narrow screens where there's no room outside the column, float over text */
   @media (max-width: calc(760px + 80px + 300px)) {
-    .scroll-btn {
+    .nav-btns, .scroll-btn {
       left: auto;
       right: 16px;
     }
