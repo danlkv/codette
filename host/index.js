@@ -5,13 +5,13 @@
 import { spawn, execSync } from 'child_process';
 import { WebSocket } from 'ws';
 import { readFileSync, readdirSync, statSync, unlinkSync } from 'fs';
-import { homedir, hostname } from 'os';
+import { homedir } from 'os';
 import { join } from 'path';
 import { ClaudeRenderer, toolSummary } from './renderer.js';
 import { RpcServer } from './rpc.js';
 
 const SERVER_URL       = process.env.SERVER_URL       || 'ws://localhost:3000';
-const CLIENT_USERNAME  = process.env.CLIENT_USERNAME  || hostname();
+const CLIENT_USERNAME  = process.env.CLIENT_USERNAME  || execSync('whoami').toString().trim();
 const CLIENT_PASSWORD  = process.env.CLIENT_PASSWORD  || 'changeme';
 const HOST_TOKEN       = process.env.HOST_KEY         || 'host-key-change-me';
 
