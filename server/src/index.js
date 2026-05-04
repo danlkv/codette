@@ -281,7 +281,7 @@ wss.on('connection', (ws, req) => {
       if (ev?.type === 'log') {
         appendLog(ev);
         const extra = ev.data ? ' ' + JSON.stringify(ev.data) : '';
-        console.log(`[${username}][${ev.level}] ${ev.msg}${extra}`);
+        console.log(`[${clientUsername}][${ev.level}] ${ev.msg}${extra}`);
         return;
       }
 
@@ -339,13 +339,12 @@ wss.on('connection', (ws, req) => {
     });
 
     ws.on('close', () => {
-      hosts.delete(username);
+      hosts.delete(clientUsername);
       host.rpc.flush();
-      // Keep agents map on context — context is discarded anyway, but flush sends 503s immediately.
-      console.log(`[server] host disconnected: ${username} (${hosts.size} remaining)`);
+      console.log(`[server] host disconnected: ${clientUsername} (${hosts.size} remaining)`);
       host.broadcast({ type: 'host_status', connected: false });
     });
-    ws.on('error', (e) => console.error(`[server] host error (${username}):`, e.message));
+    ws.on('error', (e) => console.error(`[server] host error (${clientUsername}):`, e.message));
 
   // ── Client connection ──────────────────────────────────────────────────────
   } else if (url.pathname === '/ws') {
