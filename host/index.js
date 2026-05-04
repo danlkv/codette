@@ -317,6 +317,7 @@ function connect() {
     while (logQueue.length) ws.send(JSON.stringify(logQueue.shift()));
     hr();
     w(`${A.bold}${A.cyan}Claude Web Host${A.reset}  ${A.gray}${SERVER_URL}${A.reset}\n`);
+    w(`${A.dim}Serving clients as: ${A.reset}${A.white}${CLIENT_USERNAME}${A.reset}  ${A.dim}password: ${A.reset}${A.white}${CLIENT_PASSWORD}${A.reset}\n`);
     hr();
     log('info', 'host connected to server', { url: SERVER_URL });
     sendSessionList();
