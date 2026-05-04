@@ -81,7 +81,7 @@
   .prose :global(h2) { font-size: 1.0em; }
   .prose :global(h3) { font-size: .95em; }
   .prose :global(code) {
-    background: var(--bg-elevated); border: 1px solid var(--border);
+    background: var(--bg-elevated);
     border-radius: 3px; padding: 1px 5px;
     font-size: .88em; color: var(--accent-light); font-family: inherit;
   }

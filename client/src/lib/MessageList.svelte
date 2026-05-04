@@ -89,7 +89,7 @@
     </div>
   </div>
 
-  <div class="nav-btns">
+  <div class="nav-btns" class:pinned>
     <button class="nav-btn" onclick={scrollToPrevUser} title="Previous user message">↑</button>
     <button class="nav-btn" onclick={scrollToNextUser} title="Next user message">↓</button>
   </div>
@@ -162,9 +162,9 @@
   .scroll-btn:hover { color: var(--text); border-color: var(--text-muted); }
 
   @media (max-width: calc(760px + 80px + 300px)) {
-    .nav-btns, .scroll-btn {
-      left: auto;
-      right: 16px;
-    }
+    .nav-btns, .scroll-btn { left: auto; right: 16px; }
+  }
+  @media (max-width: 1130px) {
+    .nav-btns.pinned { display: none; }
   }
 </style>

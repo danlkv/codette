@@ -157,4 +157,14 @@
     color: var(--text-muted); white-space: pre; overflow-x: auto;
     margin: .4em 0; font-family: monospace;
   }
+
+  :global(.high-contrast) :global(.prose pre),
+  :global(.high-contrast) :global(.prose code),
+  :global(.high-contrast) :global(.prose blockquote),
+  :global(.high-contrast) :global(.prose th),
+  :global(.high-contrast) :global(.prose td),
+  :global(.high-contrast) :global(.tool),
+  :global(.high-contrast) :global(.mermaid-source),
+  :global(.high-contrast) :global(.mermaid-toggle) { border: none; }
+  :global(.high-contrast) :global(.prose hr) { border-top: 1px solid var(--text-dim); }
 </style>
