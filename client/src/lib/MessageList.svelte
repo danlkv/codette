@@ -6,7 +6,7 @@
   import MessageBubble from './MessageBubble.svelte';
   import { tweened } from 'svelte/motion';
   import { cubicOut } from 'svelte/easing';
-  let { hostStatus } = $props();
+  let { hostStatus, historyLoading = false } = $props();
 
   let el = $state();
   let pinned = $state(true);
@@ -72,7 +72,7 @@
 <div class="wrap">
   <div class="list" bind:this={el} onscroll={onScroll}>
     <div class="inner">
-      {#if $messages.length === 0}
+      {#if $messages.length === 0 && !historyLoading}
         <div class="empty">
           {#if hostStatus !== 'connected'}
             <p>Waiting for host…</p>

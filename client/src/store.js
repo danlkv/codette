@@ -23,3 +23,13 @@ export const sessionCwd = derived(
 // Background cache: sessionId -> messages[]
 // Not a Svelte store — plain mutable map, only the active session uses `messages`
 export const sessionData = new Map();
+
+export function resetStores() {
+  messages.set([]);
+  lastCost.set(null);
+  lastUsage.set(null);
+  hostStatus.set('disconnected');
+  wsOk.set(false);
+  sessions.set([]);
+  currentSessionId.set(null);
+}

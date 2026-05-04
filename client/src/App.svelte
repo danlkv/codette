@@ -5,12 +5,57 @@
   import { onMount } from 'svelte';
   import Login        from './lib/Login.svelte';
   import ChatLayout   from './lib/ChatLayout.svelte';
-  import { highContrast } from './store.js';
+  import { highContrast, resetStores } from './store.js';
 
-  let token = $state(localStorage.getItem('chat_token') || '');
+  function loadAccounts() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('chat_accounts') || '[]');
+      if (saved.length) return saved;
+      // migrate legacy single token
+      const old = localStorage.getItem('chat_token');
+      if (old) {
+        const { username } = JSON.parse(atob(old.split('.')[1]));
+        return [{ username, token: old }];
+      }
+    } catch {}
+    return [];
+  }
 
-  function handleLogin(t)  { token = t; localStorage.setItem('chat_token', token); }
-  function handleLogout()  { token = ''; localStorage.removeItem('chat_token'); }
+  let accounts = $state(loadAccounts());
+  let activeIdx = $state(Math.min(
+    Number(localStorage.getItem('chat_active') || 0),
+    Math.max(accounts.length - 1, 0),
+  ));
+  let addingAccount = $state(false);
+
+  const token = $derived(accounts[activeIdx]?.token || '');
+
+  function persist() {
+    localStorage.setItem('chat_accounts', JSON.stringify(accounts));
+    localStorage.setItem('chat_active', String(activeIdx));
+  }
+
+  function handleLogin(t) {
+    try {
+      const { username } = JSON.parse(atob(t.split('.')[1]));
+      const i = accounts.findIndex(a => a.username === username);
+      if (i >= 0) { accounts[i] = { username, token: t }; activeIdx = i; }
+      else { accounts = [...accounts, { username, token: t }]; activeIdx = accounts.length - 1; }
+    } catch {
+      accounts = [...accounts, { username: '?', token: t }];
+      activeIdx = accounts.length - 1;
+    }
+    addingAccount = false;
+    persist();
+  }
+
+  function handleLogout() {
+    accounts = accounts.filter((_, i) => i !== activeIdx);
+    activeIdx = Math.min(activeIdx, Math.max(accounts.length - 1, 0));
+    persist();
+  }
+
+  function handleSwitch(idx) { resetStores(); activeIdx = idx; persist(); }
 
   // Persist high-contrast preference and apply class to <html>
   $effect(() => {
@@ -37,7 +82,16 @@
 </script>
 
 {#if token}
-  <ChatLayout {token} onLogout={handleLogout} />
+  {#key activeIdx}
+    <ChatLayout {token} {accounts} {activeIdx}
+      onLogout={handleLogout} onSwitch={handleSwitch}
+      onAddAccount={() => addingAccount = true} />
+  {/key}
+  {#if addingAccount}
+    <div class="account-overlay" onclick={(e) => { if (e.target === e.currentTarget) addingAccount = false; }}>
+      <Login onLogin={handleLogin} onCancel={() => addingAccount = false} />
+    </div>
+  {/if}
 {:else}
   <Login onLogin={handleLogin} />
 {/if}
@@ -167,4 +221,9 @@
   :global(.high-contrast) :global(.mermaid-source),
   :global(.high-contrast) :global(.mermaid-toggle) { border: none; }
   :global(.high-contrast) :global(.prose hr) { border-top: 1px solid var(--text-dim); }
+
+  .account-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    display: flex; align-items: center; justify-content: center; z-index: 200;
+  }
 </style>

@@ -1,6 +1,5 @@
 # Web-chat wrapper for claude.
 
-
 1. Server serves a chat-like svelte webapp. Webapp accepts on login/password
 2. Server listens for chat events from host and passes them onto user. Receives
    user messages and passes back to host.
@@ -93,6 +92,15 @@ will render the file instead of chat.
 ## Host terminal
 - Colored output: `you` (blue), `claude` (green), tool calls (yellow + dim summary), cost (dim).
 - Tool summary shown inline: `⚙ Bash  echo "hello"`, `⚙ Read  src/index.js`, etc.
+
+### Multi-host
+
+- Host connects to the server and specifies user and password to use.
+- Server checks if there exists an active user with same name and accepts if not.
+- Client(s) may connect to the particular host, specifying their username and password that host
+  declared.
+- Server has no client config
+
 
 ## Deployment
 - Server in Docker, port bound to localhost only.

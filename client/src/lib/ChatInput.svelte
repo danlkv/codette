@@ -12,6 +12,7 @@
     { cmd: '/context', desc: 'token usage + cost' },
     { cmd: '/status',  desc: 'connection status' },
     { cmd: '/btw',     desc: 'side message (not in history)' },
+    { cmd: '/reload',  desc: 'clear cache and refetch full history' },
   ];
 
   let prefix = $derived(value.split(' ')[0]);

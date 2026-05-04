@@ -2,7 +2,7 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
-  let { onLogin } = $props();
+  let { onLogin, onCancel } = $props();
   let username = $state(''), password = $state(''), error = $state(''), loading = $state(false);
 
   async function submit() {
@@ -34,6 +34,7 @@
       </label>
       {#if error}<p class="err">{error}</p>{/if}
       <button type="submit" disabled={loading}>{loading ? 'Signing in…' : 'Sign in'}</button>
+      {#if onCancel}<button type="button" class="cancel" onclick={onCancel}>cancel</button>{/if}
     </form>
   </div>
 </div>
@@ -41,7 +42,6 @@
 <style>
   .wrap {
     display: flex; align-items: center; justify-content: center;
-    height: var(--app-height, 100dvh); background: var(--bg-primary);
   }
   .card {
     width: 320px; background: var(--bg-secondary);
@@ -68,4 +68,5 @@
   button:hover:not(:disabled) { color: var(--accent-light); border-color: var(--accent-light); }
   button:disabled { opacity: .5; cursor: default; }
   .err { color: #f87171; font-size: .82rem; }
+  .cancel { border-color: var(--border); color: var(--text-dim); margin-top: 0; }
 </style>

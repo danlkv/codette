@@ -7,23 +7,39 @@
   import { messages, lastCost, lastUsage, hostStatus, wsOk, highContrast,
            sessions, currentSessionId, sessionData } from '../store.js';
   import { createParser } from './parser.js';
+  import { summarizeOldLines, KEEP as SUMMARIZE_KEEP } from './summarize.js';
   import MessageList from './MessageList.svelte';
   import ChatInput from './ChatInput.svelte';
   import SessionSidebar from './SessionSidebar.svelte';
   import FileView from './FileView.svelte';
   import DiffView from './DiffView.svelte';
 
-  let { token, onLogout } = $props();
+  let { token, accounts = [], activeIdx = 0, onLogout, onSwitch, onAddAccount } = $props();
+
+  const username = $derived.by(() => {
+    try { return JSON.parse(atob(token.split('.')[1])).username; } catch { return ''; }
+  });
+  let userMenuOpen = $state(false);
+  $effect(() => {
+    if (!userMenuOpen) return;
+    function onDocClick(e) {
+      if (!e.target.closest('.user-menu-wrap')) userMenuOpen = false;
+    }
+    document.addEventListener('click', onDocClick, true);
+    return () => document.removeEventListener('click', onDocClick, true);
+  });
 
   const parser = createParser({ messages, currentSessionId, lastCost, lastUsage });
 
   let ws;
+  let destroyed = false;
   let sysCounter = 0;
 
   let sidebarOpen = $state(true);
   let hostCwd = $state(null);
   let fileViewPath = $state(null);
   let diffViewCommit = $state(null);
+  let historyLoading = $state(true);
   let currentLines = [];       // raw jsonl lines for current session (for cache writes)
   let awaitingNewSession = false;
   let pendingCwd = null;
@@ -51,10 +67,14 @@
     sidebarOpen = window.innerWidth > 640;
     window.addEventListener('beforeunload', saveCurrentCache);
     window.addEventListener('popstate', onPopState);
+    console.log('[history] onMount: calling initSessions');
     await initSessions();
+    console.log('[history] onMount: initSessions done, historyLoading=false, calling connect');
+    historyLoading = false;
     connect();
   });
   onDestroy(() => {
+    destroyed = true;
     window.removeEventListener('beforeunload', saveCurrentCache);
     window.removeEventListener('popstate', onPopState);
     ws?.close();
@@ -64,6 +84,7 @@
 
   async function initSessions() {
     let sessionList = [];
+    console.log('[history] initSessions: fetching sessions');
     try {
       const res = await fetch('/api/sessions', {
         headers: { Authorization: `Bearer ${token}` },
@@ -73,92 +94,74 @@
         sessionList = data.sessions ?? data;
         if (data.hostCwd) hostCwd = data.hostCwd;
         sessions.set(dedupById(sessionList));
+        console.log('[history] initSessions: got', sessionList.length, 'sessions');
+      } else {
+        console.warn('[history] initSessions: fetch failed', res.status);
       }
-    } catch (e) {}
+    } catch (e) { console.error('[history] initSessions: fetch error', e); }
 
-    if (sessionList.length === 0) return;
+    if (sessionList.length === 0) { console.log('[history] initSessions: no sessions, returning'); return; }
     const hashId = location.hash.slice(1) || null;
     const target = (hashId && hashId !== 'new' && sessionList.find(s => s.id === hashId))
       ? hashId
       : sessionList[0].id;
+    console.log('[history] initSessions: target session', target, '(hash was:', hashId + ')');
     history.replaceState(null, '', '#' + target);
     currentSessionId.set(target);
     await loadSessionHistory(target);
   }
 
-  // Summarize old lines to save space:
-  //   - drop tool results (user events with array content)
-  //   - truncate assistant text blocks to 500 chars
-  //   - truncate Edit tool old_string/new_string to 500 lines
-  function summarizeOldLines(lines) {
-    return lines.flatMap(line => {
-      let ev;
-      try { ev = JSON.parse(line); } catch { return [line]; }
-
-      if (ev.type === 'user' && Array.isArray(ev.message?.content)) return [];
-
-      if (ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
-        let changed = false;
-        const content = ev.message.content.flatMap(b => {
-          if (b.type === 'thinking') { changed = true; return []; }
-          if (b.type === 'text' && b.text.length > 500) {
-            changed = true;
-            return [{ ...b, text: b.text.slice(0, 500) + `…[+${b.text.length - 500} chars]` }];
-          }
-          if (b.type === 'tool_use' && b.name === 'Edit' && b.input) {
-            let inputChanged = false;
-            const input = { ...b.input };
-            for (const field of ['old_string', 'new_string']) {
-              if (typeof input[field] === 'string') {
-                const ls = input[field].split('\n');
-                if (ls.length > 500) {
-                  input[field] = ls.slice(0, 500).join('\n') + `\n…[+${ls.length - 500} lines]`;
-                  inputChanged = true;
-                }
-              }
-            }
-            if (inputChanged) { changed = true; return [{ ...b, input }]; }
-          }
-          return [b];
-        });
-        return [changed ? JSON.stringify({ ...ev, message: { ...ev.message, content } }) : line];
-      }
-
-      return [line];
-    });
-  }
-
-  // Try to store history; on QuotaExceededError summarize old lines, then evict other
-  // sessions, retrying at each step. lineCount is always the real count so server
-  // offsets stay correct.
-  function tryStoreHistory(cacheKey, lines, lineCount) {
-    try { localStorage.setItem(cacheKey, JSON.stringify({ lines, lineCount })); return; }
-    catch (e) { if (e.name !== 'QuotaExceededError') { console.error('tryStoreHistory:', e); return; } }
-
-    const KEEP = 500;
-    const summarized = lines.length > KEEP
-      ? [...summarizeOldLines(lines.slice(0, -KEEP)), ...lines.slice(-KEEP)]
-      : summarizeOldLines(lines);
-
-    try { localStorage.setItem(cacheKey, JSON.stringify({ lines: summarized, lineCount })); return; }
-    catch (e) { if (e.name !== 'QuotaExceededError') { console.error('tryStoreHistory after summarize:', e); return; } }
-
-    // Evict all other sessions' history caches then retry
-    const toEvict = [];
+  // Evict the N oldest history_* entries (by ts field), skipping currentKey.
+  function evictOldestSessions(currentKey, n = 2) {
+    const entries = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (k?.startsWith('history_') && k !== cacheKey) toEvict.push(k);
+      if (!k?.startsWith('history_') || k === currentKey) continue;
+      try {
+        const ts = JSON.parse(localStorage.getItem(k))?.ts ?? 0;
+        entries.push({ k, ts });
+      } catch { entries.push({ k, ts: 0 }); }
     }
-    toEvict.forEach(k => localStorage.removeItem(k));
-    console.warn('tryStoreHistory: evicted', toEvict.length, 'other session(s) to free space');
+    entries.sort((a, b) => a.ts - b.ts);
+    const toEvict = entries.slice(0, n);
+    for (const { k } of toEvict) {
+      localStorage.removeItem(k);
+      console.log('[history] evicted', k);
+    }
+    return toEvict.length;
+  }
 
-    try { localStorage.setItem(cacheKey, JSON.stringify({ lines: summarized, lineCount })); }
-    catch (e2) { console.error('tryStoreHistory after evict:', e2); }
+  // Try to store history; on QuotaExceededError:
+  //   1. summarize old lines and retry
+  //   2. evict 2 oldest sessions and retry
+  // lineCount is always the real count so server offsets stay correct.
+  function tryStoreHistory(cacheKey, lines, lineCount) {
+    const byteEst = s => new Blob([s]).size;
+    const ts = Date.now();
+    const raw = JSON.stringify({ lines, lineCount, ts });
+    console.log('[history] tryStoreHistory:', cacheKey, lines.length, 'lines, lineCount=', lineCount, '~', (byteEst(raw)/1024).toFixed(1), 'KB');
+    try { localStorage.setItem(cacheKey, raw); console.log('[history] tryStoreHistory: saved ok'); return; }
+    catch (e) { if (e.name !== 'QuotaExceededError') { console.error('[history] tryStoreHistory:', e); return; } }
+
+    const summarized = lines.length > SUMMARIZE_KEEP
+      ? [...summarizeOldLines(lines.slice(0, -SUMMARIZE_KEEP)), ...lines.slice(-SUMMARIZE_KEEP)]
+      : summarizeOldLines(lines);
+    const sumRaw = JSON.stringify({ lines: summarized, lineCount, ts });
+    console.log('[history] tryStoreHistory: quota exceeded, summarized', lines.length, '→', summarized.length, 'lines,', (byteEst(sumRaw)/1024).toFixed(1), 'KB');
+
+    try { localStorage.setItem(cacheKey, sumRaw); console.log('[history] tryStoreHistory: saved ok (summarized)'); return; }
+    catch (e) { if (e.name !== 'QuotaExceededError') { console.error('[history] tryStoreHistory after summarize:', e); return; } }
+
+    const evicted = evictOldestSessions(cacheKey, 2);
+    if (evicted === 0) { console.warn('[history] tryStoreHistory: nothing to evict, giving up'); return; }
+    try { localStorage.setItem(cacheKey, sumRaw); console.log('[history] tryStoreHistory: saved ok (after eviction)'); return; }
+    catch (e) { console.warn('[history] tryStoreHistory: quota exceeded even after eviction, skipping cache for', cacheKey); }
   }
 
   function saveCurrentCache() {
     const id = get(currentSessionId);
     if (!id || currentLines.length === 0) return;
+    console.log('[history] saveCurrentCache:', id, currentLines.length, 'lines');
     tryStoreHistory('history_' + id, currentLines, currentLines.length);
   }
 
@@ -170,11 +173,15 @@
       const raw = localStorage.getItem(cacheKey);
       if (raw) {
         cached = JSON.parse(raw);
-        if (!('lineCount' in cached)) cached = null;
+        if (!('lineCount' in cached)) { console.warn('[history] loadSessionHistory: invalid cache (no lineCount), ignoring'); cached = null; }
       }
-    } catch (e) { console.error('loadSessionHistory localStorage read:', e); }
+    } catch (e) { console.error('[history] loadSessionHistory: localStorage read error', e); }
 
-    if (cached) applyHistoryLines(cached.lines);
+    console.log('[history] loadSessionHistory', id, '— localStorage cache:', cached ? cached.lines.length + ' lines (lineCount=' + cached.lineCount + ')' : 'none');
+    if (cached) {
+      applyHistoryLines(cached.lines);
+      console.log('[history] loadSessionHistory: applied localStorage cache, messages.length=', cached.lines.length);
+    }
     await fetchAndApplyHistory(id, cached, cacheKey);
   }
 
@@ -182,24 +189,31 @@
     try {
       const offset = cached ? cached.lineCount : null;
       const params = offset ? `?offset=${offset}` : '';
+      console.log('[history] fetchAndApplyHistory', id, '— offset:', offset ?? 'none (full fetch)');
       const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/history${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) return;
+      if (!res.ok) { console.warn('[history] fetchAndApplyHistory: server returned', res.status); return; }
       const data = await res.json();
       const lines = data.lines ?? [];
+      console.log('[history] fetchAndApplyHistory: got', lines.length, 'lines, incremental=', data.incremental, 'totalLines=', data.totalLines);
 
       if (data.incremental && cached) {
         if (lines.length === 0) {
           if (data.totalLines !== undefined && cached.lineCount > data.totalLines) {
+            console.warn('[history] fetchAndApplyHistory: cache lineCount', cached.lineCount, '> server totalLines', data.totalLines, '— re-fetching full');
             await fetchAndApplyHistory(id, null, cacheKey);
+          } else {
+            console.log('[history] fetchAndApplyHistory: no new lines, cache is up to date');
           }
           return;
         }
         const merged = [...cached.lines, ...lines];
+        console.log('[history] fetchAndApplyHistory: merged', cached.lines.length, '+', lines.length, '=', merged.length, 'lines');
         applyHistoryLines(merged);
         tryStoreHistory(cacheKey, merged, merged.length);
       } else {
+        console.log('[history] fetchAndApplyHistory: applying', lines.length, 'lines (full)');
         applyHistoryLines(lines);
         tryStoreHistory(cacheKey, lines, lines.length);
       }
@@ -214,10 +228,11 @@
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${proto}//${location.host}/ws?token=${encodeURIComponent(token)}`);
-    ws.onopen  = () => wsOk.set(true);
-    ws.onclose = () => { wsOk.set(false); setTimeout(connect, 3000); };
+    ws.onopen  = () => { if (!destroyed) wsOk.set(true); };
+    ws.onclose = () => { wsOk.set(false); if (!destroyed) setTimeout(connect, 3000); };
     ws.onerror = () => {};
     ws.onmessage = ({ data }) => {
+      if (destroyed) return;
       let msg;
       try { msg = JSON.parse(data); } catch { return; }
 
@@ -267,7 +282,7 @@
     diffViewCommit = null;
     saveCurrentCache();
 
-    if (get(currentSessionId)) sessionData.set(get(currentSessionId), [...currentLines]);
+    if (get(currentSessionId)) { console.log('[history] switchSession: saving', currentLines.length, 'lines to sessionData for', get(currentSessionId)); sessionData.set(get(currentSessionId), [...currentLines]); }
 
     currentSessionId.set(id);
     currentLines = [];
@@ -291,7 +306,7 @@
     messages.update(ms => [...ms, { id: 'sys-' + ++sysCounter, role: 'system', text }]);
   }
 
-  function handleSlash(text) {
+  async function handleSlash(text) {
     const [cmd, ...rest] = text.trim().split(/\s+/);
     const arg = rest.join(' ');
     switch (cmd) {
@@ -319,6 +334,18 @@
         }
         if (c != null) lines.push(`cost: $${c.toFixed(4)}`);
         sysMsg(lines.length ? lines.join('  ·  ') : 'no usage data yet — complete a turn first');
+        return true;
+      }
+      case '/reload': {
+        const id = get(currentSessionId);
+        if (id && id !== '__new__') {
+          localStorage.removeItem('history_' + id);
+          currentLines = [];
+          messages.set([]);
+          parser.resetTurnState();
+          sysMsg('cache cleared — refetching…');
+          await loadSessionHistory(id);
+        }
         return true;
       }
       case '/btw':
@@ -418,7 +445,21 @@
     </div>
     <button class="hc-toggle" onclick={() => highContrast.update(v => !v)}
       title="Toggle high contrast" aria-pressed={$highContrast}>HC</button>
-    <button class="logout" onclick={onLogout}>logout</button>
+    <div class="user-menu-wrap">
+      <button class="user-btn" onclick={() => userMenuOpen = !userMenuOpen}>{username}</button>
+      {#if userMenuOpen}
+        <div class="user-menu">
+          {#each accounts as acc, i}
+            {#if i !== activeIdx}
+              <button onclick={() => { userMenuOpen = false; onSwitch?.(i); }}>{acc.username}</button>
+            {/if}
+          {/each}
+          {#if accounts.length > 1}<div class="menu-sep"></div>{/if}
+          <button onclick={() => { userMenuOpen = false; onAddAccount?.(); }}>+ add account</button>
+          <button class="logout-btn" onclick={() => { userMenuOpen = false; onLogout(); }}>logout</button>
+        </div>
+      {/if}
+    </div>
   </header>
 
   <div class="body">
@@ -455,7 +496,7 @@
           onClose={() => fileViewPath = null}
         />
       {:else}
-        <MessageList hostStatus={$hostStatus} />
+        <MessageList hostStatus={$hostStatus} {historyLoading} />
         <ChatInput
           disabled={inputDisabled}
           placeholder={inputPlaceholder}
@@ -501,11 +542,27 @@
   .dot.on { color: #5a5; }
   .dot.ai.on { color: var(--accent-light); }
   .cost { font-size: .72rem; color: var(--text-dim); }
-  .logout {
+  .user-menu-wrap { position: relative; }
+  .user-btn {
     background: none; border: none; color: var(--text-dim);
     cursor: pointer; font: inherit; font-size: .72rem; padding: 0;
   }
-  .logout:hover { color: var(--text-muted); }
+  .user-btn:hover { color: var(--text-muted); }
+  .user-menu {
+    position: absolute; right: 0; top: calc(100% + 6px);
+    background: var(--bg-elevated); border: 1px solid var(--border);
+    border-radius: 5px; padding: 4px; min-width: 90px;
+    box-shadow: 0 4px 12px rgba(0,0,0,.3); z-index: 100;
+  }
+  .user-menu button {
+    display: block; width: 100%; text-align: left;
+    background: none; border: none; color: var(--text-muted);
+    cursor: pointer; font: inherit; font-size: .78rem;
+    padding: 5px 10px; border-radius: 3px;
+  }
+  .user-menu button:hover { background: var(--bg-secondary); color: var(--text); }
+  .user-menu .logout-btn { color: var(--text-dim); }
+  .menu-sep { height: 1px; background: var(--border); margin: 3px 6px; }
   .hc-toggle {
     background: none; border: 1px solid var(--border); color: var(--text-dim);
     cursor: pointer; font: inherit; font-size: .72rem;
