@@ -7,6 +7,7 @@ import jwt from 'jsonwebtoken';
 import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import { RpcClient } from './rpc.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -45,12 +46,9 @@ const clients = new Set();
 const agents = new Map();               // sessionId → { active: bool, streaming: bool }
 let sessionCache = [];                  // from last session_list from host
 let hostCwd = null;                     // host's process.cwd() from last session_list
-const pendingHistoryHttp = new Map();   // sessionId → res[]
-const pendingDeleteHttp = new Map();    // sessionId → res
-const pendingFsHttp     = new Map();   // key → res
-const pendingFileHttp   = new Map();   // key → res
-const pendingGitLogHttp  = new Map();  // sessionId → res
-const pendingGitDiffHttp = new Map();  // key → res  (key = sessionId+':'+commit)
+const pendingHistoryHttp = new Map();   // sessionId → res[]  (special: coalescing + retry)
+const pendingDeleteHttp = new Map();    // sessionId → res    (special: drained by session_list)
+const rpc = new RpcClient();            // fs, file, git/log, git/diff
 
 const app = express();
 app.use(express.json());
@@ -153,81 +151,44 @@ app.get('/api/sessions/:id/history', requireJwt, (req, res) => {
 
 // ── File system listing ───────────────────────────────────────────────────────
 app.get('/api/sessions/:id/fs', requireJwt, (req, res) => {
-  const id = req.params.id;
-  const queryPath = req.query.path || null;
-  const key = id + ':' + (queryPath || '');
-
-  if (!hostWs || hostWs.readyState !== WebSocket.OPEN) {
+  if (!hostWs || hostWs.readyState !== WebSocket.OPEN)
     return res.status(503).json({ error: 'Host not connected' });
-  }
-
-  const timer = setTimeout(() => {
-    if (pendingFsHttp.get(key) === res) {
-      pendingFsHttp.delete(key);
-      if (!res.headersSent) res.status(504).json({ error: 'fs request timed out' });
-    }
-  }, 30000);
-  res.on('close', () => clearTimeout(timer));
-
-  pendingFsHttp.set(key, res);
-  hostWs.send(JSON.stringify({ type: 'get_fs', sessionId: id, path: queryPath }));
+  const id = rpc.call(hostWs, 'get_fs',
+    { sessionId: req.params.id, path: req.query.path ?? null },
+    (err, result) => { if (!res.headersSent) err ? res.status(504).json({ error: err.message }) : res.json(result); });
+  res.on('close', () => rpc.cancel(id));
 });
 
 // ── File content ──────────────────────────────────────────────────────────────
 app.get('/api/sessions/:id/file', requireJwt, (req, res) => {
-  const id = req.params.id;
-  const filePath = req.query.path;
-  const key = id + ':' + filePath;
-
-  if (!hostWs || hostWs.readyState !== WebSocket.OPEN) {
+  if (!hostWs || hostWs.readyState !== WebSocket.OPEN)
     return res.status(503).json({ error: 'Host not connected' });
-  }
-
-  const timer = setTimeout(() => {
-    if (pendingFileHttp.get(key) === res) {
-      pendingFileHttp.delete(key);
-      if (!res.headersSent) res.status(504).json({ error: 'file request timed out' });
-    }
-  }, 30000);
-  res.on('close', () => clearTimeout(timer));
-
-  pendingFileHttp.set(key, res);
-  hostWs.send(JSON.stringify({ type: 'get_file', sessionId: id, path: filePath }));
+  const id = rpc.call(hostWs, 'get_file',
+    { sessionId: req.params.id, path: req.query.path },
+    (err, result) => { if (!res.headersSent) err ? res.status(504).json({ error: err.message }) : res.json(result); });
+  res.on('close', () => rpc.cancel(id));
 });
 
 // ── Git log ───────────────────────────────────────────────────────────────────
 app.get('/api/sessions/:id/git/log', requireJwt, (req, res) => {
-  const id = req.params.id;
   if (!hostWs || hostWs.readyState !== WebSocket.OPEN)
     return res.status(503).json({ error: 'Host not connected' });
-  const timer = setTimeout(() => {
-    if (pendingGitLogHttp.get(id) === res) {
-      pendingGitLogHttp.delete(id);
-      if (!res.headersSent) res.status(504).json({ error: 'git log timed out' });
-    }
-  }, 30000);
-  res.on('close', () => clearTimeout(timer));
-  pendingGitLogHttp.set(id, res);
-  hostWs.send(JSON.stringify({ type: 'get_git_log', sessionId: id }));
+  const id = rpc.call(hostWs, 'get_git_log',
+    { sessionId: req.params.id },
+    (err, result) => { if (!res.headersSent) err ? res.status(504).json({ error: err.message }) : res.json(result); });
+  res.on('close', () => rpc.cancel(id));
 });
 
 // ── Git diff ──────────────────────────────────────────────────────────────────
 app.get('/api/sessions/:id/git/diff', requireJwt, (req, res) => {
-  const id = req.params.id;
   const commit = req.query.commit;
   if (!commit) return res.status(400).json({ error: 'commit required' });
   if (!hostWs || hostWs.readyState !== WebSocket.OPEN)
     return res.status(503).json({ error: 'Host not connected' });
-  const key = id + ':' + commit;
-  const timer = setTimeout(() => {
-    if (pendingGitDiffHttp.get(key) === res) {
-      pendingGitDiffHttp.delete(key);
-      if (!res.headersSent) res.status(504).json({ error: 'git diff timed out' });
-    }
-  }, 30000);
-  res.on('close', () => clearTimeout(timer));
-  pendingGitDiffHttp.set(key, res);
-  hostWs.send(JSON.stringify({ type: 'get_git_diff', sessionId: id, commit }));
+  const id = rpc.call(hostWs, 'get_git_diff',
+    { sessionId: req.params.id, commit },
+    (err, result) => { if (!res.headersSent) err ? res.status(504).json({ error: err.message }) : res.json(result); });
+  res.on('close', () => rpc.cancel(id));
 });
 
 // ── Create session ────────────────────────────────────────────────────────────
@@ -315,6 +276,8 @@ wss.on('connection', (ws, req) => {
       let ev;
       try { ev = JSON.parse(data.toString()); } catch {}
 
+      if (rpc.handle(ev)) return;
+
       if (ev?.type === 'log') {
         appendLog(ev);
         const data = ev.data ? ' ' + JSON.stringify(ev.data) : '';
@@ -381,54 +344,11 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
-      if (ev?.type === 'fs_result') {
-        const key = ev.sessionId + ':' + (ev.path || '');
-        const res = pendingFsHttp.get(key);
-        if (res && !res.headersSent) {
-          ev.error ? res.status(500).json({ error: ev.error }) : res.json({ entries: ev.entries });
-          pendingFsHttp.delete(key);
-        }
-        return;
-      }
-
-      if (ev?.type === 'file_result') {
-        const key = ev.sessionId + ':' + ev.path;
-        const res = pendingFileHttp.get(key);
-        if (res && !res.headersSent) {
-          ev.content !== null
-            ? res.json({ content: ev.content })
-            : res.status(422).json({ error: ev.error || 'unreadable' });
-          pendingFileHttp.delete(key);
-        }
-        return;
-      }
-
-      if (ev?.type === 'git_log_result') {
-        const res = pendingGitLogHttp.get(ev.sessionId);
-        if (res && !res.headersSent) {
-          ev.error
-            ? res.status(500).json({ error: ev.error })
-            : res.json({ commits: ev.commits, branch: ev.branch ?? null });
-          pendingGitLogHttp.delete(ev.sessionId);
-        }
-        return;
-      }
-
-      if (ev?.type === 'git_diff_result') {
-        const key = ev.sessionId + ':' + ev.commit;
-        const res = pendingGitDiffHttp.get(key);
-        if (res && !res.headersSent) {
-          ev.diff !== null
-            ? res.json({ diff: ev.diff })
-            : res.status(422).json({ error: ev.error || 'diff failed' });
-          pendingGitDiffHttp.delete(key);
-        }
-        return;
-      }
     });
 
     ws.on('close', () => {
       hostWs = null;
+      rpc.flush();
       // Keep agents map — host process may still be alive (transient WS drop).
       // States will be corrected by agent_event messages when host reconnects.
       console.log('[server] host disconnected');

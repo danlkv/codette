@@ -8,6 +8,7 @@ import { readFileSync, readdirSync, statSync, unlinkSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { ClaudeRenderer, toolSummary } from './renderer.js';
+import { RpcServer } from './rpc.js';
 
 const SERVER_URL = process.env.SERVER_URL || 'ws://localhost:3000';
 const HOST_KEY   = process.env.HOST_KEY   || 'host-key-change-me';
@@ -256,6 +257,53 @@ function spawnClaude(extraArgs = [], sessionIdHint = null, overrideCwd = null) {
   return agentEntry;
 }
 
+// ── RPC handlers (request/response over WS) ───────────────────────────────────
+const rpc = new RpcServer();
+
+rpc.register('get_fs', (msg) => {
+  const sessionCwd = getSessionCwd(msg.sessionId);
+  const path = msg.path || sessionCwd;
+  if (!path || !sessionCwd || !path.startsWith(sessionCwd)) throw new Error('path outside session cwd');
+  const entries = readdirSync(path, { withFileTypes: true })
+    .map(e => ({ name: e.name, path: join(path, e.name), isDir: e.isDirectory() }))
+    .sort((a, b) => (a.isDir !== b.isDir ? (a.isDir ? -1 : 1) : a.name.localeCompare(b.name)));
+  log('info', 'get_fs', { path, entries: entries.length });
+  return { entries };
+});
+
+rpc.register('get_file', (msg) => {
+  const sessionCwd = getSessionCwd(msg.sessionId);
+  if (!msg.path || !sessionCwd || !msg.path.startsWith(sessionCwd)) throw new Error('path outside session cwd');
+  const buf = readFileSync(msg.path);
+  if (buf.length > 512 * 1024) throw new Error('file too large');
+  if (buf.includes(0)) throw new Error('binary file');
+  log('info', 'get_file', { path: msg.path, size: buf.length });
+  return { content: buf.toString('utf8') };
+});
+
+rpc.register('get_git_log', (msg) => {
+  const sessionCwd = getSessionCwd(msg.sessionId);
+  if (!sessionCwd) throw new Error('no cwd for session');
+  const logOut = execSync('git log --format="%H|%s|%aI|%an" -50', { cwd: sessionCwd }).toString().trim();
+  const commits = logOut ? logOut.split('\n').map(line => {
+    const [hash, subject, date, author] = line.split('|');
+    return { hash: hash?.slice(0, 7), subject, date, author };
+  }) : [];
+  let branch = null;
+  try { branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: sessionCwd }).toString().trim(); } catch {}
+  log('info', 'get_git_log', { commits: commits.length, branch });
+  return { commits, branch };
+});
+
+rpc.register('get_git_diff', (msg) => {
+  const sessionCwd = getSessionCwd(msg.sessionId);
+  if (!sessionCwd) throw new Error('no cwd for session');
+  const MAX = 256 * 1024;
+  const diff = execSync(`git show --unified=3 ${msg.commit}`, { cwd: sessionCwd, maxBuffer: MAX + 1 }).toString();
+  log('info', 'get_git_diff', { commit: msg.commit, size: diff.length });
+  return { diff: diff.slice(0, MAX) };
+});
+
 // ── Server connection ─────────────────────────────────────────────────────────
 let ws;
 
@@ -278,10 +326,12 @@ function connect() {
     if (Object.keys(states).length > 0) ws.send(JSON.stringify({ type: 'agent_event', states }));
   });
 
-  ws.on('message', (data) => {
+  ws.on('message', async (data) => {
     const raw = data.toString();
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
+
+    if (await rpc.handle(ws, msg)) return;
 
     if (msg.type === 'list_sessions') {
       log('info', 'list_sessions requested');
@@ -353,88 +403,6 @@ function connect() {
       }
       if (ws?.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'history', sessionId, lines, totalLines }));
-      }
-      return;
-    }
-
-    if (msg.type === 'get_fs') {
-      const sessionCwd = getSessionCwd(msg.sessionId);
-      const path = msg.path || sessionCwd;
-      try {
-        if (!path || !sessionCwd || !path.startsWith(sessionCwd)) {
-          throw new Error('path outside session cwd');
-        }
-        const rawEntries = readdirSync(path, { withFileTypes: true });
-        const entries = rawEntries
-          .map(entry => ({ name: entry.name, path: join(path, entry.name), isDir: entry.isDirectory() }))
-          .sort((a, b) => {
-            if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-            return a.name.localeCompare(b.name);
-          });
-        log('info', 'get_fs', { path, entries: entries.length });
-        ws.send(JSON.stringify({ type: 'fs_result', sessionId: msg.sessionId, path, entries }));
-      } catch (e) {
-        log('error', `get_fs failed: ${e.message}`, { path });
-        ws.send(JSON.stringify({ type: 'fs_result', sessionId: msg.sessionId, path, entries: [], error: e.message }));
-      }
-      return;
-    }
-
-    if (msg.type === 'get_file') {
-      const sessionCwd = getSessionCwd(msg.sessionId);
-      try {
-        if (!msg.path || !sessionCwd || !msg.path.startsWith(sessionCwd)) {
-          throw new Error('path outside session cwd');
-        }
-        const buf = readFileSync(msg.path);
-        if (buf.length > 512 * 1024) {
-          log('warn', `get_file: file too large`, { path: msg.path, size: buf.length });
-          ws.send(JSON.stringify({ type: 'file_result', sessionId: msg.sessionId, path: msg.path, content: null, error: 'file too large' }));
-        } else if (buf.includes(0)) {
-          log('warn', `get_file: binary file`, { path: msg.path });
-          ws.send(JSON.stringify({ type: 'file_result', sessionId: msg.sessionId, path: msg.path, content: null, error: 'binary file' }));
-        } else {
-          log('info', 'get_file', { path: msg.path, size: buf.length });
-          ws.send(JSON.stringify({ type: 'file_result', sessionId: msg.sessionId, path: msg.path, content: buf.toString('utf8') }));
-        }
-      } catch (e) {
-        log('error', `get_file failed: ${e.message}`, { path: msg.path });
-        ws.send(JSON.stringify({ type: 'file_result', sessionId: msg.sessionId, path: msg.path, content: null, error: e.message }));
-      }
-      return;
-    }
-
-    if (msg.type === 'get_git_log') {
-      const sessionCwd = getSessionCwd(msg.sessionId);
-      try {
-        if (!sessionCwd) throw new Error('no cwd for session');
-        const logOut = execSync('git log --format="%H|%s|%aI|%an" -50', { cwd: sessionCwd }).toString().trim();
-        const commits = logOut ? logOut.split('\n').map(line => {
-          const [hash, subject, date, author] = line.split('|');
-          return { hash: hash?.slice(0, 7), subject, date, author };
-        }) : [];
-        let branch = null;
-        try { branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: sessionCwd }).toString().trim(); } catch {}
-        log('info', 'get_git_log', { commits: commits.length, branch });
-        ws.send(JSON.stringify({ type: 'git_log_result', sessionId: msg.sessionId, commits, branch }));
-      } catch (e) {
-        log('error', `get_git_log failed: ${e.message}`);
-        ws.send(JSON.stringify({ type: 'git_log_result', sessionId: msg.sessionId, commits: [], error: e.message }));
-      }
-      return;
-    }
-
-    if (msg.type === 'get_git_diff') {
-      const sessionCwd = getSessionCwd(msg.sessionId);
-      try {
-        if (!sessionCwd) throw new Error('no cwd for session');
-        const MAX = 256 * 1024;
-        const diff = execSync(`git show --unified=3 ${msg.commit}`, { cwd: sessionCwd, maxBuffer: MAX + 1 }).toString();
-        log('info', 'get_git_diff', { commit: msg.commit, size: diff.length });
-        ws.send(JSON.stringify({ type: 'git_diff_result', sessionId: msg.sessionId, commit: msg.commit, diff: diff.slice(0, MAX) }));
-      } catch (e) {
-        log('error', `get_git_diff failed: ${e.message}`, { commit: msg.commit });
-        ws.send(JSON.stringify({ type: 'git_diff_result', sessionId: msg.sessionId, commit: msg.commit, diff: null, error: e.message }));
       }
       return;
     }
