@@ -13,9 +13,15 @@ function truncStr(s, limit = TRUNC) {
 //   - user(tool_results): truncate content, strip outer transcript metadata
 //   - assistant: drop thinking blocks, truncate text + tool_use inputs, strip outer metadata
 export function summarizeOldLines(lines) {
+  let seenAiTitle = false;
   return lines.flatMap(line => {
     let ev;
     try { ev = JSON.parse(line); } catch { return [line]; }
+
+    if (ev.type === 'ai-title') {
+      if (!seenAiTitle) { seenAiTitle = true; return [line]; }
+      return [];
+    }
 
     if (ev.type === 'user' && Array.isArray(ev.message?.content)) {
       const content = ev.message.content.map(b => {

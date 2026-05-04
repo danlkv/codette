@@ -41,6 +41,7 @@
   let diffViewCommit = $state(null);
   let historyLoading = $state(true);
   let currentLines = [];       // raw jsonl lines for current session (for cache writes)
+  let sessionTitle = $state('');
   let awaitingNewSession = false;
   let pendingCwd = null;
 
@@ -75,6 +76,7 @@
   });
   onDestroy(() => {
     destroyed = true;
+    saveCurrentCache();
     window.removeEventListener('beforeunload', saveCurrentCache);
     window.removeEventListener('popstate', onPopState);
     ws?.close();
@@ -135,10 +137,10 @@
   //   1. summarize old lines and retry
   //   2. evict 2 oldest sessions and retry
   // lineCount is always the real count so server offsets stay correct.
-  function tryStoreHistory(cacheKey, lines, lineCount) {
+  function tryStoreHistory(cacheKey, lines, lineCount, title = '') {
     const byteEst = s => new Blob([s]).size;
     const ts = Date.now();
-    const raw = JSON.stringify({ lines, lineCount, ts });
+    const raw = JSON.stringify({ lines, lineCount, ts, title });
     console.log('[history] tryStoreHistory:', cacheKey, lines.length, 'lines, lineCount=', lineCount, '~', (byteEst(raw)/1024).toFixed(1), 'KB');
     try { localStorage.setItem(cacheKey, raw); console.log('[history] tryStoreHistory: saved ok'); return; }
     catch (e) { if (e.name !== 'QuotaExceededError') { console.error('[history] tryStoreHistory:', e); return; } }
@@ -162,7 +164,7 @@
     const id = get(currentSessionId);
     if (!id || currentLines.length === 0) return;
     console.log('[history] saveCurrentCache:', id, currentLines.length, 'lines');
-    tryStoreHistory('history_' + id, currentLines, currentLines.length);
+    tryStoreHistory('history_' + id, currentLines, currentLines.length, sessionTitle);
   }
 
   async function loadSessionHistory(id) {
@@ -179,6 +181,7 @@
 
     console.log('[history] loadSessionHistory', id, '— localStorage cache:', cached ? cached.lines.length + ' lines (lineCount=' + cached.lineCount + ')' : 'none');
     if (cached) {
+      if (cached.title) sessionTitle = cached.title;
       applyHistoryLines(cached.lines);
       console.log('[history] loadSessionHistory: applied localStorage cache, messages.length=', cached.lines.length);
     }
@@ -211,18 +214,23 @@
         const merged = [...cached.lines, ...lines];
         console.log('[history] fetchAndApplyHistory: merged', cached.lines.length, '+', lines.length, '=', merged.length, 'lines');
         applyHistoryLines(merged);
-        tryStoreHistory(cacheKey, merged, merged.length);
+        tryStoreHistory(cacheKey, merged, merged.length, sessionTitle);
       } else {
         console.log('[history] fetchAndApplyHistory: applying', lines.length, 'lines (full)');
         applyHistoryLines(lines);
-        tryStoreHistory(cacheKey, lines, lines.length);
+        tryStoreHistory(cacheKey, lines, lines.length, sessionTitle);
       }
     } catch (e) { console.error('fetchAndApplyHistory:', e); }
   }
 
   function applyHistoryLines(lines) {
-    currentLines = [...lines];
-    messages.set(parser.applyLines(lines));
+    const filtered = [];
+    for (const line of lines) {
+      try { const ev = JSON.parse(line); if (ev.type === 'ai-title') { if (ev.aiTitle) sessionTitle = ev.aiTitle; continue; } } catch {}
+      filtered.push(line);
+    }
+    currentLines = filtered;
+    messages.set(parser.applyLines(filtered));
   }
 
   function connect() {
@@ -243,6 +251,7 @@
       else if (msg.type === 'claude_line') {
         const { sessionId, line } = msg;
         if (sessionId === get(currentSessionId)) {
+          try { const ev = JSON.parse(line); if (ev.type === 'ai-title') { if (ev.aiTitle) sessionTitle = ev.aiTitle; return; } } catch {}
           currentLines.push(line);
           parser.parseLine(line, true);
         } else {
@@ -286,6 +295,7 @@
 
     currentSessionId.set(id);
     currentLines = [];
+    sessionTitle = '';
     parser.resetTurnState();
 
     // Show in-memory cache only if there's no localStorage cache that will
@@ -435,6 +445,7 @@
     <button class="sidebar-toggle" onclick={() => sidebarOpen = !sidebarOpen}
       title="Toggle sessions" aria-pressed={sidebarOpen}>☰</button>
     <span class="brand">claude</span>
+    <span class="session-title">{sessionTitle}</span>
     <div class="indicators">
       <span class="dot" class:on={$hostStatus === 'connected'}>host</span>
       <span class="dot" class:on={$wsOk}>ws</span>
@@ -536,7 +547,13 @@
   }
   .sidebar-toggle:hover { color: var(--text-muted); }
   .sidebar-toggle[aria-pressed="true"] { color: var(--accent); }
-  .brand { color: var(--accent); font-weight: 600; font-size: .88rem; flex: 1; }
+  .brand { color: var(--accent); font-weight: 600; font-size: .88rem; }
+  .session-title {
+    flex: 1; text-align: center;
+    font-size: .78rem; color: var(--text-dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    min-width: 0;
+  }
   .indicators { display: flex; align-items: center; gap: 8px; }
   .dot { font-size: .72rem; color: var(--text-dim); }
   .dot.on { color: #5a5; }
