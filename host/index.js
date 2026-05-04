@@ -10,9 +10,9 @@ import { join } from 'path';
 import { ClaudeRenderer, toolSummary } from './renderer.js';
 import { RpcServer } from './rpc.js';
 
-const SERVER_URL      = process.env.SERVER_URL      || 'ws://localhost:3000';
-const HOST_USERNAME   = process.env.HOST_USERNAME   || process.env.CHAT_USERNAME || 'admin';
-const HOST_PASSWORD   = process.env.HOST_PASSWORD   || process.env.CHAT_PASSWORD || 'changeme';
+const SERVER_URL    = process.env.SERVER_URL    || 'ws://localhost:3000';
+const HOST_USERNAME = process.env.HOST_USERNAME || process.env.CHAT_USERNAME || 'admin';
+const HOST_TOKEN    = process.env.HOST_KEY      || 'host-key-change-me';
 
 // ── ANSI helpers ──────────────────────────────────────────────────────────────
 const A = {
@@ -309,7 +309,7 @@ rpc.register('get_git_diff', (msg) => {
 let ws;
 
 function connect() {
-  ws = new WebSocket(`${SERVER_URL}/host?username=${encodeURIComponent(HOST_USERNAME)}&password=${encodeURIComponent(HOST_PASSWORD)}`);
+  ws = new WebSocket(`${SERVER_URL}/host?username=${encodeURIComponent(HOST_USERNAME)}&token=${encodeURIComponent(HOST_TOKEN)}`);
 
   ws.on('open', () => {
     // Flush buffered logs now that we're connected

@@ -34,12 +34,20 @@ function loadUsers() {
   try {
     if (process.env.USERS) return JSON.parse(process.env.USERS);
   } catch {}
-  return [{ username: process.env.CHAT_USERNAME || 'admin', password: process.env.CHAT_PASSWORD || 'changeme' }];
+  return [{
+    username:  process.env.CHAT_USERNAME || 'admin',
+    password:  process.env.CHAT_PASSWORD || 'changeme',
+    hostToken: process.env.HOST_KEY      || 'host-key-change-me',
+  }];
 }
 const USERS = loadUsers();
 
 function findUser(username, password) {
   return USERS.find(u => u.username === username && u.password === password) ?? null;
+}
+
+function findUserByHostToken(username, hostToken) {
+  return USERS.find(u => u.username === username && u.hostToken === hostToken) ?? null;
 }
 
 // ── Log buffer ────────────────────────────────────────────────────────────────
@@ -259,9 +267,9 @@ wss.on('connection', (ws, req) => {
 
   // ── Host connection ────────────────────────────────────────────────────────
   if (url.pathname === '/host') {
-    const username = url.searchParams.get('username');
-    const password = url.searchParams.get('password');
-    if (!findUser(username, password)) { ws.close(1008, 'Unauthorized'); return; }
+    const username  = url.searchParams.get('username');
+    const hostToken = url.searchParams.get('token');
+    if (!findUserByHostToken(username, hostToken)) { ws.close(1008, 'Unauthorized'); return; }
     if (hosts.has(username)) { ws.close(1008, 'Host already connected'); return; }
 
     const host = new HostContext(username, ws);

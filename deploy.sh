@@ -44,5 +44,5 @@ else
   echo "WARN: login endpoint returned $code — containers may still be starting"
 fi
 
-pass=$(ssh "$REMOTE" "grep ^CHAT_PASSWORD ${REMOTE_DIR}/.env | cut -d= -f2")
-echo "Host: HOST_USERNAME=admin HOST_PASSWORD=${pass} SERVER_URL=wss://${DOMAIN} node host/index.js"
+key=$(ssh "$REMOTE" "grep ^HOST_KEY ${REMOTE_DIR}/.env | cut -d= -f2")
+echo "Host: HOST_USERNAME=admin HOST_KEY=${key} SERVER_URL=wss://${DOMAIN} node host/index.js"
