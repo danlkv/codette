@@ -45,4 +45,4 @@ else
 fi
 
 key=$(ssh "$REMOTE" "grep ^HOST_KEY ${REMOTE_DIR}/.env | cut -d= -f2")
-echo "Host: HOST_USERNAME=admin HOST_KEY=${key} SERVER_URL=wss://${DOMAIN} node host/index.js"
+echo "Host: HOST_KEY=${key} CLIENT_USERNAME=<hostname> CLIENT_PASSWORD=<password> SERVER_URL=wss://${DOMAIN} node host/index.js"

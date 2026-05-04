@@ -5,14 +5,15 @@
 import { spawn, execSync } from 'child_process';
 import { WebSocket } from 'ws';
 import { readFileSync, readdirSync, statSync, unlinkSync } from 'fs';
-import { homedir } from 'os';
+import { homedir, hostname } from 'os';
 import { join } from 'path';
 import { ClaudeRenderer, toolSummary } from './renderer.js';
 import { RpcServer } from './rpc.js';
 
-const SERVER_URL    = process.env.SERVER_URL    || 'ws://localhost:3000';
-const HOST_USERNAME = process.env.HOST_USERNAME || process.env.CHAT_USERNAME || 'admin';
-const HOST_TOKEN    = process.env.HOST_KEY      || 'host-key-change-me';
+const SERVER_URL       = process.env.SERVER_URL       || 'ws://localhost:3000';
+const CLIENT_USERNAME  = process.env.CLIENT_USERNAME  || hostname();
+const CLIENT_PASSWORD  = process.env.CLIENT_PASSWORD  || 'changeme';
+const HOST_TOKEN       = process.env.HOST_KEY         || 'host-key-change-me';
 
 // ── ANSI helpers ──────────────────────────────────────────────────────────────
 const A = {
@@ -309,7 +310,7 @@ rpc.register('get_git_diff', (msg) => {
 let ws;
 
 function connect() {
-  ws = new WebSocket(`${SERVER_URL}/host?username=${encodeURIComponent(HOST_USERNAME)}&token=${encodeURIComponent(HOST_TOKEN)}`);
+  ws = new WebSocket(`${SERVER_URL}/host?token=${encodeURIComponent(HOST_TOKEN)}&clientUsername=${encodeURIComponent(CLIENT_USERNAME)}&clientPassword=${encodeURIComponent(CLIENT_PASSWORD)}`);
 
   ws.on('open', () => {
     // Flush buffered logs now that we're connected

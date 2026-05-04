@@ -26,29 +26,8 @@ function stripThinking(lines) {
 }
 
 const JWT_SECRET = process.env.JWT_SECRET || 'jwt-secret-change-me';
+const HOST_KEY   = process.env.HOST_KEY   || 'host-key-change-me';
 const PORT       = parseInt(process.env.PORT || '3000', 10);
-
-// User store — supports USERS JSON array or single CHAT_USERNAME/CHAT_PASSWORD fallback.
-// Each entry: { username, password }
-function loadUsers() {
-  try {
-    if (process.env.USERS) return JSON.parse(process.env.USERS);
-  } catch {}
-  return [{
-    username:  process.env.CHAT_USERNAME || 'admin',
-    password:  process.env.CHAT_PASSWORD || 'changeme',
-    hostToken: process.env.HOST_KEY      || 'host-key-change-me',
-  }];
-}
-const USERS = loadUsers();
-
-function findUser(username, password) {
-  return USERS.find(u => u.username === username && u.password === password) ?? null;
-}
-
-function findUserByHostToken(username, hostToken) {
-  return USERS.find(u => u.username === username && u.hostToken === hostToken) ?? null;
-}
 
 // ── Log buffer ────────────────────────────────────────────────────────────────
 const LOG_MAX   = 500;
@@ -61,8 +40,9 @@ function appendLog(entry) {
 
 // ── Per-host state ────────────────────────────────────────────────────────────
 class HostContext {
-  constructor(username, ws) {
-    this.username = username;
+  constructor(clientUsername, clientPassword, ws) {
+    this.clientUsername = clientUsername;
+    this.clientPassword = clientPassword;
     this.ws = ws;
     this.agents = new Map();          // sessionId → { active, streaming }
     this.sessionCache = [];
@@ -82,7 +62,7 @@ class HostContext {
 
   broadcast(msg) {
     const data = JSON.stringify(msg);
-    for (const ws of clients.get(this.username) ?? []) {
+    for (const ws of clients.get(this.clientUsername) ?? []) {
       if (ws.readyState === WebSocket.OPEN) ws.send(data);
     }
   }
@@ -123,7 +103,7 @@ function requireJwt(req, res, next) {
 }
 
 function requireHost(req, res, next) {
-  const host = hosts.get(req.user.username);
+  const host = hosts.get(req.user.username);  // keyed by clientUsername
   if (!host) return res.status(503).json({ error: 'Host not connected' });
   req.host = host;
   next();
@@ -132,7 +112,8 @@ function requireHost(req, res, next) {
 // ── Login ─────────────────────────────────────────────────────────────────────
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body || {};
-  if (findUser(username, password)) {
+  const host = [...hosts.values()].find(h => h.clientUsername === username && h.clientPassword === password);
+  if (host) {
     const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ token });
   } else {
@@ -142,7 +123,7 @@ app.post('/api/login', (req, res) => {
 
 // ── Sessions list ─────────────────────────────────────────────────────────────
 app.get('/api/sessions', requireJwt, (req, res) => {
-  const host = hosts.get(req.user.username);
+  const host = hosts.get(req.user.username);  // clientUsername from JWT
   res.json({ sessions: host ? host.enrichSessions() : [], hostCwd: host?.hostCwd ?? null });
 });
 
@@ -267,14 +248,15 @@ wss.on('connection', (ws, req) => {
 
   // ── Host connection ────────────────────────────────────────────────────────
   if (url.pathname === '/host') {
-    const username  = url.searchParams.get('username');
-    const hostToken = url.searchParams.get('token');
-    if (!findUserByHostToken(username, hostToken)) { ws.close(1008, 'Unauthorized'); return; }
-    if (hosts.has(username)) { ws.close(1008, 'Host already connected'); return; }
+    if (url.searchParams.get('token') !== HOST_KEY) { ws.close(1008, 'Unauthorized'); return; }
+    const clientUsername = url.searchParams.get('clientUsername');
+    const clientPassword = url.searchParams.get('clientPassword');
+    if (!clientUsername || !clientPassword) { ws.close(1008, 'clientUsername and clientPassword required'); return; }
+    if (hosts.has(clientUsername)) { ws.close(1008, 'Host already connected for this username'); return; }
 
-    const host = new HostContext(username, ws);
-    hosts.set(username, host);
-    console.log(`[server] host connected: ${username} (${hosts.size} total)`);
+    const host = new HostContext(clientUsername, clientPassword, ws);
+    hosts.set(clientUsername, host);
+    console.log(`[server] host connected: ${clientUsername} (${hosts.size} total)`);
 
     ws.send(JSON.stringify({ type: 'list_sessions' }));
     host.broadcast({ type: 'host_status', connected: true });
