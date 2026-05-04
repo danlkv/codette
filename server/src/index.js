@@ -105,7 +105,7 @@ function requireJwt(req, res, next) {
 function requireHost(req, res, next) {
   const host = hosts.get(req.user.username);  // keyed by clientUsername
   if (!host) return res.status(503).json({ error: 'Host not connected' });
-  req.host = host;
+  req.claudeHost = host;
   next();
 }
 
@@ -129,7 +129,7 @@ app.get('/api/sessions', requireJwt, (req, res) => {
 
 // ── Session history ───────────────────────────────────────────────────────────
 app.get('/api/sessions/:id/history', requireJwt, requireHost, (req, res) => {
-  const host = req.host;
+  const host = req.claudeHost;
   const id = req.params.id;
   const offsetStr = req.query.offset;
   const offset = offsetStr !== undefined ? Number(offsetStr) : null;
@@ -164,48 +164,48 @@ app.get('/api/sessions/:id/history', requireJwt, requireHost, (req, res) => {
 
 // ── File system listing ───────────────────────────────────────────────────────
 app.get('/api/sessions/:id/fs', requireJwt, requireHost, (req, res) => {
-  const rid = req.host.rpc.call(req.host.ws, 'get_fs',
+  const rid = req.claudeHost.rpc.call(req.claudeHost.ws, 'get_fs',
     { sessionId: req.params.id, path: req.query.path ?? null },
     (err, result) => { if (!res.headersSent) err ? res.status(504).json({ error: err.message }) : res.json(result); });
-  res.on('close', () => req.host.rpc.cancel(rid));
+  res.on('close', () => req.claudeHost.rpc.cancel(rid));
 });
 
 // ── File content ──────────────────────────────────────────────────────────────
 app.get('/api/sessions/:id/file', requireJwt, requireHost, (req, res) => {
-  const rid = req.host.rpc.call(req.host.ws, 'get_file',
+  const rid = req.claudeHost.rpc.call(req.claudeHost.ws, 'get_file',
     { sessionId: req.params.id, path: req.query.path },
     (err, result) => { if (!res.headersSent) err ? res.status(504).json({ error: err.message }) : res.json(result); });
-  res.on('close', () => req.host.rpc.cancel(rid));
+  res.on('close', () => req.claudeHost.rpc.cancel(rid));
 });
 
 // ── Git log ───────────────────────────────────────────────────────────────────
 app.get('/api/sessions/:id/git/log', requireJwt, requireHost, (req, res) => {
-  const rid = req.host.rpc.call(req.host.ws, 'get_git_log',
+  const rid = req.claudeHost.rpc.call(req.claudeHost.ws, 'get_git_log',
     { sessionId: req.params.id },
     (err, result) => { if (!res.headersSent) err ? res.status(504).json({ error: err.message }) : res.json(result); });
-  res.on('close', () => req.host.rpc.cancel(rid));
+  res.on('close', () => req.claudeHost.rpc.cancel(rid));
 });
 
 // ── Git diff ──────────────────────────────────────────────────────────────────
 app.get('/api/sessions/:id/git/diff', requireJwt, requireHost, (req, res) => {
   const commit = req.query.commit;
   if (!commit) return res.status(400).json({ error: 'commit required' });
-  const rid = req.host.rpc.call(req.host.ws, 'get_git_diff',
+  const rid = req.claudeHost.rpc.call(req.claudeHost.ws, 'get_git_diff',
     { sessionId: req.params.id, commit },
     (err, result) => { if (!res.headersSent) err ? res.status(504).json({ error: err.message }) : res.json(result); });
-  res.on('close', () => req.host.rpc.cancel(rid));
+  res.on('close', () => req.claudeHost.rpc.cancel(rid));
 });
 
 // ── Create session ────────────────────────────────────────────────────────────
 app.post('/api/sessions', requireJwt, requireHost, (req, res) => {
   const { cwd, firstMessage } = req.body || {};
-  req.host.ws.send(JSON.stringify({ type: 'new_session', cwd, firstMessage }));
+  req.claudeHost.ws.send(JSON.stringify({ type: 'new_session', cwd, firstMessage }));
   res.status(202).json({});
 });
 
 // ── Delete session ────────────────────────────────────────────────────────────
 app.delete('/api/sessions/:id', requireJwt, requireHost, (req, res) => {
-  const host = req.host;
+  const host = req.claudeHost;
   const id = req.params.id;
   host.pendingDelete.set(id, res);
   host.ws.send(JSON.stringify({ type: 'delete_session', sessionId: id }));
