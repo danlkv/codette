@@ -51,8 +51,8 @@
     display: flex; gap: 8px; align-items: flex-start;
   }
   .tool-row .label {
-    font-size: .75rem; flex-shrink: 0;
-    padding-top: 8px; text-align: right; color: var(--text-dim);
+    /* compact UI style */ font-size: .65rem; flex-shrink: 0;
+    /* compact UI style */ padding-top: 4px; text-align: right; color: var(--text-dim);
   }
   .tool-row :global(.tool) { flex: 1; margin-top: 0; }
 
@@ -68,9 +68,10 @@
     white-space: pre-wrap; word-break: break-word; margin: 0;
     border: 1px solid var(--accent);
     border-radius: 4px; padding: 7px 10px;
+    font-family: var(--chat-font);
   }
 
-  .prose { color: var(--text); line-height: 1.5; }
+  .prose { color: var(--text); line-height: 1.35; /* compact UI style */ font-family: var(--chat-font); }
   .prose :global(p)            { margin: 0 0 .6em; }
   .prose :global(p:last-child) { margin-bottom: 0; }
   .prose :global(h1),.prose :global(h2),.prose :global(h3),
@@ -83,11 +84,12 @@
   .prose :global(code) {
     background: var(--bg-elevated);
     border-radius: 3px; padding: 1px 5px;
-    font-size: .88em; color: var(--accent-light); font-family: inherit;
+    font-size: .88em; color: var(--accent-light); font-family: monospace;
   }
   .prose :global(pre) {
     background: var(--bg-elevated); border: 1px solid var(--border);
     border-radius: 5px; padding: 10px 14px; overflow-x: auto; margin: .5em 0;
+    font-family: monospace;
   }
   .prose :global(pre code) { background: none; border: none; padding: 0; color: var(--text); font-size: .88em; }
   .prose :global(ul),.prose :global(ol) { padding-left: 1.5em; margin: .4em 0; }
@@ -104,6 +106,8 @@
   .prose :global(table) { border-collapse: collapse; width: 100%; margin: .5em 0; font-size: .88em; }
   .prose :global(th),.prose :global(td) { border: 1px solid var(--border); padding: 4px 10px; }
   .prose :global(th)    { background: var(--bg-elevated); color: var(--text-muted); }
+  .prose :global(.math-block) { margin: .5em 0; }
+  .prose :global(.katex-display) { margin: 0; overflow: auto hidden; padding-bottom: .15em; }
   .cur { color: var(--accent); animation: blink .7s step-end infinite; }
   @keyframes blink { 50% { opacity: 0; } }
 </style>

@@ -88,7 +88,7 @@
   }
   .header {
     display: flex; align-items: center; gap: 6px;
-    width: 100%; padding: 6px 10px;
+    width: 100%; padding: 4px 10px; /* compact UI style */
     background: none; border: none; cursor: pointer;
     color: var(--text-muted); text-align: left;
     font: inherit; font-size: .8rem;

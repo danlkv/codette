@@ -4,7 +4,7 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
   import { get } from 'svelte/store';
-  import { messages, lastCost, lastUsage, hostStatus, wsOk, highContrast,
+  import { messages, lastCost, lastUsage, hostStatus, wsOk, highContrast, vibrateOnDone, fontStyle,
            sessions, currentSessionId, sessionData } from '../store.js';
   import { createParser } from './parser.js';
   import { summarizeOldLines, KEEP as SUMMARIZE_KEEP } from './summarize.js';
@@ -20,6 +20,7 @@
     try { return JSON.parse(atob(token.split('.')[1])).username; } catch { return ''; }
   });
   let userMenuOpen = $state(false);
+  $effect(() => { localStorage.setItem('vibrate', $vibrateOnDone ? '1' : '0'); });
   $effect(() => {
     if (!userMenuOpen) return;
     function onDocClick(e) {
@@ -57,8 +58,19 @@
           ? 'Message Claude… (/ for commands)'
           : 'Send to start… (/ for commands)');
 
+  // Hash helpers: format is #username/sessionId (legacy: #sessionId)
+  function parseHashSessionId() {
+    const h = location.hash.slice(1);
+    if (!h) return null;
+    const slash = h.indexOf('/');
+    return (slash >= 0 ? h.slice(slash + 1) : h) || null;
+  }
+  function makeHash(sessionId) {
+    return '#' + (username ? username + '/' : '') + sessionId;
+  }
+
   function onPopState() {
-    const id = location.hash.slice(1) || null;
+    const id = parseHashSessionId();
     if (!id || id === get(currentSessionId)) return;
     if (id === 'new') { handleNewSession(null); return; }
     switchSession(id);
@@ -103,12 +115,12 @@
     } catch (e) { console.error('[history] initSessions: fetch error', e); }
 
     if (sessionList.length === 0) { console.log('[history] initSessions: no sessions, returning'); return; }
-    const hashId = location.hash.slice(1) || null;
+    const hashId = parseHashSessionId();
     const target = (hashId && hashId !== 'new' && sessionList.find(s => s.id === hashId))
       ? hashId
       : sessionList[0].id;
     console.log('[history] initSessions: target session', target, '(hash was:', hashId + ')');
-    history.replaceState(null, '', '#' + target);
+    history.replaceState(null, '', makeHash(target));
     currentSessionId.set(target);
     await loadSessionHistory(target);
   }
@@ -270,6 +282,9 @@
           sessions.update(list => list.map(s =>
             s.id === sessionId ? { ...s, agentState: toState(event) } : s
           ));
+          if (event === 'idle' && sessionId === get(currentSessionId) && get(vibrateOnDone)) {
+            navigator.vibrate?.(40);
+          }
           if (awaitingNewSession && event === 'started' && sessionId !== get(currentSessionId)) {
             awaitingNewSession = false;
             switchSession(sessionId);
@@ -285,7 +300,7 @@
 
   async function switchSession(id) {
     if (id === get(currentSessionId)) return;
-    history.pushState(null, '', '#' + id);
+    history.pushState(null, '', makeHash(id));
 
     fileViewPath = null;
     diffViewCommit = null;
@@ -406,7 +421,7 @@
     fileViewPath = null;
     diffViewCommit = null;
     saveCurrentCache();
-    history.pushState(null, '', '#new');
+    history.pushState(null, '', makeHash('new'));
     currentSessionId.set('__new__');
     currentLines = [];
     messages.set([]);
@@ -454,20 +469,40 @@
         <span class="cost">${$lastCost.toFixed(4)}</span>
       {/if}
     </div>
-    <button class="hc-toggle" onclick={() => highContrast.update(v => !v)}
-      title="Toggle high contrast" aria-pressed={$highContrast}>HC</button>
     <div class="user-menu-wrap">
-      <button class="user-btn" onclick={() => userMenuOpen = !userMenuOpen}>{username}</button>
+      <button class="user-btn" onclick={() => userMenuOpen = !userMenuOpen}>{username} <span class="gear">⚙</span></button>
       {#if userMenuOpen}
         <div class="user-menu">
+          <div class="menu-section-label">accounts</div>
+          <button class="account-active" disabled>{username}</button>
           {#each accounts as acc, i}
             {#if i !== activeIdx}
               <button onclick={() => { userMenuOpen = false; onSwitch?.(i); }}>{acc.username}</button>
             {/if}
           {/each}
-          {#if accounts.length > 1}<div class="menu-sep"></div>{/if}
           <button onclick={() => { userMenuOpen = false; onAddAccount?.(); }}>+ add account</button>
           <button class="logout-btn" onclick={() => { userMenuOpen = false; onLogout(); }}>logout</button>
+          <div class="menu-sep"></div>
+          <div class="menu-section-label">settings</div>
+          <label class="menu-toggle">
+            <span>high contrast</span>
+            <input type="checkbox" checked={$highContrast}
+              onchange={() => highContrast.update(v => !v)} />
+          </label>
+          <label class="menu-toggle">
+            <span>vibrate on done</span>
+            <input type="checkbox" checked={$vibrateOnDone}
+              onchange={() => vibrateOnDone.update(v => !v)} />
+          </label>
+          <div class="menu-toggle">
+            <span>font</span>
+            <div class="font-pick">
+              {#each ['mono', 'sans', 'serif'] as f}
+                <button class="font-btn" class:active={$fontStyle === f}
+                  onclick={() => fontStyle.set(f)}>{f}</button>
+              {/each}
+            </div>
+          </div>
         </div>
       {/if}
     </div>
@@ -563,28 +598,48 @@
   .user-btn {
     background: none; border: none; color: var(--text-dim);
     cursor: pointer; font: inherit; font-size: .72rem; padding: 0;
+    display: flex; align-items: center; gap: 5px;
   }
   .user-btn:hover { color: var(--text-muted); }
+  .gear { color: var(--text); font-size: 1rem; line-height: 1; }
   .user-menu {
     position: absolute; right: 0; top: calc(100% + 6px);
     background: var(--bg-elevated); border: 1px solid var(--border);
-    border-radius: 5px; padding: 4px; min-width: 90px;
-    box-shadow: 0 4px 12px rgba(0,0,0,.3); z-index: 100;
+    border-radius: 6px; padding: 6px; min-width: 200px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.4); z-index: 100;
+  }
+  .menu-section-label {
+    font-size: .65rem; color: var(--text-dim); text-transform: uppercase;
+    letter-spacing: .06em; padding: 4px 8px 2px; user-select: none;
   }
   .user-menu button {
     display: block; width: 100%; text-align: left;
     background: none; border: none; color: var(--text-muted);
-    cursor: pointer; font: inherit; font-size: .78rem;
-    padding: 5px 10px; border-radius: 3px;
+    cursor: pointer; font: inherit; font-size: .82rem;
+    padding: 6px 10px; border-radius: 4px;
   }
-  .user-menu button:hover { background: var(--bg-secondary); color: var(--text); }
+  .user-menu button:hover:not(:disabled) { background: var(--bg-secondary); color: var(--text); }
+  .user-menu .account-active { color: var(--text); font-weight: 600; cursor: default; }
   .user-menu .logout-btn { color: var(--text-dim); }
-  .menu-sep { height: 1px; background: var(--border); margin: 3px 6px; }
-  .hc-toggle {
-    background: none; border: 1px solid var(--border); color: var(--text-dim);
-    cursor: pointer; font: inherit; font-size: .72rem;
-    padding: 2px 6px; border-radius: 4px; transition: color .15s, border-color .15s;
+  .menu-sep { height: 1px; background: var(--border); margin: 5px 4px; }
+  .menu-toggle {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 10px; border-radius: 4px; cursor: pointer;
+    font-size: .82rem; color: var(--text-muted);
   }
-  .hc-toggle[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
-  .hc-toggle:hover { color: var(--text-muted); border-color: var(--text-muted); }
+  .menu-toggle:hover { background: var(--bg-secondary); color: var(--text); }
+  .menu-toggle input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
+  .font-pick {
+    display: flex; border: 1px solid var(--border); border-radius: 3px; overflow: hidden;
+    margin-left: 12px;
+  }
+  .font-btn {
+    background: none; border: none; border-right: 1px solid var(--border);
+    color: var(--text-muted); font: inherit; font-size: .68rem;
+    padding: 2px 7px; cursor: pointer; transition: background .1s, color .1s;
+    min-width: 34px; text-align: center;
+  }
+  .font-btn:last-child { border-right: none; }
+  .font-btn:hover { background: var(--bg-secondary); color: var(--text); }
+  .font-btn.active { background: var(--accent); color: #fff; }
 </style>

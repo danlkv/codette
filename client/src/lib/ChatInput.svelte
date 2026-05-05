@@ -63,7 +63,7 @@
     <textarea
       bind:this={el} bind:value
       onkeydown={keydown} oninput={resize}
-      {placeholder} {disabled} rows="1"
+      {placeholder} rows="1"
     ></textarea>
     <button onclick={send} disabled={!value.trim() || disabled}>{sendLabel}</button>
   </div>

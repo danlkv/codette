@@ -107,7 +107,7 @@
     flex: 1; overflow-y: auto;
   }
   .inner {
-    display: flex; flex-direction: column; gap: 20px;
+    display: flex; flex-direction: column; gap: 18px; /* compact UI style */
     align-items: stretch;
     max-width: 760px; margin: 0 auto;
     padding: 24px 16px 16px;

@@ -5,7 +5,7 @@
   import { onMount } from 'svelte';
   import Login        from './lib/Login.svelte';
   import ChatLayout   from './lib/ChatLayout.svelte';
-  import { highContrast, resetStores } from './store.js';
+  import { highContrast, fontStyle, resetStores } from './store.js';
 
   function loadAccounts() {
     try {
@@ -22,10 +22,22 @@
   }
 
   let accounts = $state(loadAccounts());
-  let activeIdx = $state(Math.min(
-    Number(localStorage.getItem('chat_active') || 0),
-    Math.max(accounts.length - 1, 0),
-  ));
+
+  function getInitialActiveIdx(accs) {
+    const h = location.hash.slice(1);
+    if (h) {
+      const slash = h.indexOf('/');
+      const urlUser = slash >= 0 ? h.slice(0, slash) : null;
+      if (urlUser) {
+        const idx = accs.findIndex(a => a.username === urlUser);
+        if (idx >= 0) return idx;
+        return accs.length; // force login: out-of-bounds → token = ''
+      }
+    }
+    return Math.min(Number(localStorage.getItem('chat_active') || 0), Math.max(accs.length - 1, 0));
+  }
+
+  let activeIdx = $state(getInitialActiveIdx(accounts));
   let addingAccount = $state(false);
 
   const token = $derived(accounts[activeIdx]?.token || '');
@@ -63,6 +75,17 @@
       document.documentElement.classList.toggle('high-contrast', $highContrast);
       localStorage.setItem('hc', $highContrast ? '1' : '0');
     }
+  });
+
+  const FONT_FAMILIES = {
+    mono:  "'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
+    sans:  "system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
+    serif: "Georgia, 'Times New Roman', serif",
+  };
+
+  $effect(() => {
+    document.documentElement.style.setProperty('--chat-font', FONT_FAMILIES[$fontStyle] ?? FONT_FAMILIES.mono);
+    localStorage.setItem('font', $fontStyle);
   });
 
   // Fix mobile keyboard shrinking the viewport

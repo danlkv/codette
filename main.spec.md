@@ -36,6 +36,7 @@ Typed in the input bar; handled client-side before sending to claude.
 | `/status` | Show host/ws connection status |
 | `/model <name>` | Switch model (sends claude `/model` command) |
 | `/btw <question>` | Side question — not added to conversation history |
+| `/claudeweb-inline-files` | Instruct agent to use inline file viewer in current session |
 
 
 ### Session management
@@ -86,8 +87,15 @@ no agents running.
 ### File management
 
 As a subsection in sidebar below session list section, user can explore directory tree at session's
-home dir. User can click on a file and the main area 
+home dir. User can click on a file and the main area
 will render the file instead of chat.
+
+### Inline file viewer
+
+Agent can quote source files inline in chat using a `sourcefile` code fence. The UI renders
+it as a scrollable file panel instead of raw code. When creating a new session, the user can
+check "instruct agent to use inline file viewer" — this appends a system prompt teaching the
+agent the syntax. See `inline-file.spec.md`.
 
 ## Host terminal
 - Colored output: `you` (blue), `claude` (green), tool calls (yellow + dim summary), cost (dim).

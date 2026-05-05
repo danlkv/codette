@@ -7,6 +7,9 @@ the stateful host stdin pipe.
 Claude process  ←stdin/stdout→  Host  ←/host WS→  Server  ←REST+WS→  Clients
 ```
 
+**Convention:** message fields invented by this app (not part of Claude CLI/Code) are prefixed
+`claudeweb_` (e.g. `claudeweb_settings`).
+
 ---
 
 ## Layer 1 — Claude ↔ Host (stream-json stdio)
