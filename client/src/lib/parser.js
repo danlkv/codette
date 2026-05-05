@@ -124,7 +124,7 @@ export function createParser({ messages, currentSessionId, lastCost, lastUsage }
           }
           liveClaudeId = claudeId;
           liveUid = uid();
-          mutMsg(ms => [...ms, { id: liveUid, role: 'assistant', text, streaming: live, ts: ev.timestamp ?? null }]);
+          mutMsg(ms => [...ms, { id: liveUid, role: 'assistant', text, streaming: live, ts: ev.timestamp ? new Date(ev.timestamp).getTime() : Date.now() }]);
         }
       }
 

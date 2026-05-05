@@ -296,8 +296,9 @@ rpc.register('get_file', (msg) => {
   const buf = readFileSync(filePath);
   if (buf.length > 512 * 1024) throw new Error('file too large');
   if (buf.includes(0)) throw new Error('binary file');
+  const mtime = statSync(filePath).mtimeMs;
   log('info', 'get_file ok', { path: filePath, size: buf.length });
-  return { content: buf.toString('utf8') };
+  return { content: buf.toString('utf8'), mtime };
 });
 
 rpc.register('get_git_log', (msg) => {

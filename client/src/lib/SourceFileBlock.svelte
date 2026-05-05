@@ -9,7 +9,7 @@
 <script>
   import { onMount } from 'svelte';
 
-  let { path, ranges = [], annotations = [], sessionId, token, onOpenFile = null } = $props();
+  let { path, ranges = [], annotations = [], sessionId, token, onOpenFile = null, messageTime = null } = $props();
 
   const MAX_LINES = 600;
 
@@ -23,6 +23,7 @@
   let hlIdx = $state(0);
   let collapsed = $state(false);
   let showAnnotations = $state(true);
+  let stale = $state(false);
 
   // Set of all highlighted line numbers (all lines within any range)
   const hlSet = $derived((() => {
@@ -51,7 +52,7 @@
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
-    return data.content ?? '';
+    return data;
   }
 
   function loadFile() {
@@ -60,8 +61,9 @@
       inflight.set(path, req);
       return req;
     })();
-    p.then(content => {
-      const all = content.split('\n');
+    p.then(({ content, mtime }) => {
+      if (annotations.length && messageTime != null && mtime != null && mtime > messageTime) stale = true;
+      const all = (content ?? '').split('\n');
       totalLines = all.length;
       // View window: cover all ranges + context padding up to MAX_LINES
       const minLine = ranges.length ? Math.min(...ranges.map(r => r.start)) : 1;
@@ -143,6 +145,9 @@
     {#if onOpenFile}
       <button class="sf-view" onclick={() => onOpenFile(path)} title="View full file">view file</button>
     {/if}
+    {#if stale}
+      <span class="sf-stale" title="File was modified after this message — annotations may be misaligned">⚠ file modified</span>
+    {/if}
     {#if annotations.length}
       <button class="sf-ann-toggle" onclick={() => showAnnotations = !showAnnotations} title={showAnnotations ? 'Hide annotations' : 'Show annotations'}>{showAnnotations ? 'hide notes' : 'show notes'}</button>
     {/if}
@@ -221,6 +226,12 @@
     transition: color .15s, border-color .15s;
   }
   .sf-nav:hover { color: var(--accent-light); border-color: var(--accent); }
+  .sf-stale {
+    font-size: .75em;
+    color: rgba(220, 170, 50, 0.75);
+    flex-shrink: 0;
+    user-select: none;
+  }
   .sf-ann-toggle, .sf-view, .sf-copy {
     background: none;
     border: 1px solid var(--border);

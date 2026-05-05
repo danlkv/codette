@@ -37,6 +37,22 @@ With multiple ranges and annotations:
 - **Annotations**: optional `@N text` lines after the path line attach inline notes rendered as
   virtual text at end-of-line (dim italic, non-selectable). Any line number may be annotated,
   not just highlighted ones.
+- **Annotations are static** — they are baked into the message at render time and do not update
+  if the file changes on disk. Line numbers may drift after edits. The agent should re-emit a
+  fresh `sourcefile` fence if the file has changed since the annotation was written.
+
+#### Staleness detection (not implemented)
+
+Two options:
+
+- **mtime (server)**: `/api/sessions/:id/file` returns `mtime` alongside `content`. Client
+  compares `mtime` to message timestamp; if file is newer, show a dim `⚠ file modified` warning
+  in the header. No agent changes needed.
+
+- **first-load hash (client)**: On first fetch, store `trimmed line content` for each annotated
+  line in `localStorage` keyed by `sessionId:path:lineNum`. On subsequent fetches, compare
+  current content against stored baseline; mark diverged annotations with `⚠`. Storage is keyed
+  per session and can be evicted when the session is deleted.
 
 ### Verified behaviour
 

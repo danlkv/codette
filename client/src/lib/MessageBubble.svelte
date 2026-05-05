@@ -34,7 +34,7 @@
       {#if msg.role === 'user'}
         <p class="user-text">{msg.text}</p>
       {:else}
-        <div class="prose" use:mermaidRender={msg.text} use:sourceFileRender={{ text: msg.text, sessionId, token, onOpenFile }}>
+        <div class="prose" use:mermaidRender={msg.text} use:sourceFileRender={{ text: msg.text, sessionId, token, onOpenFile, messageTime: msg.ts ?? null }}>
           {@html renderMd(msg.text)}{#if isStreaming}<span class="cur">▌</span>{/if}
         </div>
       {/if}

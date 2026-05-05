@@ -14,7 +14,7 @@ function parseRanges(str) {
 
 export function sourceFileRender(node, trigger) {
   function run() {
-    const { sessionId, token, onOpenFile } = trigger ?? {};
+    const { sessionId, token, onOpenFile, messageTime } = trigger ?? {};
     for (const el of node.querySelectorAll('.source-file-block:not([data-mounted])')) {
       el.dataset.mounted = '1';
       const { path, ranges, ann } = el.dataset;
@@ -27,6 +27,7 @@ export function sourceFileRender(node, trigger) {
           sessionId,
           token,
           onOpenFile: onOpenFile ? () => onOpenFile(path) : null,
+          messageTime: messageTime ?? null,
         },
       });
     }
