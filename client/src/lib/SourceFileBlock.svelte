@@ -155,7 +155,7 @@
     <button class="sf-toggle" onclick={() => collapsed = !collapsed} title={collapsed ? 'Expand' : 'Collapse'}>{collapsed ? '▶' : '▼'}</button>
   </div>
   {#if !collapsed}
-  <div class="sf-body">
+  <div class="sf-body" class:sf-body-loading={lines === null && !error}>
     {#if error}
       <pre class="sf-pre sf-error">[could not load: {error}]</pre>
     {:else if lines === null}
@@ -261,6 +261,9 @@
     overflow: auto;
     max-height: 30vh;
     background: var(--bg-primary);
+  }
+  .sf-body-loading {
+    min-height: 30vh;
   }
   .sf-body::-webkit-scrollbar-corner { background: var(--bg-primary); }
   .sf-pre {

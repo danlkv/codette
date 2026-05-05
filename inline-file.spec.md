@@ -41,18 +41,19 @@ With multiple ranges and annotations:
   if the file changes on disk. Line numbers may drift after edits. The agent should re-emit a
   fresh `sourcefile` fence if the file has changed since the annotation was written.
 
-#### Staleness detection (not implemented)
+#### Loading state
+Viewport holds `min-height: 30vh` while fetching to prevent layout shift; collapses to content height after load.
 
-Two options:
+#### Staleness detection (implemented: mtime)
 
-- **mtime (server)**: `/api/sessions/:id/file` returns `mtime` alongside `content`. Client
-  compares `mtime` to message timestamp; if file is newer, show a dim `⚠ file modified` warning
-  in the header. No agent changes needed.
+`/api/sessions/:id/file` returns `{ content, mtime }` (mtime in ms). Client compares `mtime`
+to `message.ts` (ms, set from `ev.timestamp` ISO string or `Date.now()` at stream start); if
+`mtime > messageTime` and annotations are present, shows a dim `⚠ file modified` warning in
+the header.
 
-- **first-load hash (client)**: On first fetch, store `trimmed line content` for each annotated
-  line in `localStorage` keyed by `sessionId:path:lineNum`. On subsequent fetches, compare
-  current content against stored baseline; mark diverged annotations with `⚠`. Storage is keyed
-  per session and can be evicted when the session is deleted.
+Alternative not implemented: **first-load hash** — on first fetch store trimmed line content in
+`localStorage` keyed by `sessionId:path:lineNum`; compare on subsequent fetches for
+per-annotation drift detection.
 
 ### Verified behaviour
 
