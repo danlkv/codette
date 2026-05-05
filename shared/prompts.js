@@ -15,7 +15,8 @@ export const CLAUDEWEB_INLINE_FILE_PROMPT =
   'Keep the total span under 800 lines to avoid overflow. ' +
   'Order is preserved and drives the prev/next navigation buttons, so you can encode a meaningful traversal sequence. ' +
   'Omit the `:` spec entirely to show the whole file with no highlights. ' +
-  'Optional: add `@N annotation text` lines after the path line to attach inline notes to specific lines (rendered as virtual text at end-of-line).';
+  'Optional: add `@N annotation text` lines after the path line to attach inline notes to specific lines (rendered as virtual text at end-of-line). ' +
+  'Use sourcefile whenever the user asks things like: "show me the file", "open X", "what\'s in X", "where is X defined", "walk me through the code", "show the relevant section", "can you show me an image/screenshot", or any request to view, display, or reference a file.';
 
 export function makeInlineFilePrompt(cwd) {
   const cwdNote = cwd ? `\nPaths must be absolute or relative to the working directory (${cwd}).` : '';

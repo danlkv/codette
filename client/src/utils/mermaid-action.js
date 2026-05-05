@@ -26,9 +26,27 @@ function getConfig() {
       clusterBorder:       v('--border'),
       titleColor:          v('--text'),
       nodeTextColor:       v('--text'),
+      activationBkgColor:  v('--bg-elevated'),
+      activationBorderColor: v('--accent'),
       fontSize:            '13px',
     },
   };
+}
+
+function openFullscreen(mermaidEl) {
+  const svg = mermaidEl.querySelector('svg');
+  if (!svg) return;
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;cursor:zoom-out;';
+  const clone = svg.cloneNode(true);
+  clone.style.cssText = 'max-width:95vw;max-height:95vh;width:auto;height:auto;background:var(--bg-primary);border-radius:6px;padding:16px;cursor:default;';
+  clone.addEventListener('click', e => e.stopPropagation());
+  overlay.appendChild(clone);
+  overlay.addEventListener('click', () => overlay.remove());
+  document.addEventListener('keydown', function esc(e) {
+    if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', esc); }
+  });
+  document.body.appendChild(overlay);
 }
 
 function wrapWithToggle(mermaidEl, source) {
@@ -40,6 +58,12 @@ function wrapWithToggle(mermaidEl, source) {
   btn.textContent = 'source';
   btn.title = 'Toggle diagram source';
 
+  const fsBtn = document.createElement('button');
+  fsBtn.className = 'mermaid-toggle';
+  fsBtn.textContent = '⤢';
+  fsBtn.title = 'Fullscreen';
+  fsBtn.addEventListener('click', () => openFullscreen(mermaidEl));
+
   const pre = document.createElement('pre');
   pre.className = 'mermaid-source';
   pre.textContent = source;
@@ -48,6 +72,7 @@ function wrapWithToggle(mermaidEl, source) {
   mermaidEl.parentNode.insertBefore(wrap, mermaidEl);
   wrap.appendChild(mermaidEl);
   wrap.appendChild(pre);
+  wrap.appendChild(fsBtn);
   wrap.appendChild(btn);
 
   btn.addEventListener('click', () => {

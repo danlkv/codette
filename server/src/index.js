@@ -377,11 +377,7 @@ wss.on('connection', (ws, req) => {
       const h = hosts.get(username);
 
       if (msg.type === 'user') {
-        // Echo to all clients for this user, then forward to host
-        const echo = JSON.stringify({ type: 'claude_line', sessionId: msg.sessionId, line: JSON.stringify({ type: 'user', message: msg.message }) });
-        for (const c of clients.get(username) ?? []) {
-          if (c.readyState === WebSocket.OPEN) c.send(echo);
-        }
+        // Forward to host; host echoes back as claude_line after writing to stdin
         if (h?.ws.readyState === WebSocket.OPEN) h.ws.send(data.toString());
         return;
       }

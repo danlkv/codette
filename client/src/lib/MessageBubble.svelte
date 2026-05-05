@@ -20,7 +20,7 @@
 {:else if msg.role === 'tool'}
   <div class="tool-row">
     <span class="label">⚙</span>
-    <ToolBlock tool={msg} running={msg.running} />
+    <ToolBlock tool={msg} running={msg.running} {onOpenFile} />
   </div>
 
 {:else if msg.role === 'user_question'}

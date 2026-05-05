@@ -14,7 +14,7 @@ Claude process  ←stdin/stdout→  Host  ←/host WS→  Server  ←REST+WS→ 
 
 ## Layer 1 — Claude ↔ Host (stream-json stdio)
 
-Standard Claude CLI stream-json protocol. Host spawns claude with:
+Standard Claude CLI stream-json protocol. Full event reference with examples: [`doc/claude-jsonl.md`](doc/claude-jsonl.md). Host spawns claude with:
 ```
 claude --dangerously-skip-permissions \
        --input-format stream-json \
@@ -31,7 +31,7 @@ claude --dangerously-skip-permissions \
 | `system`    | `subtype:"init"`, `session_id`, `cwd` | first event |
 | `assistant` | `message.{id,content}` | streamed; `text` and `tool_use` blocks |
 | `tool`      | `message.content[]` (tool_result items) | host forwards to server |
-| `user`      | `message.content` | echo of stdin message |
+| `user`      | `message.content: ToolResultBlock[]` | tool results only; **initial user message is NOT emitted on stdout** (session file only) |
 | `result`    | `subtype`, `total_cost_usd`, `usage` | end of turn |
 
 ### Host → Claude (stdin)
@@ -111,11 +111,13 @@ Push events and stateful commands only.
 | type | key fields | notes |
 |------|-----------|-------|
 | `agent_ctl` | `sessionId`, `event: 'stop'\|'interrupt'` | forwarded to host |
-| `user` | `sessionId`, `message: {role, content}` | server broadcasts as `claude_line` to all clients, then forwards to host stdin |
+| `user` | `sessionId`, `message: {role, content}` | server forwards to host stdin; **host** echoes back as `claude_line({type:'user'})` to all clients |
 
 ---
 
 ## Implementation Notes
+
+**User message echo (host):** The server does not echo user messages — it forwards them to the host, which emits a `claude_line({type:'user'})` after writing to Claude's stdin. This ensures the echo confirms delivery to the agent. On the sending client, the send button switches to a progress indicator immediately on send; it clears and the message bubble renders only when the echo `claude_line` arrives. Other clients receive the same `claude_line` broadcast and render the bubble identically.
 
 **History relay (server):** `GET /api/sessions/:id/history?offset=N` parks the HTTP response in
 `pendingHistoryHttp: Map<sessionId, entry[]>` and sends `get_session_history { sessionId, offset }` to host over WS.
@@ -167,24 +169,33 @@ sequenceDiagram
     participant C as Client
     participant S as Server
     participant H as Host
-    C->>S: GET /api/sessions
-    S-->>C: Session[]
+    participant Cl as Claude
+    C->>+S: GET /api/sessions
+    S-->>-C: Session[]
     Note over C: pick most recent session
-    C->>S: GET /api/sessions/:id/history?offset=0
-    S-->>C: {lines, incremental:false}
+    C->>+S: GET /api/sessions/:id/history?offset=0
+    S-->>-C: {lines, incremental:false}
     Note over C: display + cache in localStorage
     C->>S: WS open
-    C->>S: user (WS)
-    S-->>C: claude_line(user echo)
-    S->>H: user
-    Note over H: no agent → spawnClaude(--resume id)
+    C->>+S: user (WS)
+    Note over C: send button - pending indicator
+    S->>+H: user
+    S-->>-C: (forwarded)
+    H->>+Cl: spawn --resume id
+    Cl-->>H: system.init
     H-->>S: agent_event(started)
     S-->>C: agent_event(started)
-    Note over H: write message to stdin
+    H->>Cl: stdin write
+    H-->>S: claude_line(user echo)
+    S-->>C: claude_line(user echo)
+    Note over C: pending cleared - message bubble rendered
     loop streaming
+        Cl-->>H: stdout line
         H-->>S: claude_line
         S-->>C: claude_line
     end
+    Cl-->>-H: result
+    deactivate H
 ```
 
 ### Hot start — agent running, client reconnects
@@ -192,11 +203,11 @@ sequenceDiagram
 sequenceDiagram
     participant C as Client
     participant S as Server
-    C->>S: GET /api/sessions
-    S-->>C: {sessions, hostCwd}
+    C->>+S: GET /api/sessions
+    S-->>-C: {sessions, hostCwd}
     Note over C: show localStorage cache immediately
-    C->>S: GET /sessions/:id/history?offset=N
-    S-->>C: {lines: newLines, incremental:true}
+    C->>+S: GET /sessions/:id/history?offset=N
+    S-->>-C: {lines: newLines, incremental:true}
     Note over C: merge new lines into cache
     C->>S: WS open
     S-->>C: claude_line (already in flight)
@@ -209,7 +220,7 @@ sequenceDiagram
     participant S as Server
     C->>S: GET /sessions/B/history
     S-->>C: {lines}
-    Note over C: claude_line(A) still arrives via WS·<br/>stored in A's store· B rendered
+    Note over C: claude_line(A) still arrives via WS, stored in A store, B rendered
 ```
 
 ### Two clients — one session active, one joining
@@ -219,29 +230,34 @@ sequenceDiagram
     participant B as ClientB
     participant S as Server
     participant H as Host
-    Note over A,S: ClientA connected · viewing session A · agent running
-    B->>S: GET /api/sessions
-    S-->>B: Session[] (A:agentActive)
-    B->>S: GET /sessions/A/history
-    S-->>B: {lines}
+    Note over A,S: ClientA connected, viewing session A, agent running
+    B->>+S: GET /api/sessions
+    S-->>-B: Session[] (A:agentActive)
+    B->>+S: GET /sessions/A/history
+    S-->>-B: {lines}
     B->>S: WS open
-    A->>S: user (WS)
+    A->>+S: user (WS)
+    Note over A: send button - pending indicator
+    S->>+H: user
+    S-->>-A: (forwarded)
+    H-->>S: claude_line(A, user echo)
     S-->>A: claude_line(A, user echo)
     S-->>B: claude_line(A, user echo)
-    S->>H: user
-    loop streaming — both clients viewing A
+    Note over A: pending cleared - message bubble rendered
+    loop streaming, both clients viewing A
         H-->>S: claude_line(A)
         S-->>A: claude_line(A)
         S-->>B: claude_line(A)
     end
+    deactivate H
     Note over B: switches to session B
     B->>S: GET /sessions/B/history
     S-->>B: {lines}
-    loop streaming — B viewing B, A still running
+    loop streaming, B viewing B, A still running
         H-->>S: claude_line(A)
         S-->>A: claude_line(A)
         S-->>B: claude_line(A)
-        Note over B: stored in A's store · B rendered
+        Note over B: stored in A store, B rendered
     end
     Note over B: deletes session C
     B->>S: DELETE /sessions/C
@@ -260,14 +276,14 @@ sequenceDiagram
     participant S as Server
     participant H as Host
     C->>S: agent_ctl(interrupt) WS
-    S->>H: agent_ctl(interrupt)
+    S->>+H: agent_ctl(interrupt)
     Note over H: SIGUSR1
-    H-->>S: agent_event(idle)
+    H-->>-S: agent_event(idle)
     S-->>C: agent_event(idle)
     C->>S: agent_ctl(stop) WS
-    S->>H: agent_ctl(stop)
+    S->>+H: agent_ctl(stop)
     Note over H: proc.kill()
-    H-->>S: agent_event(stopped)
+    H-->>-S: agent_event(stopped)
     S-->>C: agent_event(stopped)
     S-->>C: session_list
 ```

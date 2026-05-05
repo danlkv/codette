@@ -485,19 +485,24 @@ function connect() {
       w(`\n${A.bold}${A.blue}you${A.reset}  ${message.content}\n`);
       log('info', 'user message → stdin', { preview: String(message.content).slice(0, 60), session: String(sessionId).slice(0, 8) });
 
+      const echoLine = JSON.stringify({ type: 'user', message });
+      const echoMsg = JSON.stringify({ type: 'claude_line', sessionId, line: echoLine });
+
       let agentEntry = agents.get(sessionId);
       if (!agentEntry) {
         // No running agent — auto-resume this session then write message
         log('info', 'no agent for session, auto-resuming', { sessionId: String(sessionId).slice(0, 8) });
         agentEntry = spawnClaude(['--resume', sessionId], sessionId);
-        // Write after a tick so the process has started
+        // Write after a tick so the process has started; echo after write
         setImmediate(() => {
           const ok = agentEntry.proc.stdin.write(JSON.stringify(msg) + '\n');
           if (!ok) log('warn', 'stdin write buffered (backpressure)');
+          if (ws?.readyState === WebSocket.OPEN) ws.send(echoMsg);
         });
       } else {
         const ok = agentEntry.proc.stdin.write(JSON.stringify(msg) + '\n');
         if (!ok) log('warn', 'stdin write buffered (backpressure)');
+        if (ws?.readyState === WebSocket.OPEN) ws.send(echoMsg);
       }
       return;
     }

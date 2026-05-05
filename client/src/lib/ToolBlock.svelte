@@ -4,7 +4,7 @@
 <script>
   import { toolIcon } from '../utils/tools.js';
   import { sessionCwd } from '../store.js';
-  let { tool, running = false } = $props(); // tool: { name, summary, input, id }
+  let { tool, running = false, onOpenFile = null } = $props(); // tool: { name, summary, input, id }
 
   let open = $state(false);
 
@@ -44,7 +44,10 @@
         {#if tool.name === 'Edit' && editDiff(tool.input)}
           {@const diff = editDiff(tool.input)}
           {#if tool.input.file_path}
-            <div class="diff-path">{rel(tool.input.file_path)}</div>
+            <div class="diff-path">
+              {rel(tool.input.file_path)}
+              {#if onOpenFile}<button class="open-file" onclick={() => onOpenFile(tool.input.file_path)}>open file</button>{/if}
+            </div>
           {/if}
           <div class="diff">
             {#each diff.oldLines as line}
@@ -56,7 +59,10 @@
           </div>
         {:else if tool.name === 'Write' && tool.input?.content != null}
           {#if tool.input.file_path}
-            <div class="diff-path">{rel(tool.input.file_path)}</div>
+            <div class="diff-path">
+              {rel(tool.input.file_path)}
+              {#if onOpenFile}<button class="open-file" onclick={() => onOpenFile(tool.input.file_path)}>open file</button>{/if}
+            </div>
           {/if}
           <div class="diff">
             {#each tool.input.content.split('\n') as line}
@@ -141,7 +147,14 @@
   .diff-path {
     font: .75rem/1.4 'SF Mono', 'Fira Code', monospace;
     color: var(--text-dim); margin-bottom: 6px;
+    display: flex; align-items: center; gap: 8px;
   }
+  .open-file {
+    font: .7rem/1 inherit; background: none; border: 1px solid var(--border);
+    border-radius: 4px; padding: 1px 6px; cursor: pointer;
+    color: var(--accent-light); white-space: nowrap;
+  }
+  .open-file:hover { border-color: var(--accent); }
   .diff {
     font: .78rem/1.5 'SF Mono', 'Fira Code', monospace;
     border-radius: 4px; overflow: hidden;

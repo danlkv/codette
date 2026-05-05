@@ -49,7 +49,9 @@
   let pendingCwd = null;
   let pendingSettings = null;
 
-  let currentAgentActive = $derived(!!$sessions.find(s => s.id === $currentSessionId)?.agentState);
+  let currentAgentState = $derived($sessions.find(s => s.id === $currentSessionId)?.agentState ?? null);
+  let currentAgentActive = $derived(!!currentAgentState);
+  let sendPending = $state(false);
   let inputDisabled = $derived(!$wsOk);
   let inputPlaceholder = $derived($currentSessionId === '__new__'
     ? 'Type your first message to start the session…'
@@ -266,7 +268,11 @@
       else if (msg.type === 'claude_line') {
         const { sessionId, line } = msg;
         if (sessionId === get(currentSessionId)) {
-          try { const ev = JSON.parse(line); if (ev.type === 'ai-title') { if (ev.aiTitle) sessionTitle = ev.aiTitle; return; } } catch {}
+          try {
+            const ev = JSON.parse(line);
+            if (ev.type === 'ai-title') { if (ev.aiTitle) sessionTitle = ev.aiTitle; return; }
+            if (ev.type === 'user' && typeof ev.message?.content === 'string') sendPending = false;
+          } catch {}
           currentLines.push(line);
           parser.parseLine(line, true);
         } else {
@@ -418,6 +424,7 @@
     }
 
     if (ws?.readyState !== 1) return;
+    sendPending = true;
     ws.send(JSON.stringify({
       type: 'user',
       sessionId: get(currentSessionId),
@@ -481,7 +488,7 @@
     <div class="indicators">
       <span class="dot" class:on={$hostStatus === 'connected'}>host</span>
       <span class="dot" class:on={$wsOk}>ws</span>
-      <span class="dot ai" class:on={currentAgentActive}>ai</span>
+      <span class="dot ai" class:on={currentAgentActive} class:idle={currentAgentState === 'idle'}>ai</span>
       {#if $lastCost != null}
         <span class="cost">${$lastCost.toFixed(4)}</span>
       {/if}
@@ -590,9 +597,9 @@
       <div class="chat-main" class:hidden={fileViewPath || diffViewCommit}>
         <MessageList hostStatus={$hostStatus} {historyLoading} sessionId={$currentSessionId} {token} onOpenFile={path => handleFileOpen({ path })} />
         <ChatInput
-          disabled={inputDisabled}
+          disabled={inputDisabled || sendPending}
           placeholder={inputPlaceholder}
-          sendLabel={currentAgentActive ? 'send' : 'send & start'}
+          sendLabel={sendPending ? '…' : currentAgentActive ? 'send' : 'send & start'}
           onSend={handleSend}
         />
       </div>
@@ -641,6 +648,7 @@
   .dot { font-size: .72rem; color: var(--text-dim); }
   .dot.on { color: #5a5; }
   .dot.ai.on { color: var(--accent-light); }
+  .dot.ai.idle { color: #5a5; }
   .cost { font-size: .72rem; color: var(--text-dim); }
   .user-menu-wrap { position: relative; }
   .user-btn {
