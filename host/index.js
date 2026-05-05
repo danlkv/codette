@@ -308,6 +308,13 @@ rpc.register('get_fs', (msg) => {
   return { entries };
 });
 
+const BINARY_MIME = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif',
+  tiff: 'image/tiff', tif: 'image/tiff', svg: 'image/svg+xml',
+  pdf: 'application/pdf',
+};
+
 rpc.register('get_file', (msg) => {
   const sessionCwd = getSessionCwd(msg.sessionId);
   const filePath = resolveFsPath(msg.path, sessionCwd);
@@ -316,10 +323,17 @@ rpc.register('get_file', (msg) => {
     log('warn', 'get_file rejected', { raw: msg.path, resolved: filePath, cwd: sessionCwd });
     throw new Error('path outside session cwd');
   }
+  const ext = filePath.split('.').pop().toLowerCase();
+  const mimeType = BINARY_MIME[ext];
   const buf = readFileSync(filePath);
+  const mtime = statSync(filePath).mtimeMs;
+  if (mimeType) {
+    if (buf.length > 10 * 1024 * 1024) throw new Error('file too large');
+    log('info', 'get_file binary ok', { path: filePath, size: buf.length, mimeType });
+    return { base64: buf.toString('base64'), mimeType, mtime };
+  }
   if (buf.length > 512 * 1024) throw new Error('file too large');
   if (buf.includes(0)) throw new Error('binary file');
-  const mtime = statSync(filePath).mtimeMs;
   log('info', 'get_file ok', { path: filePath, size: buf.length });
   return { content: buf.toString('utf8'), mtime };
 });

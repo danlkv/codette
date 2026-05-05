@@ -9,6 +9,7 @@ export const CLAUDEWEB_INLINE_FILE_PROMPT =
   '@95 bug is here\n' +
   '```\n' +
   'Use this instead of pasting raw code whenever you reference an existing file. ' +
+  'Supported file types: text/source files (with line ranges and annotations), images (png, jpg, gif, webp, etc. — rendered inline), and PDFs (opened via "view file"). ' +
   'After `:` is a comma-separated list of line ranges — each range is `N` (single line) or `N-M`. ' +
   'All specified lines are highlighted and the view window covers them all. ' +
   'Keep the total span under 800 lines to avoid overflow. ' +

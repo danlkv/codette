@@ -7,19 +7,25 @@
   import { syntaxHighlight } from '../utils/syntax-highlight-action.js';
   import { sessions, currentSessionId, syntaxTheme } from '../store.js';
   import { highlightLines, langFromPath } from '../utils/highlight.js';
+  import ImagePreview from './ImagePreview.svelte';
 
   let { sessionId = null, path = '', token = null, onClose } = $props();
 
   let content = $state(null);
+  let base64 = $state(null);
+  let mimeType = $state(null);
   let error = $state(null);
   let loading = $state(true);
   let hlHtml = $state(null);
+  let pdfPages = $state(null); // array of canvas elements after render
 
   let sessionCwd = $derived($sessions.find(s => s.id === $currentSessionId)?.cwd ?? null);
   let relativePath = $derived((sessionCwd && path.startsWith(sessionCwd))
     ? path.slice(sessionCwd.length).replace(/^\//, '')
     : path);
   let isMarkdown = $derived(/\.md$/i.test(path));
+  let isImage = $derived(!!mimeType && mimeType.startsWith('image/'));
+  let isPdf = $derived(mimeType === 'application/pdf');
   let renderedHtml = $derived(isMarkdown && content ? renderMd(content) : null);
 
   $effect(() => {
@@ -31,6 +37,12 @@
       .catch(() => { hlHtml = null; });
   });
 
+  // Render PDF when base64 arrives
+  $effect(() => {
+    if (!isPdf || !base64) { pdfPages = null; return; }
+    renderPdf(base64).catch(e => { error = String(e); pdfPages = null; });
+  });
+
   $effect(() => {
     if (path) fetchFile();
   });
@@ -39,6 +51,9 @@
     loading = true;
     error = null;
     content = null;
+    base64 = null;
+    mimeType = null;
+    pdfPages = null;
     try {
       const url = `/api/sessions/${encodeURIComponent(sessionId)}/file?path=${encodeURIComponent(path)}`;
       const res = await fetch(url, {
@@ -47,6 +62,9 @@
       const data = await res.json();
       if (data.error) {
         error = data.error;
+      } else if (data.base64) {
+        base64 = data.base64;
+        mimeType = data.mimeType;
       } else if (data.content === null) {
         error = '[binary file]';
       } else {
@@ -58,6 +76,39 @@
       loading = false;
     }
   }
+
+  let pdfContainerEl = $state(null);
+
+  async function renderPdf(b64) {
+    const [pdfjsLib, { default: workerUrl }] = await Promise.all([
+      import('pdfjs-dist'),
+      import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
+    ]);
+    pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+    const data = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const pdf = await pdfjsLib.getDocument({ data }).promise;
+    const canvases = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 1.5 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      canvas.style.width = '100%';
+      canvas.style.display = 'block';
+      canvas.style.marginBottom = '8px';
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      canvases.push(canvas);
+    }
+    pdfPages = canvases;
+  }
+
+  // Mount PDF canvases into container when both are ready
+  $effect(() => {
+    if (!pdfContainerEl || !pdfPages) return;
+    pdfContainerEl.innerHTML = '';
+    for (const canvas of pdfPages) pdfContainerEl.appendChild(canvas);
+  });
 </script>
 
 <div class="file-view">
@@ -71,6 +122,13 @@
       <div class="fv-status">loading…</div>
     {:else if error}
       <div class="fv-status fv-error">{error}</div>
+    {:else if isImage}
+      <ImagePreview src="data:{mimeType};base64,{base64}" alt={relativePath} />
+    {:else if isPdf}
+      {#if !pdfPages}
+        <div class="fv-status">rendering pdf…</div>
+      {/if}
+      <div class="fv-pdf" bind:this={pdfContainerEl}></div>
     {:else if renderedHtml}
       <div class="fv-md" use:mermaidRender={renderedHtml} use:syntaxHighlight={{ theme: $syntaxTheme }}>{@html renderedHtml}</div>
     {:else if hlHtml}
@@ -153,6 +211,10 @@
   }
 
   .fv-hl :global(span) { font-family: inherit; }
+
+  .fv-pdf {
+    padding: 12px;
+  }
 
   .fv-md {
     padding: 16px 20px;

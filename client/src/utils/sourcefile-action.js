@@ -2,7 +2,7 @@
 // Copyright 2026 Danylo Lykov
 
 import { mount } from 'svelte';
-import SourceFileBlock from '../lib/SourceFileBlock.svelte';
+import InlineFile from '../lib/InlineFile.svelte';
 
 function parseRanges(str) {
   if (!str) return [];
@@ -18,7 +18,7 @@ export function sourceFileRender(node, trigger) {
     for (const el of node.querySelectorAll('.source-file-block:not([data-mounted])')) {
       el.dataset.mounted = '1';
       const { path, ranges, ann } = el.dataset;
-      mount(SourceFileBlock, {
+      mount(InlineFile, {
         target: el,
         props: {
           path,
