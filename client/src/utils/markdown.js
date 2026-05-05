@@ -49,6 +49,23 @@ marked.use({
   renderer: {
     code(token) {
       if (token.lang === 'mermaid') return `<div class="mermaid">${esc(token.text)}</div>`;
+      if (token.lang === 'sourcefile') {
+        const [pathLine, ...annotLines] = token.text.trim().split('\n');
+        const colonIdx = pathLine.lastIndexOf(':');
+        const hasRanges = colonIdx > 0 && /^\d/.test(pathLine.slice(colonIdx + 1));
+        const filePath = hasRanges ? pathLine.slice(0, colonIdx) : pathLine;
+        const ranges = hasRanges ? pathLine.slice(colonIdx + 1) : '';
+        const annotations = annotLines
+          .map(l => { const m = l.match(/^@(\d+)\s+(.*)/); return m ? { line: +m[1], text: m[2] } : null; })
+          .filter(Boolean);
+        const escAttr = s => esc(s).replace(/"/g, '&quot;');
+        const annAttr = annotations.length ? escAttr(JSON.stringify(annotations)) : '';
+        return `<div class="source-file-block"` +
+          ` data-path="${esc(filePath)}"` +
+          ` data-ranges="${esc(ranges)}"` +
+          (annAttr ? ` data-ann="${annAttr}"` : '') +
+          `></div>`;
+      }
       return false;
     },
   },
@@ -56,7 +73,7 @@ marked.use({
 
 const DOMPURIFY_CONFIG = {
   ADD_TAGS: ['div'],
-  ADD_ATTR: ['aria-hidden'],  // used by KaTeX spans
+  ADD_ATTR: ['aria-hidden', 'data-path', 'data-ranges', 'data-ann'],
 };
 
 export function renderMd(text) {

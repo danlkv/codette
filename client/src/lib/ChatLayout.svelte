@@ -4,6 +4,8 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
   import { get } from 'svelte/store';
+
+  import { makeInlineFilePrompt } from '../../../shared/prompts.js';
   import { messages, lastCost, lastUsage, hostStatus, wsOk, highContrast, vibrateOnDone, fontStyle,
            sessions, currentSessionId, sessionData } from '../store.js';
   import { createParser } from './parser.js';
@@ -45,6 +47,7 @@
   let sessionTitle = $state('');
   let awaitingNewSession = false;
   let pendingCwd = null;
+  let pendingSettings = null;
 
   let currentAgentActive = $derived(!!$sessions.find(s => s.id === $currentSessionId)?.agentState);
   let inputDisabled = $derived(!$wsOk);
@@ -381,6 +384,19 @@
             message: { role: 'user', content: arg },
           }));
         return true;
+      case '/claudeweb-inline-files': {
+        const sid = get(currentSessionId);
+        const cwd = get(sessions).find(s => s.id === sid)?.cwd ?? null;
+        const prompt = makeInlineFilePrompt(cwd);
+        if (ws?.readyState === 1)
+          ws.send(JSON.stringify({
+            type: 'user',
+            sessionId: sid,
+            message: { role: 'user', content: prompt },
+          }));
+        sysMsg('inline file viewer enabled');
+        return true;
+      }
       default:
         return false;
     }
@@ -395,7 +411,7 @@
         await fetch('/api/sessions', {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cwd: pendingCwd, firstMessage: text }),
+          body: JSON.stringify({ cwd: pendingCwd, firstMessage: text, claudeweb_settings: pendingSettings ?? undefined }),
         });
       } catch { awaitingNewSession = false; }
       return;
@@ -416,8 +432,9 @@
     if (window.innerWidth <= 640) sidebarOpen = false;
   }
 
-  function handleNewSession(cwd) {
+  function handleNewSession(cwd, settings = null) {
     pendingCwd = cwd || null;
+    pendingSettings = settings;
     fileViewPath = null;
     diffViewCommit = null;
     saveCurrentCache();
@@ -541,15 +558,16 @@
           {token}
           onClose={() => fileViewPath = null}
         />
-      {:else}
-        <MessageList hostStatus={$hostStatus} {historyLoading} />
+      {/if}
+      <div class="chat-main" class:hidden={fileViewPath || diffViewCommit}>
+        <MessageList hostStatus={$hostStatus} {historyLoading} sessionId={$currentSessionId} {token} onOpenFile={path => handleFileOpen({ path })} />
         <ChatInput
           disabled={inputDisabled}
           placeholder={inputPlaceholder}
           sendLabel={currentAgentActive ? 'send' : 'send & start'}
           onSend={handleSend}
         />
-      {/if}
+      </div>
     </div>
   </div>
 </div>
@@ -558,6 +576,8 @@
   .layout { display: flex; flex-direction: column; height: var(--app-height, 100dvh); }
   .body { display: flex; flex: 1; overflow: hidden; position: relative; }
   .chat { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+  .chat-main { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+  .chat-main.hidden { display: none; }
 
   .backdrop { display: none; }
   @media (max-width: 640px) {

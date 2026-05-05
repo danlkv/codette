@@ -4,11 +4,12 @@
 <script>
   import { renderMd } from '../utils/markdown.js';
   import { mermaidRender } from '../utils/mermaid-action.js';
+  import { sourceFileRender } from '../utils/sourcefile-action.js';
   import { fmtTime } from '../utils/time.js';
   import ToolBlock from './ToolBlock.svelte';
   import QuestionBlock from './QuestionBlock.svelte';
   import TodoBlock from './TodoBlock.svelte';
-  let { msg, isStreaming = false } = $props();
+  let { msg, isStreaming = false, sessionId = null, token = null, onOpenFile = null } = $props();
 </script>
 
 {#if msg.role === 'system'}
@@ -33,7 +34,7 @@
       {#if msg.role === 'user'}
         <p class="user-text">{msg.text}</p>
       {:else}
-        <div class="prose" use:mermaidRender={msg.text}>
+        <div class="prose" use:mermaidRender={msg.text} use:sourceFileRender={{ text: msg.text, sessionId, token, onOpenFile }}>
           {@html renderMd(msg.text)}{#if isStreaming}<span class="cur">▌</span>{/if}
         </div>
       {/if}
@@ -86,7 +87,7 @@
     border-radius: 3px; padding: 1px 5px;
     font-size: .88em; color: var(--accent-light); font-family: monospace;
   }
-  .prose :global(pre) {
+  .prose :global(pre:not(.sf-pre)) {
     background: var(--bg-elevated); border: 1px solid var(--border);
     border-radius: 5px; padding: 10px 14px; overflow-x: auto; margin: .5em 0;
     font-family: monospace;

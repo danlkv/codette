@@ -9,6 +9,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { ClaudeRenderer, toolSummary } from './renderer.js';
 import { RpcServer } from './rpc.js';
+import { makeInlineFilePrompt } from '../shared/prompts.js';
 
 const SERVER_URL       = process.env.SERVER_URL       || 'ws://localhost:3000';
 const CLIENT_USERNAME  = process.env.CLIENT_USERNAME  || execSync('whoami').toString().trim();
@@ -262,10 +263,21 @@ function spawnClaude(extraArgs = [], sessionIdHint = null, overrideCwd = null) {
 // ── RPC handlers (request/response over WS) ───────────────────────────────────
 const rpc = new RpcServer();
 
+const ALLOWED_PREFIXES = ['/tmp'];
+function resolveFsPath(p, sessionCwd) {
+  if (!p) return null;
+  if (!p.startsWith('/') && sessionCwd) return join(sessionCwd, p);
+  return p;
+}
+function pathAllowed(p, sessionCwd) {
+  if (sessionCwd && p.startsWith(sessionCwd)) return true;
+  return ALLOWED_PREFIXES.some(prefix => p.startsWith(prefix + '/') || p === prefix);
+}
+
 rpc.register('get_fs', (msg) => {
   const sessionCwd = getSessionCwd(msg.sessionId);
-  const path = msg.path || sessionCwd;
-  if (!path || !sessionCwd || !path.startsWith(sessionCwd)) throw new Error('path outside session cwd');
+  const path = resolveFsPath(msg.path, sessionCwd) || sessionCwd;
+  if (!path || !pathAllowed(path, sessionCwd)) throw new Error('path outside session cwd');
   const entries = readdirSync(path, { withFileTypes: true })
     .map(e => ({ name: e.name, path: join(path, e.name), isDir: e.isDirectory() }))
     .sort((a, b) => (a.isDir !== b.isDir ? (a.isDir ? -1 : 1) : a.name.localeCompare(b.name)));
@@ -275,11 +287,16 @@ rpc.register('get_fs', (msg) => {
 
 rpc.register('get_file', (msg) => {
   const sessionCwd = getSessionCwd(msg.sessionId);
-  if (!msg.path || !sessionCwd || !msg.path.startsWith(sessionCwd)) throw new Error('path outside session cwd');
-  const buf = readFileSync(msg.path);
+  const filePath = resolveFsPath(msg.path, sessionCwd);
+  log('info', 'get_file attempt', { raw: msg.path, resolved: filePath, cwd: sessionCwd });
+  if (!filePath || !pathAllowed(filePath, sessionCwd)) {
+    log('warn', 'get_file rejected', { raw: msg.path, resolved: filePath, cwd: sessionCwd });
+    throw new Error('path outside session cwd');
+  }
+  const buf = readFileSync(filePath);
   if (buf.length > 512 * 1024) throw new Error('file too large');
   if (buf.includes(0)) throw new Error('binary file');
-  log('info', 'get_file', { path: msg.path, size: buf.length });
+  log('info', 'get_file ok', { path: filePath, size: buf.length });
   return { content: buf.toString('utf8') };
 });
 
@@ -334,7 +351,12 @@ function connect() {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
 
-    if (await rpc.handle(ws, msg)) return;
+    try {
+      if (await rpc.handle(ws, msg)) return;
+    } catch (e) {
+      log('error', 'rpc.handle threw (ws.send failed?)', { type: msg.type, err: e.message });
+      return;
+    }
 
     if (msg.type === 'list_sessions') {
       log('info', 'list_sessions requested');
@@ -357,8 +379,12 @@ function connect() {
     if (msg.type === 'new_session') {
       const cwd = msg.cwd || null;
       const firstMessage = msg.firstMessage || null;
+      const settings = msg.claudeweb_settings ?? {};
       log('info', 'new session requested', { cwd, hasMsg: !!firstMessage });
-      const agentEntry = spawnClaude([], null, cwd);
+      const extraArgs = (settings.inlineFiles !== false)
+        ? ['--append-system-prompt', makeInlineFilePrompt(cwd)]
+        : [];
+      const agentEntry = spawnClaude(extraArgs, null, cwd);
       if (firstMessage) {
         // Write after a tick so the process has started reading stdin
         setImmediate(() => {

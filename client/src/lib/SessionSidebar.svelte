@@ -27,6 +27,7 @@
   let confirmTimer = $state(null);
   let showNew = $state(false);
   let newCwd = $state('');
+  let inlineFiles = $state(localStorage.getItem('claudeweb_inlineFiles') !== 'false');
 
   $effect(() => {
     if (showNew && !newCwd && hostCwd) newCwd = hostCwd;
@@ -38,7 +39,8 @@
   }
 
   function startNew() {
-    onNewSession?.(newCwd.trim() || null);
+    localStorage.setItem('claudeweb_inlineFiles', inlineFiles ? 'true' : 'false');
+    onNewSession?.(newCwd.trim() || null, { inlineFiles });
     showNew = false;
     newCwd = hostCwd || '';
   }
@@ -77,6 +79,10 @@
       <input class="new-input" bind:value={newCwd} placeholder="/path/to/project" autofocus />
       <button class="new-start" type="submit">Start</button>
     </form>
+    <label class="inline-files-toggle">
+      <input type="checkbox" bind:checked={inlineFiles} />
+      <span>instruct agent to use inline file viewer</span>
+    </label>
   {/if}
   <div class="list">
     {#each sessions as s (s.id)}
@@ -199,6 +205,13 @@
     padding: 4px 8px; flex-shrink: 0; transition: opacity .15s;
   }
   .new-start:hover { opacity: .85; }
+  .inline-files-toggle {
+    display: flex; align-items: center; gap: 5px;
+    padding: 4px 8px 6px;
+    font-size: .72rem; color: var(--text-dim);
+    cursor: pointer;
+  }
+  .inline-files-toggle input { accent-color: var(--accent); cursor: pointer; }
   .list {
     flex: 1;
     overflow-y: auto;

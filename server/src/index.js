@@ -166,7 +166,8 @@ app.get('/api/sessions/:id/history', requireJwt, requireHost, (req, res) => {
 app.get('/api/sessions/:id/fs', requireJwt, requireHost, (req, res) => {
   const rid = req.claudeHost.rpc.call(req.claudeHost.ws, 'get_fs',
     { sessionId: req.params.id, path: req.query.path ?? null },
-    (err, result) => { if (!res.headersSent) err ? res.status(504).json({ error: err.message }) : res.json(result); });
+    (err, result) => { if (!res.headersSent) err ? res.status(504).json({ error: err.message }) : res.json(result); },
+    10000);
   res.on('close', () => req.claudeHost.rpc.cancel(rid));
 });
 
@@ -174,7 +175,8 @@ app.get('/api/sessions/:id/fs', requireJwt, requireHost, (req, res) => {
 app.get('/api/sessions/:id/file', requireJwt, requireHost, (req, res) => {
   const rid = req.claudeHost.rpc.call(req.claudeHost.ws, 'get_file',
     { sessionId: req.params.id, path: req.query.path },
-    (err, result) => { if (!res.headersSent) err ? res.status(504).json({ error: err.message }) : res.json(result); });
+    (err, result) => { if (!res.headersSent) err ? res.status(504).json({ error: err.message }) : res.json(result); },
+    10000);
   res.on('close', () => req.claudeHost.rpc.cancel(rid));
 });
 
@@ -198,8 +200,8 @@ app.get('/api/sessions/:id/git/diff', requireJwt, requireHost, (req, res) => {
 
 // ── Create session ────────────────────────────────────────────────────────────
 app.post('/api/sessions', requireJwt, requireHost, (req, res) => {
-  const { cwd, firstMessage } = req.body || {};
-  req.claudeHost.ws.send(JSON.stringify({ type: 'new_session', cwd, firstMessage }));
+  const { cwd, firstMessage, claudeweb_settings } = req.body || {};
+  req.claudeHost.ws.send(JSON.stringify({ type: 'new_session', cwd, firstMessage, claudeweb_settings }));
   res.status(202).json({});
 });
 

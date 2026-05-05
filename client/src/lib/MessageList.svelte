@@ -6,7 +6,7 @@
   import MessageBubble from './MessageBubble.svelte';
   import { tweened } from 'svelte/motion';
   import { cubicOut } from 'svelte/easing';
-  let { hostStatus, historyLoading = false } = $props();
+  let { hostStatus, historyLoading = false, sessionId = null, token = null, onOpenFile = null } = $props();
 
   let el = $state();
   let pinned = $state(true);
@@ -84,7 +84,7 @@
       {/if}
 
       {#each $messages as m (m.id)}
-        <MessageBubble msg={m} isStreaming={!!m.streaming} />
+        <MessageBubble msg={m} isStreaming={!!m.streaming} {sessionId} {token} {onOpenFile} />
       {/each}
     </div>
   </div>
