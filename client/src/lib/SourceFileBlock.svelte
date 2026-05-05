@@ -8,12 +8,15 @@
 
 <script>
   import { onMount } from 'svelte';
+  import { syntaxTheme } from '../store.js';
+  import { highlightLines, langFromPath } from '../utils/highlight.js';
 
   let { path, ranges = [], annotations = [], sessionId, token, onOpenFile = null, messageTime = null } = $props();
 
   const MAX_LINES = 600;
 
   let lines = $state(null);
+  let hlLines = $state(null); // per-line highlighted HTML, or null if no theme
   let error = $state(null);
   let containerEl = $state(null);
   let preEl = $state(null);
@@ -55,6 +58,29 @@
     return data;
   }
 
+  let rawContent = $state(null); // full file text, kept for re-highlighting
+
+  function applyContent(content, mtime) {
+    if (annotations.length && messageTime != null && mtime != null && mtime > messageTime) stale = true;
+    rawContent = content ?? '';
+    const all = rawContent.split('\n');
+    totalLines = all.length;
+    // View window: cover all ranges + context padding up to MAX_LINES
+    const minLine = ranges.length ? Math.min(...ranges.map(r => r.start)) : 1;
+    const maxLine = ranges.length ? Math.max(...ranges.map(r => r.end)) : all.length;
+    const rs = minLine - 1;
+    const re = maxLine;
+    const extra = Math.max(0, MAX_LINES - (re - rs));
+    const above = Math.min(rs, Math.floor(extra / 2));
+    const below = Math.min(all.length - re, extra - above);
+    const s = rs - above;
+    const e = re + below;
+    displayStart = s + 1;
+    lines = all.slice(s, e);
+    truncated = s > 0 || e < all.length;
+    requestAnimationFrame(scrollToTarget);
+  }
+
   function loadFile() {
     const p = inflight.get(path) ?? (() => {
       const req = fetchContent().finally(() => inflight.delete(path));
@@ -62,25 +88,19 @@
       return req;
     })();
     p.then(({ content, mtime }) => {
-      if (annotations.length && messageTime != null && mtime != null && mtime > messageTime) stale = true;
-      const all = (content ?? '').split('\n');
-      totalLines = all.length;
-      // View window: cover all ranges + context padding up to MAX_LINES
-      const minLine = ranges.length ? Math.min(...ranges.map(r => r.start)) : 1;
-      const maxLine = ranges.length ? Math.max(...ranges.map(r => r.end)) : all.length;
-      const rs = minLine - 1;
-      const re = maxLine;
-      const extra = Math.max(0, MAX_LINES - (re - rs));
-      const above = Math.min(rs, Math.floor(extra / 2));
-      const below = Math.min(all.length - re, extra - above);
-      const s = rs - above;
-      const e = re + below;
-      displayStart = s + 1;
-      lines = all.slice(s, e);
-      truncated = s > 0 || e < all.length;
-      requestAnimationFrame(scrollToTarget);
+      applyContent(content, mtime);
     }).catch(err => { error = err.message; });
   }
+
+  // Re-highlight whenever theme or loaded lines change
+  $effect(() => {
+    const theme = $syntaxTheme;
+    const content = rawContent;
+    if (!theme || content === null || lines === null) { hlLines = null; return; }
+    const lang = langFromPath(path);
+    const sliced = lines.join('\n');
+    highlightLines(sliced, lang, theme).then(hl => { hlLines = hl; }).catch(() => { hlLines = null; });
+  });
 
   function scrollToLine(lineNum) {
     if (!preEl || !lines) return;
@@ -164,7 +184,7 @@
       <pre class="sf-pre" bind:this={preEl}>{#each lines as line, i}{@const lineNum = displayStart + i}<span
           class="sf-line"
           class:sf-hl={hlSet.has(lineNum)}
-        ><span class="sf-ln">{lineNum}</span><span class="sf-code">{@html esc(line)}</span>{#if showAnnotations && annMap.has(lineNum)}<span class="sf-ann">{annMap.get(lineNum)}</span>{/if}</span>{/each}</pre>
+        ><span class="sf-ln">{lineNum}</span><span class="sf-code">{@html hlLines ? hlLines[i] : esc(line)}</span>{#if showAnnotations && annMap.has(lineNum)}<span class="sf-ann">{annMap.get(lineNum)}</span>{/if}</span>{/each}</pre>
       {#if truncated}
         <div class="sf-trunc">lines {displayStart}–{displayStart + lines.length - 1} of {totalLines}</div>
       {/if}

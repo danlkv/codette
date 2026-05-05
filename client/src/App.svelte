@@ -5,7 +5,7 @@
   import { onMount } from 'svelte';
   import Login        from './lib/Login.svelte';
   import ChatLayout   from './lib/ChatLayout.svelte';
-  import { highContrast, fontStyle, resetStores } from './store.js';
+  import { highContrast, fontStyle, syntaxTheme, resetStores } from './store.js';
 
   function loadAccounts() {
     try {
@@ -86,6 +86,11 @@
   $effect(() => {
     document.documentElement.style.setProperty('--chat-font', FONT_FAMILIES[$fontStyle] ?? FONT_FAMILIES.mono);
     localStorage.setItem('font', $fontStyle);
+  });
+
+  $effect(() => {
+    if ($syntaxTheme) localStorage.setItem('syntaxTheme', $syntaxTheme);
+    else localStorage.removeItem('syntaxTheme');
   });
 
   // Fix mobile keyboard shrinking the viewport

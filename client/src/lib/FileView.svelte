@@ -4,13 +4,16 @@
 <script>
   import { renderMd } from '../utils/markdown.js';
   import { mermaidRender } from '../utils/mermaid-action.js';
-  import { sessions, currentSessionId } from '../store.js';
+  import { syntaxHighlight } from '../utils/syntax-highlight-action.js';
+  import { sessions, currentSessionId, syntaxTheme } from '../store.js';
+  import { highlightLines, langFromPath } from '../utils/highlight.js';
 
   let { sessionId = null, path = '', token = null, onClose } = $props();
 
   let content = $state(null);
   let error = $state(null);
   let loading = $state(true);
+  let hlHtml = $state(null);
 
   let sessionCwd = $derived($sessions.find(s => s.id === $currentSessionId)?.cwd ?? null);
   let relativePath = $derived((sessionCwd && path.startsWith(sessionCwd))
@@ -18,6 +21,15 @@
     : path);
   let isMarkdown = $derived(/\.md$/i.test(path));
   let renderedHtml = $derived(isMarkdown && content ? renderMd(content) : null);
+
+  $effect(() => {
+    const theme = $syntaxTheme;
+    if (!theme || !content || isMarkdown) { hlHtml = null; return; }
+    const lang = langFromPath(path);
+    highlightLines(content, lang, theme)
+      .then(lineHtmls => { hlHtml = lineHtmls.join('\n'); })
+      .catch(() => { hlHtml = null; });
+  });
 
   $effect(() => {
     if (path) fetchFile();
@@ -60,7 +72,9 @@
     {:else if error}
       <div class="fv-status fv-error">{error}</div>
     {:else if renderedHtml}
-      <div class="fv-md" use:mermaidRender={renderedHtml}>{@html renderedHtml}</div>
+      <div class="fv-md" use:mermaidRender={renderedHtml} use:syntaxHighlight={{ theme: $syntaxTheme }}>{@html renderedHtml}</div>
+    {:else if hlHtml}
+      <pre class="fv-pre fv-hl">{@html hlHtml}</pre>
     {:else}
       <pre class="fv-pre">{content}</pre>
     {/if}
@@ -137,6 +151,8 @@
     min-height: 100%;
     box-sizing: border-box;
   }
+
+  .fv-hl :global(span) { font-family: inherit; }
 
   .fv-md {
     padding: 16px 20px;

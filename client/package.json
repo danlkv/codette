@@ -11,6 +11,7 @@
     "katex": "^0.16.45",
     "marked": "^18.0.3",
     "mermaid": "^11.14.0",
+    "shiki": "^4.0.2",
     "svelte": "^5.55.5"
   },
   "devDependencies": {

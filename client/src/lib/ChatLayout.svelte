@@ -6,7 +6,7 @@
   import { get } from 'svelte/store';
 
   import { makeInlineFilePrompt } from '../../../shared/prompts.js';
-  import { messages, lastCost, lastUsage, hostStatus, wsOk, highContrast, vibrateOnDone, fontStyle,
+  import { messages, lastCost, lastUsage, hostStatus, wsOk, highContrast, vibrateOnDone, fontStyle, syntaxTheme,
            sessions, currentSessionId, sessionData } from '../store.js';
   import { createParser } from './parser.js';
   import { summarizeOldLines, KEEP as SUMMARIZE_KEEP } from './summarize.js';
@@ -520,6 +520,34 @@
               {/each}
             </div>
           </div>
+          <div class="menu-toggle">
+            <span>syntax</span>
+            <select class="theme-select" value={$syntaxTheme ?? ''}
+              onchange={e => syntaxTheme.set(e.currentTarget.value || null)}>
+              <option value="">none</option>
+              <optgroup label="dark">
+                <option value="github-dark">github dark</option>
+                <option value="one-dark-pro">one dark pro</option>
+                <option value="catppuccin-mocha">catppuccin mocha</option>
+                <option value="nord">nord</option>
+                <option value="dracula">dracula</option>
+                <option value="tokyo-night">tokyo night</option>
+                <option value="rose-pine">rose pine</option>
+                <option value="solarized-dark">solarized dark</option>
+                <option value="vitesse-dark">vitesse dark</option>
+              </optgroup>
+              <optgroup label="light">
+                <option value="github-light">github light</option>
+                <option value="rose-pine-dawn">rose pine dawn</option>
+                <option value="solarized-light">solarized light</option>
+                <option value="vitesse-light">vitesse light</option>
+              </optgroup>
+              <optgroup label="high contrast">
+                <option value="github-dark-high-contrast">github dark hc</option>
+                <option value="github-light-high-contrast">github light hc</option>
+              </optgroup>
+            </select>
+          </div>
         </div>
       {/if}
     </div>
@@ -662,4 +690,11 @@
   .font-btn:last-child { border-right: none; }
   .font-btn:hover { background: var(--bg-secondary); color: var(--text); }
   .font-btn.active { background: var(--accent); color: #fff; }
+  .theme-select {
+    background: var(--bg-secondary); border: 1px solid var(--border);
+    border-radius: 3px; color: var(--text-muted); font: inherit;
+    font-size: .72rem; padding: 2px 4px; cursor: pointer;
+    margin-left: 12px;
+  }
+  .theme-select:hover { border-color: var(--accent); color: var(--text); }
 </style>

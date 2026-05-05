@@ -11,6 +11,7 @@ export const wsOk           = writable(false);
 export const highContrast   = writable(localStorage.getItem('hc') === '1');
 export const vibrateOnDone  = writable(localStorage.getItem('vibrate') !== '0');
 export const fontStyle      = writable(localStorage.getItem('font') || 'mono');
+export const syntaxTheme    = writable(localStorage.getItem('syntaxTheme') || null);
 
 // Multi-session support
 export const sessions         = writable([]);    // Session[] list from server
