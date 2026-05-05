@@ -16,6 +16,28 @@ const CLIENT_USERNAME  = process.env.CLIENT_USERNAME  || execSync('whoami').toSt
 const CLIENT_PASSWORD  = process.env.CLIENT_PASSWORD  || 'changeme';
 const HOST_TOKEN       = process.env.HOST_KEY         || 'host-key-change-me';
 
+// --no-dir-privacy: disable cwd-restriction check on get_fs / get_file
+const NO_DIR_PRIVACY = process.argv.includes('--no-dir-privacy');
+
+if (process.argv.includes('--help') || process.argv.includes('-h')) {
+  process.stdout.write(`Usage: node host/index.js [options]
+
+Environment variables:
+  SERVER_URL        WebSocket server URL          (default: ws://localhost:3000)
+  CLIENT_USERNAME   Username shown in chat        (default: whoami)
+  CLIENT_PASSWORD   Password for web login        (default: changeme)
+  HOST_KEY          Shared secret with server     (default: host-key-change-me)
+
+Options:
+  --no-dir-privacy  Disable cwd-restriction on get_fs/get_file (allows any path)
+  --help, -h        Show this help
+
+Example:
+  HOST_KEY=secret CLIENT_USERNAME=dan SERVER_URL=wss://chat.example.com node host/index.js
+`);
+  process.exit(0);
+}
+
 // ── ANSI helpers ──────────────────────────────────────────────────────────────
 const A = {
   reset:  '\x1b[0m', bold:  '\x1b[1m', dim:   '\x1b[2m',
@@ -270,6 +292,7 @@ function resolveFsPath(p, sessionCwd) {
   return p;
 }
 function pathAllowed(p, sessionCwd) {
+  if (NO_DIR_PRIVACY) return true;
   if (sessionCwd && p.startsWith(sessionCwd)) return true;
   return ALLOWED_PREFIXES.some(prefix => p.startsWith(prefix + '/') || p === prefix);
 }
@@ -336,6 +359,7 @@ function connect() {
     hr();
     w(`${A.bold}${A.cyan}Claude Web Host${A.reset}  ${A.gray}${SERVER_URL}${A.reset}\n`);
     w(`${A.dim}Serving clients as: ${A.reset}${A.white}${CLIENT_USERNAME}${A.reset}  ${A.dim}password: ${A.reset}${A.white}${CLIENT_PASSWORD}${A.reset}\n`);
+    if (NO_DIR_PRIVACY) w(`${A.yellow}[warn] --no-dir-privacy: file access unrestricted${A.reset}\n`);
     hr();
     log('info', 'host connected to server', { url: SERVER_URL });
     sendSessionList();
