@@ -14,12 +14,13 @@ import { toolSummary } from '../utils/tools.js';
  *   (caller should call messages.set(result)).
  * - resetTurnState / finalizeIncomplete: lifecycle helpers for callers.
  */
-export function createParser({ messages, currentSessionId, lastCost, lastUsage }) {
+export function createParser({ messages, currentSessionId, lastCost, lastUsage, lastContextUsage, onContextWindow }) {
   // Per-turn streaming state
   let seenToolIds = new Set();
   let liveClaudeId = null;
   let liveUid = null;
   let msgCounter = 0;
+  let lastAssistantUsage = null; // last seen assistant message usage (any stop_reason)
 
   // Batch accumulator: null = write to store directly, array = accumulate for atomic set
   let _batch = null;
@@ -65,6 +66,7 @@ export function createParser({ messages, currentSessionId, lastCost, lastUsage }
   }
 
   function parseLine(line, live = false) {
+    const fromHistory = !live;
     let ev;
     try { ev = JSON.parse(line); } catch { return; }
 
@@ -135,6 +137,24 @@ export function createParser({ messages, currentSessionId, lastCost, lastUsage }
         }
       }
 
+      // Update ctx from assistant events (both history and live).
+      // usage.input_tokens + cache fields = tokens sent to this API call = current context size.
+      // result.modelUsage has cumulative billing totals, not per-call context size.
+      const stopReason = ev.message?.stop_reason;
+      const usage = ev.message?.usage;
+      if (usage) lastAssistantUsage = usage; // track last seen usage for result handler fallback
+      if (stopReason != null && usage && lastContextUsage) {
+        const inputTotal = (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0);
+        const val = {
+          used: inputTotal,
+          total: 200000, // all current Claude models; overwritten when result event provides contextWindow
+          cacheRead: usage.cache_read_input_tokens ?? 0,
+          out: usage.output_tokens ?? 0,
+        };
+        console.log('[ctx] assistant event:', { stopReason, live, in: usage.input_tokens, cacheRead: usage.cache_read_input_tokens, cacheCreate: usage.cache_creation_input_tokens, out: usage.output_tokens, inputTotal }, '→', val);
+        lastContextUsage.set(val);
+      }
+
     } else if (ev.type === 'result') {
       if (liveUid !== null) {
         mutMsg(ms => ms.map(m =>
@@ -148,6 +168,31 @@ export function createParser({ messages, currentSessionId, lastCost, lastUsage }
       ));
       if (ev.total_cost_usd != null) lastCost.set(ev.total_cost_usd);
       if (ev.usage != null) lastUsage.set(ev.usage);
+      // result.modelUsage provides the definitive contextWindow (denominator).
+      // Use lastAssistantUsage for per-call token counts — result.usage is cumulative across turns.
+      // With --include-partial-messages, the final complete assistant event may not reach the live
+      // stream (only partials do), so this is the reliable place to set lastContextUsage live.
+      if (lastContextUsage) {
+        const cw = ev.modelUsage
+          ? Object.values(ev.modelUsage).map(m => m.contextWindow).find(v => v != null)
+          : null;
+        if (lastAssistantUsage) {
+          const u = lastAssistantUsage;
+          const inputTotal = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+          console.log('[ctx] result: setting from lastAssistantUsage, cw=', cw, 'inputTotal=', inputTotal);
+          lastContextUsage.set({
+            used: inputTotal,
+            total: cw ?? 200000,
+            cacheRead: u.cache_read_input_tokens ?? 0,
+            out: u.output_tokens ?? 0,
+          });
+          if (cw != null) onContextWindow?.(cw);
+        } else if (cw != null) {
+          lastContextUsage.update(v => v ? { ...v, total: cw } : v);
+          onContextWindow?.(cw);
+        }
+        lastAssistantUsage = null; // reset for next turn
+      }
       seenToolIds = new Set();
     }
   }
@@ -157,6 +202,19 @@ export function createParser({ messages, currentSessionId, lastCost, lastUsage }
   function applyLines(lines) {
     _batch = [];
     resetTurnState();
+    // Debug: tally event types and assistant stop_reasons
+    const tally = {}; const asstReasons = {};
+    for (const line of lines) {
+      try {
+        const ev = JSON.parse(line);
+        tally[ev.type] = (tally[ev.type] ?? 0) + 1;
+        if (ev.type === 'assistant') {
+          const sr = ev.message?.stop_reason ?? 'null/absent';
+          asstReasons[sr] = (asstReasons[sr] ?? 0) + 1;
+        }
+      } catch {}
+    }
+    console.log('[ctx] applyLines', lines.length, 'lines — types:', tally, '— asst stop_reasons:', asstReasons);
     for (const line of lines) parseLine(line, false);
     finalizeIncomplete();
     const batch = _batch;

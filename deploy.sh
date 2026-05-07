@@ -2,13 +2,22 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Danylo Lykov
 
-# Deploy webchat to example.com
+# Deploy webchat to a remote host
+# usage: ./deploy.sh [remote-host]
 set -euo pipefail
 
-REMOTE="example.com"
-REMOTE_DIR="/home/<user>/webchat"
-DOMAIN="chat.example.com"
+REMOTE="${1:-example.com}"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+
+case "$REMOTE" in
+  example.com)
+    REMOTE_DIR="/home/<user>/webchat"
+    DOMAIN="chat.example.com"
+    ;;
+  *)
+    echo "Unknown host: $REMOTE. Add it to deploy.sh or set REMOTE_DIR/DOMAIN."; exit 1
+    ;;
+esac
 
 # ── 1. Build client locally ───────────────────────────────────────────────────
 echo "==> building client"

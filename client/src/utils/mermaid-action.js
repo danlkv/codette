@@ -37,9 +37,12 @@ function openFullscreen(mermaidEl) {
   const svg = mermaidEl.querySelector('svg');
   if (!svg) return;
   const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;cursor:zoom-out;';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;cursor:zoom-out;padding:24px;box-sizing:border-box;';
   const clone = svg.cloneNode(true);
-  clone.style.cssText = 'max-width:95vw;max-height:95vh;width:auto;height:auto;background:var(--bg-primary);border-radius:6px;padding:16px;cursor:default;';
+  // Remove fixed dimensions so it scales to viewport
+  clone.removeAttribute('width');
+  clone.removeAttribute('height');
+  clone.style.cssText = 'max-width:100%;max-height:100%;width:auto;height:auto;background:var(--bg-primary);border-radius:6px;padding:16px;cursor:default;display:block;';
   clone.addEventListener('click', e => e.stopPropagation());
   overlay.appendChild(clone);
   overlay.addEventListener('click', () => overlay.remove());

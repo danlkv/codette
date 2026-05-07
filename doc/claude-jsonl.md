@@ -11,9 +11,11 @@ Examples: `doc/example-stream.jsonl`, `doc/example-session.jsonl` (session `37f7
 | Field | stream | session |
 |-------|--------|---------|
 | wrapper | `parent_tool_use_id`, `session_id` | full envelope |
-| `message.stop_reason` | `null` | `"end_turn"` \| `"tool_use"` |
+| `message.stop_reason` | always `null` | `"end_turn"` \| `"tool_use"` |
 | `message.usage` | partial (no `output_tokens`) | complete |
 | `requestId`, `timestamp` | absent on assistant | present |
+
+**Key implication:** the stream never emits a final complete assistant event with `stop_reason` set — that version is written to session JSONL only. The `result` event is the stream's end-of-turn marker. Clients wanting per-turn usage should read from the last assistant `usage` seen before `result`, not gate on `stop_reason != null`.
 
 ---
 
@@ -99,8 +101,8 @@ type ToolResultBlock = {
 }
 
 type ToolUseResult =
-  | { stdout: string, stderr: string, interrupted: boolean, isImage: boolean, noOutputExpected: boolean }  // Bash
-  | { filePath: string, oldString: string, newString: string, originalFile: string }                       // Edit
+  | { stdout: string, stderr: string, interrupted: boolean, isImage?: boolean, noOutputExpected?: boolean }  // Bash
+  | { filePath: string, oldString: string, newString: string, originalFile: string }                         // Edit
 ```
 
 ---
@@ -112,7 +114,7 @@ type ToolUseResult =
   ...envelope
   attachment:
     | { type: "deferred_tools_delta", addedNames: string[], addedLines: string[], removedNames: string[] }
-    | { type: "skill_listing", content: string, skillCount: number, isInitial: boolean }
+    | { type: "skill_listing", content: string, skillCount: number, isInitial: boolean, showConcurrencyNote: boolean }
 }
 ```
 
@@ -176,7 +178,7 @@ type Message = {
 type ContentBlock =
   | { type: "text",     text: string }
   | { type: "thinking", thinking: string, signature: string }   // signature = base64 opaque token
-  | { type: "tool_use", id: string, name: string, input: ToolInput, caller: { type: "direct" | "mcp" } }
+  | { type: "tool_use", id: string, name: string, input: ToolInput, caller?: { type: "direct" | "mcp" } }  // caller present only when tool_search beta enabled
   | { type: "tool_result", tool_use_id: string, content: string, is_error: boolean }
 
 type ToolInput =

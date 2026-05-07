@@ -186,7 +186,7 @@ sequenceDiagram
     H-->>S: agent_event(started)
     S-->>C: agent_event(started)
     H->>Cl: stdin write
-    H-->>S: claude_line(user echo)
+    H-->>-S: claude_line(user echo)
     S-->>C: claude_line(user echo)
     Note over C: pending cleared - message bubble rendered
     loop streaming
@@ -195,7 +195,6 @@ sequenceDiagram
         S-->>C: claude_line
     end
     Cl-->>-H: result
-    deactivate H
 ```
 
 ### Hot start — agent running, client reconnects
@@ -240,7 +239,7 @@ sequenceDiagram
     Note over A: send button - pending indicator
     S->>+H: user
     S-->>-A: (forwarded)
-    H-->>S: claude_line(A, user echo)
+    H-->>-S: claude_line(A, user echo)
     S-->>A: claude_line(A, user echo)
     S-->>B: claude_line(A, user echo)
     Note over A: pending cleared - message bubble rendered
@@ -249,7 +248,6 @@ sequenceDiagram
         S-->>A: claude_line(A)
         S-->>B: claude_line(A)
     end
-    deactivate H
     Note over B: switches to session B
     B->>S: GET /sessions/B/history
     S-->>B: {lines}

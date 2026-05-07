@@ -5,13 +5,15 @@ import { writable, derived } from 'svelte/store';
 
 export const messages       = writable([]);
 export const lastCost       = writable(null);
-export const lastUsage      = writable(null); // { input_tokens, output_tokens, cache_read_input_tokens }
+export const lastUsage          = writable(null); // { input_tokens, output_tokens, cache_read_input_tokens }
+export const lastContextUsage   = writable(null); // { used: number, total: number } from modelUsage
 export const hostStatus     = writable('disconnected');
 export const wsOk           = writable(false);
 export const highContrast   = writable(localStorage.getItem('hc') === '1');
 export const vibrateOnDone  = writable(localStorage.getItem('vibrate') !== '0');
 export const fontStyle      = writable(localStorage.getItem('font') || 'mono');
 export const syntaxTheme    = writable(localStorage.getItem('syntaxTheme') || null);
+export const accentColor    = writable(localStorage.getItem('accentColor') || null);
 
 // Multi-session support
 export const sessions         = writable([]);    // Session[] list from server
@@ -31,6 +33,7 @@ export function resetStores() {
   messages.set([]);
   lastCost.set(null);
   lastUsage.set(null);
+  lastContextUsage.set(null);
   hostStatus.set('disconnected');
   wsOk.set(false);
   sessions.set([]);

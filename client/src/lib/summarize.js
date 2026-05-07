@@ -12,9 +12,21 @@ function truncStr(s, limit = TRUNC) {
 // Compact old JSONL lines to reduce localStorage size:
 //   - user(tool_results): truncate content, strip outer transcript metadata
 //   - assistant: drop thinking blocks, truncate text + tool_use inputs, strip outer metadata
+//   - assistant.usage: kept only on the most recent complete event (for ctx bar); stripped elsewhere
 export function summarizeOldLines(lines) {
+  // Find the last complete assistant event with usage so ctx bar still works after summarization
+  let lastCompleteAsstIdx = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try {
+      const ev = JSON.parse(lines[i]);
+      if (ev.type === 'assistant' && ev.message?.stop_reason != null && ev.message?.usage) {
+        lastCompleteAsstIdx = i; break;
+      }
+    } catch {}
+  }
+
   let seenAiTitle = false;
-  return lines.flatMap(line => {
+  return lines.flatMap((line, idx) => {
     let ev;
     try { ev = JSON.parse(line); } catch { return [line]; }
 
@@ -54,9 +66,11 @@ export function summarizeOldLines(lines) {
         }
         return [b];
       });
-      // strip usage/diagnostics/model + outer transcript metadata
-      const { id, role, stop_reason, stop_sequence, type: msgType } = ev.message;
-      return [JSON.stringify({ type: ev.type, timestamp: ev.timestamp, message: { id, role, stop_reason, stop_sequence, type: msgType, content } })];
+      // strip diagnostics/model + outer transcript metadata; keep usage only on most recent event
+      const { id, role, stop_reason, stop_sequence, type: msgType, usage } = ev.message;
+      const msg = { id, role, stop_reason, stop_sequence, type: msgType, content };
+      if (idx === lastCompleteAsstIdx && usage) msg.usage = usage;
+      return [JSON.stringify({ type: ev.type, timestamp: ev.timestamp, message: msg })];
     }
 
     return [line];

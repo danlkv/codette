@@ -2,7 +2,7 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
-  let { disabled = false, placeholder = 'Message Claude…', sendLabel = 'send', onSend } = $props();
+  let { disabled = false, placeholder = 'Message Claude…', sendLabel = 'send', onSend, header } = $props();
 
   let value = $state('');
   let el = $state();
@@ -60,6 +60,7 @@
       {/each}
     </div>
   {/if}
+  {@render header?.()}
   <div class="bar">
     <textarea
       bind:this={el} bind:value
@@ -80,6 +81,7 @@
   .bar {
     display: flex; align-items: flex-end; gap: 8px;
     max-width: 740px; margin: 0 auto;
+    position: relative;
   }
   textarea {
     flex: 1; background: var(--bg-elevated);

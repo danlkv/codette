@@ -32,6 +32,7 @@ const EXT_LANG = {
   ex: 'elixir', exs: 'elixir',
   hs: 'haskell',
   nix: 'nix',
+  mojo: 'mojo', '🔥': 'mojo',
 };
 
 // Theme id → shiki bundle import
@@ -93,6 +94,7 @@ const LANG_IMPORTS = {
   elixir:     () => import('shiki/langs/elixir.mjs'),
   haskell:    () => import('shiki/langs/haskell.mjs'),
   nix:        () => import('shiki/langs/nix.mjs'),
+  mojo:       () => import('shiki/langs/mojo.mjs'),
 };
 
 // Store promises, not resolved values — prevents concurrent duplicate loads

@@ -6,7 +6,7 @@
   import { get } from 'svelte/store';
 
   import { makeInlineFilePrompt } from '../../../shared/prompts.js';
-  import { messages, lastCost, lastUsage, hostStatus, wsOk, highContrast, vibrateOnDone, fontStyle, syntaxTheme,
+  import { messages, lastCost, lastUsage, lastContextUsage, hostStatus, wsOk, highContrast, vibrateOnDone, fontStyle, syntaxTheme, accentColor,
            sessions, currentSessionId, sessionData } from '../store.js';
   import { createParser } from './parser.js';
   import { summarizeOldLines, KEEP as SUMMARIZE_KEEP } from './summarize.js';
@@ -32,7 +32,9 @@
     return () => document.removeEventListener('click', onDocClick, true);
   });
 
-  const parser = createParser({ messages, currentSessionId, lastCost, lastUsage });
+  let storedContextWindow = null;
+  const parser = createParser({ messages, currentSessionId, lastCost, lastUsage, lastContextUsage,
+    onContextWindow(cw) { storedContextWindow = cw; } });
 
   let ws;
   let destroyed = false;
@@ -52,6 +54,7 @@
   let currentAgentState = $derived($sessions.find(s => s.id === $currentSessionId)?.agentState ?? null);
   let currentAgentActive = $derived(!!currentAgentState);
   let sendPending = $state(false);
+  let ctxBarOpen = $state(false);
   let inputDisabled = $derived(!$wsOk);
   let inputPlaceholder = $derived($currentSessionId === '__new__'
     ? 'Type your first message to start the session…'
@@ -64,21 +67,30 @@
           : 'Send to start… (/ for commands)');
 
   // Hash helpers: format is #username/sessionId (legacy: #sessionId)
-  function parseHashSessionId() {
+  function parseHash() {
     const h = location.hash.slice(1);
-    if (!h) return null;
-    const slash = h.indexOf('/');
-    return (slash >= 0 ? h.slice(slash + 1) : h) || null;
+    if (!h) return { sessionId: null, file: null };
+    const [base, query] = h.split('?');
+    const slash = base.indexOf('/');
+    const sessionId = (slash >= 0 ? base.slice(slash + 1) : base) || null;
+    const file = query ? (new URLSearchParams(query).get('file') || null) : null;
+    return { sessionId, file };
   }
-  function makeHash(sessionId) {
-    return '#' + (username ? username + '/' : '') + sessionId;
+  function parseHashSessionId() { return parseHash().sessionId; }
+  function makeHash(sessionId, filePath = null) {
+    const base = '#' + (username ? username + '/' : '') + sessionId;
+    return filePath ? base + '?file=' + encodeURIComponent(filePath) : base;
   }
 
   function onPopState() {
-    const id = parseHashSessionId();
-    if (!id || id === get(currentSessionId)) return;
+    const { sessionId: id, file } = parseHash();
+    if (!id || id === get(currentSessionId)) {
+      fileViewPath = file;
+      return;
+    }
     if (id === 'new') { handleNewSession(null); return; }
     switchSession(id);
+    fileViewPath = file;
   }
 
   onMount(async () => {
@@ -120,13 +132,14 @@
     } catch (e) { console.error('[history] initSessions: fetch error', e); }
 
     if (sessionList.length === 0) { console.log('[history] initSessions: no sessions, returning'); return; }
-    const hashId = parseHashSessionId();
+    const { sessionId: hashId, file: hashFile } = parseHash();
     const target = (hashId && hashId !== 'new' && sessionList.find(s => s.id === hashId))
       ? hashId
       : sessionList[0].id;
     console.log('[history] initSessions: target session', target, '(hash was:', hashId + ')');
-    history.replaceState(null, '', makeHash(target));
+    history.replaceState(null, '', makeHash(target, hashFile));
     currentSessionId.set(target);
+    if (hashFile) fileViewPath = hashFile;
     await loadSessionHistory(target);
   }
 
@@ -154,10 +167,10 @@
   //   1. summarize old lines and retry
   //   2. evict 2 oldest sessions and retry
   // lineCount is always the real count so server offsets stay correct.
-  function tryStoreHistory(cacheKey, lines, lineCount, title = '') {
+  function tryStoreHistory(cacheKey, lines, lineCount, title = '', contextWindow = null) {
     const byteEst = s => new Blob([s]).size;
     const ts = Date.now();
-    const raw = JSON.stringify({ lines, lineCount, ts, title });
+    const raw = JSON.stringify({ lines, lineCount, ts, title, ...(contextWindow && { contextWindow }) });
     console.log('[history] tryStoreHistory:', cacheKey, lines.length, 'lines, lineCount=', lineCount, '~', (byteEst(raw)/1024).toFixed(1), 'KB');
     try { localStorage.setItem(cacheKey, raw); console.log('[history] tryStoreHistory: saved ok'); return; }
     catch (e) { if (e.name !== 'QuotaExceededError') { console.error('[history] tryStoreHistory:', e); return; } }
@@ -181,7 +194,7 @@
     const id = get(currentSessionId);
     if (!id || currentLines.length === 0) return;
     console.log('[history] saveCurrentCache:', id, currentLines.length, 'lines');
-    tryStoreHistory('history_' + id, currentLines, currentLines.length, sessionTitle);
+    tryStoreHistory('history_' + id, currentLines, currentLines.length, sessionTitle, storedContextWindow);
   }
 
   async function loadSessionHistory(id) {
@@ -199,6 +212,7 @@
     console.log('[history] loadSessionHistory', id, '— localStorage cache:', cached ? cached.lines.length + ' lines (lineCount=' + cached.lineCount + ')' : 'none');
     if (cached) {
       if (cached.title) sessionTitle = cached.title;
+      if (cached.contextWindow) storedContextWindow = cached.contextWindow;
       applyHistoryLines(cached.lines);
       console.log('[history] loadSessionHistory: applied localStorage cache, messages.length=', cached.lines.length);
     }
@@ -231,11 +245,11 @@
         const merged = [...cached.lines, ...lines];
         console.log('[history] fetchAndApplyHistory: merged', cached.lines.length, '+', lines.length, '=', merged.length, 'lines');
         applyHistoryLines(merged);
-        tryStoreHistory(cacheKey, merged, merged.length, sessionTitle);
+        tryStoreHistory(cacheKey, merged, merged.length, sessionTitle, storedContextWindow);
       } else {
         console.log('[history] fetchAndApplyHistory: applying', lines.length, 'lines (full)');
         applyHistoryLines(lines);
-        tryStoreHistory(cacheKey, lines, lines.length, sessionTitle);
+        tryStoreHistory(cacheKey, lines, lines.length, sessionTitle, storedContextWindow);
       }
     } catch (e) { console.error('fetchAndApplyHistory:', e); }
   }
@@ -248,6 +262,7 @@
     }
     currentLines = filtered;
     messages.set(parser.applyLines(filtered));
+    if (storedContextWindow) lastContextUsage.update(v => v ? { ...v, total: storedContextWindow } : v);
   }
 
   function connect() {
@@ -320,6 +335,7 @@
     currentSessionId.set(id);
     currentLines = [];
     sessionTitle = '';
+    storedContextWindow = null;
     parser.resetTurnState();
 
     // Show in-memory cache only if there's no localStorage cache that will
@@ -471,6 +487,7 @@
   function handleFileOpen({ path }) {
     fileViewPath = path;
     diffViewCommit = null;
+    history.pushState(null, '', makeHash(get(currentSessionId), path));
   }
 
   function handleDiffOpen({ commit }) {
@@ -525,6 +542,16 @@
                 <button class="font-btn" class:active={$fontStyle === f}
                   onclick={() => fontStyle.set(f)}>{f}</button>
               {/each}
+            </div>
+          </div>
+          <div class="menu-toggle">
+            <span>accent</span>
+            <div class="accent-pick">
+              <input type="color" value={$accentColor ?? '#cc5500'}
+                oninput={e => accentColor.set(e.currentTarget.value)} />
+              {#if $accentColor}
+                <button class="accent-reset" onclick={() => accentColor.set(null)}>reset</button>
+              {/if}
             </div>
           </div>
           <div class="menu-toggle">
@@ -591,17 +618,36 @@
           sessionId={$currentSessionId}
           path={fileViewPath}
           {token}
-          onClose={() => fileViewPath = null}
+          onClose={() => { fileViewPath = null; history.pushState(null, '', makeHash(get(currentSessionId))); }}
         />
       {/if}
       <div class="chat-main" class:hidden={fileViewPath || diffViewCommit}>
         <MessageList hostStatus={$hostStatus} {historyLoading} sessionId={$currentSessionId} {token} onOpenFile={path => handleFileOpen({ path })} />
-        <ChatInput
-          disabled={inputDisabled || sendPending}
-          placeholder={inputPlaceholder}
-          sendLabel={sendPending ? '…' : currentAgentActive ? 'send' : 'send & start'}
-          onSend={handleSend}
-        />
+        <div class="ctx-shell" class:ctx-open={ctxBarOpen}
+          style={$lastContextUsage ? `--ctx-pct:${Math.min(100, $lastContextUsage.used / $lastContextUsage.total * 100).toFixed(1)}%` : '--ctx-pct:0%'}>
+          <div class="ctx-above">
+            <div class="ctx-above-inner">
+              {#if $lastContextUsage}
+                ctx <em>{Math.round($lastContextUsage.used / 1000)}k / {Math.round($lastContextUsage.total / 1000)}k</em>
+                {#if $lastContextUsage.out}
+                  <span class="ctx-sep">·</span> last out: <em>{($lastContextUsage.out / 1000).toFixed(1)}k</em>
+                {/if}
+                {#if $lastContextUsage.cacheRead && $lastContextUsage.used}
+                  <span class="ctx-sep">·</span> input cache: <em>{Math.round($lastContextUsage.cacheRead / $lastContextUsage.used * 100)}%</em>
+                {/if}
+              {:else}
+                <span class="ctx-dim">no data yet — complete a turn first</span>
+              {/if}
+            </div>
+          </div>
+          <ChatInput
+            disabled={inputDisabled || sendPending}
+            placeholder={inputPlaceholder}
+            sendLabel={sendPending ? '…' : currentAgentActive ? 'send' : 'send & start'}
+            onSend={handleSend}
+          />
+          <button class="ctx-strip" onclick={() => ctxBarOpen = !ctxBarOpen} title="Token usage"></button>
+        </div>
       </div>
     </div>
   </div>
@@ -698,6 +744,16 @@
   .font-btn:last-child { border-right: none; }
   .font-btn:hover { background: var(--bg-secondary); color: var(--text); }
   .font-btn.active { background: var(--accent); color: #fff; }
+  .accent-pick { display: flex; align-items: center; gap: 6px; margin-left: 12px; }
+  .accent-pick input[type="color"] {
+    width: 28px; height: 20px; padding: 0; border: 1px solid var(--border);
+    border-radius: 3px; background: none; cursor: pointer;
+  }
+  .accent-reset {
+    background: none; border: none; color: var(--text-dim); font: inherit;
+    font-size: .68rem; cursor: pointer; padding: 0;
+  }
+  .accent-reset:hover { color: var(--text-muted); }
   .theme-select {
     background: var(--bg-secondary); border: 1px solid var(--border);
     border-radius: 3px; color: var(--text-muted); font: inherit;
@@ -705,4 +761,31 @@
     margin-left: 12px;
   }
   .theme-select:hover { border-color: var(--accent); color: var(--text); }
+
+  .ctx-shell { position: relative; }
+  .ctx-shell :global(.wrap) { padding-left: 22px; }
+
+  .ctx-above { overflow: hidden; max-height: 0; transition: max-height .18s ease; }
+  .ctx-shell.ctx-open .ctx-above { max-height: 30px; }
+  .ctx-above-inner {
+    display: flex; align-items: baseline; gap: 5px; flex-wrap: nowrap;
+    padding: 3px 16px 3px 22px; border-bottom: 1px solid var(--border);
+    font: .62rem/1 monospace; color: var(--text-dim); justify-content: flex-end;
+  }
+  .ctx-above-inner em { color: var(--accent-light); font-style: normal; }
+  .ctx-sep { color: var(--border); margin: 0 2px; }
+  .ctx-dim { font-style: italic; }
+
+  .ctx-strip {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 16px;
+    background: none; border: none; cursor: pointer; padding: 0;
+    display: flex; align-items: stretch;
+  }
+  .ctx-strip::before {
+    content: ''; width: 6px;
+    background: linear-gradient(to top, var(--accent) var(--ctx-pct, 0%), var(--bg-elevated) var(--ctx-pct, 0%));
+    opacity: .55; transition: opacity .15s;
+  }
+  .ctx-strip:hover::before { opacity: 1; }
+  .ctx-shell.ctx-open .ctx-strip::before { opacity: 1; }
 </style>
