@@ -54,6 +54,9 @@
     base64 = null;
     mimeType = null;
     pdfPages = null;
+    pdfScale = 1.5;
+    pdfDoc = null;
+    pdfNumPages = 0;
     try {
       const url = `/api/sessions/${encodeURIComponent(sessionId)}/file?path=${encodeURIComponent(path)}`;
       const res = await fetch(url, {
@@ -77,43 +80,85 @@
     }
   }
 
+  let pdfScale = $state(1.5);
+  let pdfNumPages = $state(0);
+  let pdfDoc = null;    // loaded pdfjs document
+  let pdfLib = null;    // cached pdfjs module
   let pdfContainerEl = $state(null);
 
+  // Re-render at new scale when user zooms (pdfDoc already loaded)
+  $effect(() => {
+    const scale = pdfScale;
+    if (!pdfDoc) return;
+    renderPages(pdfDoc, scale).catch(e => console.error('[pdf zoom]', e));
+  });
+
   async function renderPdf(b64) {
-    const [pdfjsLib, { default: workerUrl }] = await Promise.all([
-      import('pdfjs-dist'),
-      import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
-    ]);
-    pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+    if (!pdfLib) {
+      const [lib, { default: workerUrl }] = await Promise.all([
+        import('pdfjs-dist'),
+        import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
+      ]);
+      lib.GlobalWorkerOptions.workerSrc = workerUrl;
+      pdfLib = lib;
+    }
     const data = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-    const pdf = await pdfjsLib.getDocument({ data }).promise;
-    const canvases = [];
+    pdfDoc = await pdfLib.getDocument({ data }).promise;
+    pdfNumPages = pdfDoc.numPages;
+    await renderPages(pdfDoc, pdfScale);
+  }
+
+  async function renderPages(pdf, scale) {
+    const pages = [];
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
-      const viewport = page.getViewport({ scale: 1.5 });
+      const viewport = page.getViewport({ scale });
+
       const canvas = document.createElement('canvas');
       canvas.width = viewport.width;
       canvas.height = viewport.height;
-      canvas.style.width = '100%';
-      canvas.style.display = 'block';
-      canvas.style.marginBottom = '8px';
       await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-      canvases.push(canvas);
+
+      const textDiv = document.createElement('div');
+      textDiv.className = 'pdf-text-layer';
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'pdf-page';
+      wrapper.style.cssText = `width:${viewport.width}px;height:${viewport.height}px`;
+      wrapper.appendChild(canvas);
+      wrapper.appendChild(textDiv);
+      pages.push(wrapper);
+
+      // Render text layer (v4: renderTextLayer, v5: TextLayer class)
+      const src = page.streamTextContent();
+      if (pdfLib.renderTextLayer) {
+        pdfLib.renderTextLayer({ textContentSource: src, container: textDiv, viewport });
+      } else if (pdfLib.TextLayer) {
+        new pdfLib.TextLayer({ textContentSource: src, container: textDiv, viewport }).render();
+      }
     }
-    pdfPages = canvases;
+    pdfPages = pages;
   }
 
-  // Mount PDF canvases into container when both are ready
+  // Mount page wrappers into container when pdfPages changes
   $effect(() => {
     if (!pdfContainerEl || !pdfPages) return;
     pdfContainerEl.innerHTML = '';
-    for (const canvas of pdfPages) pdfContainerEl.appendChild(canvas);
+    for (const page of pdfPages) pdfContainerEl.appendChild(page);
   });
 </script>
 
 <div class="file-view">
   <div class="fv-header">
     <span class="fv-path" title={path}>{relativePath}</span>
+    {#if isPdf && pdfPages}
+      <span class="fv-pdf-pages">{pdfNumPages}p</span>
+      <div class="fv-zoom">
+        <button class="fv-zoom-btn" onclick={() => pdfScale = Math.max(0.5, +(pdfScale - 0.25).toFixed(2))} title="Zoom out">−</button>
+        <span class="fv-zoom-label">{Math.round(pdfScale * 100)}%</span>
+        <button class="fv-zoom-btn" onclick={() => pdfScale = Math.min(4, +(pdfScale + 0.25).toFixed(2))} title="Zoom in">+</button>
+      </div>
+    {/if}
     <button class="fv-close" onclick={onClose} title="Close file view" aria-label="Close">×</button>
   </div>
 
@@ -212,8 +257,66 @@
 
   .fv-hl :global(span) { font-family: inherit; }
 
+  .fv-zoom {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .fv-zoom-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: .85rem;
+    line-height: 1;
+    padding: 1px 6px;
+    font-family: inherit;
+  }
+  .fv-zoom-btn:hover { color: var(--text); border-color: var(--text-muted); }
+  .fv-zoom-label {
+    font-size: .72rem;
+    color: var(--text-dim);
+    min-width: 3ch;
+    text-align: center;
+  }
+
+  .fv-pdf-pages {
+    font-size: .72rem;
+    color: var(--text-dim);
+    flex-shrink: 0;
+  }
+
   .fv-pdf {
     padding: 12px;
+  }
+
+  :global(.pdf-page) {
+    position: relative;
+    margin: 0 auto 8px;
+  }
+  :global(.pdf-page canvas) {
+    display: block;
+  }
+  :global(.pdf-text-layer) {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    line-height: 1;
+    user-select: text;
+  }
+  :global(.pdf-text-layer span),
+  :global(.pdf-text-layer br) {
+    color: transparent;
+    position: absolute;
+    white-space: pre;
+    cursor: text;
+    transform-origin: 0% 0%;
+  }
+  :global(.pdf-text-layer ::selection) {
+    background: rgba(100, 150, 255, 0.35);
+    color: transparent;
   }
 
   .fv-md {
