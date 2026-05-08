@@ -25,28 +25,25 @@
     return `#${h2(hue(h+1/3))}${h2(hue(h))}${h2(hue(h-1/3))}`;
   }
 
-  $effect(() => {
-    localStorage.setItem('accentColor', $accentColor ?? '');
-    const root = document.documentElement;
-    if ($accentColor) {
-      root.style.setProperty('--accent', $accentColor);
-      root.style.setProperty('--accent-light', lightenHex($accentColor));
-    } else {
-      root.style.removeProperty('--accent');
-      root.style.removeProperty('--accent-light');
-    }
-  });
-
   function loadAccounts() {
     try {
-      const saved = JSON.parse(localStorage.getItem('chat_accounts') || '[]');
-      if (saved.length) return saved;
-      // migrate legacy single token
-      const old = localStorage.getItem('chat_token');
-      if (old) {
-        const { username } = JSON.parse(atob(old.split('.')[1]));
-        return [{ username, token: old }];
+      let accs = JSON.parse(localStorage.getItem('chat_accounts') || '[]');
+      if (!accs.length) {
+        // migrate legacy single token
+        const old = localStorage.getItem('chat_token');
+        if (old) {
+          const { username } = JSON.parse(atob(old.split('.')[1]));
+          accs = [{ username, token: old }];
+        }
       }
+      if (!accs.length) return [];
+      // ensure every account has a settings object; migrate bare localStorage to first account
+      const legacyTheme = localStorage.getItem('syntaxTheme') || null;
+      const legacyAccent = localStorage.getItem('accentColor') || null;
+      return accs.map((acc, i) => acc.settings ? acc : {
+        ...acc,
+        settings: i === 0 ? { syntaxTheme: legacyTheme, accentColor: legacyAccent } : {},
+      });
     } catch {}
     return [];
   }
@@ -81,10 +78,10 @@
     try {
       const { username } = JSON.parse(atob(t.split('.')[1]));
       const i = accounts.findIndex(a => a.username === username);
-      if (i >= 0) { accounts[i] = { username, token: t }; activeIdx = i; }
-      else { accounts = [...accounts, { username, token: t }]; activeIdx = accounts.length - 1; }
+      if (i >= 0) { accounts[i] = { ...accounts[i], token: t }; activeIdx = i; }
+      else { accounts = [...accounts, { username, token: t, settings: {} }]; activeIdx = accounts.length - 1; }
     } catch {
-      accounts = [...accounts, { username: '?', token: t }];
+      accounts = [...accounts, { username: '?', token: t, settings: {} }];
       activeIdx = accounts.length - 1;
     }
     addingAccount = false;
@@ -98,6 +95,40 @@
   }
 
   function handleSwitch(idx) { resetStores(); activeIdx = idx; persist(); }
+
+  // Apply per-account settings when active account changes
+  $effect(() => {
+    const s = accounts[activeIdx]?.settings ?? {};
+    syntaxTheme.set(s.syntaxTheme ?? null);
+    accentColor.set(s.accentColor ?? null);
+  });
+
+  // Persist syntaxTheme to active account
+  $effect(() => {
+    const theme = $syntaxTheme;
+    const acc = accounts[activeIdx];
+    if (!acc || (acc.settings?.syntaxTheme ?? null) === theme) return;
+    accounts[activeIdx] = { ...acc, settings: { ...(acc.settings ?? {}), syntaxTheme: theme } };
+    persist();
+  });
+
+  // Persist accentColor to active account + apply CSS vars
+  $effect(() => {
+    const color = $accentColor;
+    const acc = accounts[activeIdx];
+    if (acc && (acc.settings?.accentColor ?? null) !== color) {
+      accounts[activeIdx] = { ...acc, settings: { ...(acc.settings ?? {}), accentColor: color } };
+      persist();
+    }
+    const root = document.documentElement;
+    if (color) {
+      root.style.setProperty('--accent', color);
+      root.style.setProperty('--accent-light', lightenHex(color));
+    } else {
+      root.style.removeProperty('--accent');
+      root.style.removeProperty('--accent-light');
+    }
+  });
 
   // Persist high-contrast preference and apply class to <html>
   $effect(() => {
@@ -116,11 +147,6 @@
   $effect(() => {
     document.documentElement.style.setProperty('--chat-font', FONT_FAMILIES[$fontStyle] ?? FONT_FAMILIES.mono);
     localStorage.setItem('font', $fontStyle);
-  });
-
-  $effect(() => {
-    if ($syntaxTheme) localStorage.setItem('syntaxTheme', $syntaxTheme);
-    else localStorage.removeItem('syntaxTheme');
   });
 
   // Fix mobile keyboard shrinking the viewport
