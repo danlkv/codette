@@ -29,9 +29,8 @@
   function send() {
     const text = value.trim();
     if (!text) return;
-    value = '';
-    resize();
-    onSend?.(text);
+    const clearFn = () => { value = ''; resize(); };
+    onSend?.(text, clearFn);
   }
 
   function keydown(e) {

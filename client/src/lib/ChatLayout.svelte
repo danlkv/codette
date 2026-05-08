@@ -54,6 +54,8 @@
   let currentAgentState = $derived($sessions.find(s => s.id === $currentSessionId)?.agentState ?? null);
   let currentAgentActive = $derived(!!currentAgentState);
   let sendPending = $state(false);
+  let pendingClearFn = null;
+  let pendingEchoTimer = null;
   let ctxBarOpen = $state(false);
   let inputDisabled = $derived(!$wsOk);
   let inputPlaceholder = $derived($currentSessionId === '__new__'
@@ -286,7 +288,12 @@
           try {
             const ev = JSON.parse(line);
             if (ev.type === 'ai-title') { if (ev.aiTitle) sessionTitle = ev.aiTitle; return; }
-            if (ev.type === 'user' && typeof ev.message?.content === 'string') sendPending = false;
+            if (ev.type === 'user' && typeof ev.message?.content === 'string') {
+              clearTimeout(pendingEchoTimer);
+              sendPending = false;
+              pendingClearFn?.();
+              pendingClearFn = null;
+            }
           } catch {}
           currentLines.push(line);
           parser.parseLine(line, true);
@@ -424,8 +431,8 @@
     }
   }
 
-  async function handleSend(text) {
-    if (text.startsWith('/') && handleSlash(text)) return;
+  async function handleSend(text, clearFn) {
+    if (text.startsWith('/') && handleSlash(text)) { clearFn?.(); return; }
 
     if (get(currentSessionId) === '__new__') {
       awaitingNewSession = true;
@@ -435,12 +442,19 @@
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ cwd: pendingCwd, firstMessage: text, claudeweb_settings: pendingSettings ?? undefined }),
         });
+        clearFn?.();
       } catch { awaitingNewSession = false; }
       return;
     }
 
     if (ws?.readyState !== 1) return;
     sendPending = true;
+    pendingClearFn = clearFn ?? null;
+    clearTimeout(pendingEchoTimer);
+    pendingEchoTimer = setTimeout(() => {
+      sendPending = false;
+      pendingClearFn = null;
+    }, 8000);
     ws.send(JSON.stringify({
       type: 'user',
       sessionId: get(currentSessionId),
