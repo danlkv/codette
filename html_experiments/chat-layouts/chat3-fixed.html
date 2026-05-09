@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chat Layout 3: position:fixed header + footer</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #1a1a2e; --bg2: #16213e; --bg3: #0f3460;
+  --accent: #a8ff78; --text: #e0e0e0; --dim: #888; --border: #2a2a4a;
+  --header-h: 58px;
+  --footer-h: 58px;
+}
+body { background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, sans-serif; }
+
+/* ── KEY TECHNIQUE ──────────────────────────────────────────────────────────
+   Header and footer are position:fixed — always visible regardless of scroll,
+   zoom, or keyboard. Messages fill the viewport with matching top/bottom padding.
+   Stable on all mobile scenarios. Input can grow with JS: update --footer-h var.
+   Tradeoff: requires knowing header/footer heights (or using ResizeObserver).
+   ────────────────────────────────────────────────────────────────────────── */
+header {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+  height: var(--header-h);
+  background: var(--bg2); border-bottom: 1px solid var(--border);
+  padding: 10px 16px; display: flex; flex-direction: column; gap: 2px;
+}
+header h1 { font-size: .9rem; color: var(--accent); font-weight: 600; }
+header p  { font-size: .72rem; color: var(--dim); }
+.messages {
+  padding-top: calc(var(--header-h) + 16px);
+  padding-bottom: calc(var(--footer-h) + 16px);
+  padding-left: 16px; padding-right: 16px;
+  display: flex; flex-direction: column; gap: 12px;
+  min-height: 100vh;
+}
+.msg { max-width: 680px; width: 100%; }
+.msg.hn { align-self: flex-start; }
+.msg-label { font-size: .65rem; color: var(--dim); margin-bottom: 3px; }
+.msg-body {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 10px 12px; font-size: .85rem; line-height: 1.5;
+}
+.msg-body a { color: var(--accent); text-decoration: none; }
+.msg-title { font-weight: 600; margin-bottom: 4px; }
+.msg-meta { font-size: .72rem; color: var(--dim); margin-top: 4px; }
+.loading { color: var(--dim); font-size: .85rem; text-align: center; padding: 40px; }
+footer {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;
+  background: var(--bg2); border-top: 1px solid var(--border);
+  padding: 10px 16px; display: flex; gap: 8px; align-items: flex-end;
+}
+textarea {
+  flex: 1; background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); font: inherit; font-size: .85rem;
+  padding: 8px 10px; resize: none; min-height: 36px; max-height: 160px;
+  overflow-y: auto; line-height: 1.4;
+}
+textarea:focus { outline: none; border-color: var(--accent); }
+button {
+  background: var(--accent); border: none; border-radius: 6px;
+  color: #111; font: inherit; font-size: .8rem; padding: 8px 14px;
+  cursor: pointer; flex-shrink: 0; align-self: flex-end;
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Layout 3 — position:fixed header + footer</h1>
+  <p>header/footer fixed; messages pad-top + pad-bottom; body scrolls</p>
+</header>
+<div class="messages" id="msgs">
+  <div class="loading">Loading HN top stories…</div>
+</div>
+<footer id="footer">
+  <textarea id="ta" rows="1" placeholder="Type a message…"></textarea>
+  <button>Send</button>
+</footer>
+<script>
+const container = document.getElementById('msgs');
+const footer    = document.getElementById('footer');
+const ta        = document.getElementById('ta');
+
+// Track footer height so padding-bottom stays correct
+const ro = new ResizeObserver(() => {
+  document.documentElement.style.setProperty('--footer-h', footer.offsetHeight + 'px');
+});
+ro.observe(footer);
+
+ta.addEventListener('input', () => {
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight, 160) + 'px';
+});
+
+async function load() {
+  try {
+    const ids = await fetch('https://hacker-news.firebaseio.com/v0/topstories.json').then(r => r.json());
+    container.innerHTML = '';
+    for (const id of ids.slice(0, 25)) {
+      const s = await fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`).then(r => r.json());
+      if (!s || !s.title) continue;
+      const el = document.createElement('div');
+      el.className = 'msg hn';
+      el.innerHTML = `
+        <div class="msg-label">hacker news · ${new Date(s.time*1000).toLocaleTimeString()}</div>
+        <div class="msg-body">
+          <div class="msg-title"><a href="${s.url||'#'}" target="_blank">${s.title}</a></div>
+          ${s.text ? `<div style="margin-top:6px;font-size:.8rem;color:var(--dim)">${s.text.replace(/<[^>]+>/g,'').slice(0,200)}…</div>` : ''}
+          <div class="msg-meta">▲ ${s.score} · ${s.descendants||0} comments · by ${s.by}</div>
+        </div>`;
+      container.appendChild(el);
+      window.scrollTo(0, document.body.scrollHeight);
+    }
+  } catch(e) {
+    container.innerHTML = `<div class="loading">Failed: ${e.message}</div>`;
+  }
+}
+load();
+</script>
+</body>
+</html>

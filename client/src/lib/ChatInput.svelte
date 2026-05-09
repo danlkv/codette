@@ -2,6 +2,7 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
+  import { tick } from 'svelte';
   let { disabled = false, placeholder = 'Message Claude…', sendLabel = 'send', onSend, header } = $props();
 
   let value = $state('');
@@ -29,12 +30,12 @@
   function send() {
     const text = value.trim();
     if (!text) return;
-    const clearFn = () => { value = ''; resize(); };
+    const clearFn = async () => { value = ''; await tick(); resize(); };
     onSend?.(text, clearFn);
   }
 
   function keydown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    if (e.key === 'Enter' && !e.shiftKey && !window.matchMedia('(pointer: coarse)').matches) { e.preventDefault(); send(); }
     if (e.key === 'Tab' && matches.length) {
       e.preventDefault();
       complete(matches[0].cmd);

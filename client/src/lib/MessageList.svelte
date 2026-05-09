@@ -101,10 +101,10 @@
 
 <style>
   .wrap {
-    flex: 1; overflow: hidden; position: relative; display: flex; flex-direction: column;
+    flex: 1; min-height: 0; overflow: hidden; position: relative; display: flex; flex-direction: column;
   }
   .list {
-    flex: 1; overflow-y: auto;
+    flex: 1; min-height: 0; overflow-y: auto;
   }
   .inner {
     display: flex; flex-direction: column; gap: 18px; /* compact UI style */

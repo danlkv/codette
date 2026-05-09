@@ -2,7 +2,6 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
-  import { onMount } from 'svelte';
   import Login        from './lib/Login.svelte';
   import ChatLayout   from './lib/ChatLayout.svelte';
   import { highContrast, fontStyle, syntaxTheme, accentColor, resetStores } from './store.js';
@@ -149,20 +148,6 @@
     localStorage.setItem('font', $fontStyle);
   });
 
-  // Fix mobile keyboard shrinking the viewport
-  onMount(() => {
-    function setVh() {
-      const h = window.visualViewport?.height ?? window.innerHeight;
-      document.documentElement.style.setProperty('--app-height', h + 'px');
-    }
-    setVh();
-    window.visualViewport?.addEventListener('resize', setVh);
-    window.addEventListener('resize', setVh);
-    return () => {
-      window.visualViewport?.removeEventListener('resize', setVh);
-      window.removeEventListener('resize', setVh);
-    };
-  });
 </script>
 
 {#if token}
@@ -271,10 +256,10 @@
     font-size: 14px;
     background: var(--bg-primary);
     color: var(--text);
-    height: var(--app-height, 100dvh);
+    height: 100svh;
     overflow: hidden;
   }
-  :global(#app) { height: var(--app-height, 100dvh); display: flex; flex-direction: column; }
+  :global(#app) { height: 100svh; display: flex; flex-direction: column; }
   :global(::-webkit-scrollbar) { width: 6px; }
   :global(::-webkit-scrollbar-track) { background: transparent; }
   :global(::-webkit-scrollbar-thumb) { background: var(--bg-elevated); border-radius: 3px; }

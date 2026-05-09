@@ -637,38 +637,38 @@
       {/if}
       <div class="chat-main" class:hidden={fileViewPath || diffViewCommit}>
         <MessageList hostStatus={$hostStatus} {historyLoading} sessionId={$currentSessionId} {token} onOpenFile={path => handleFileOpen({ path })} />
-        <div class="ctx-shell" class:ctx-open={ctxBarOpen}
-          style={$lastContextUsage ? `--ctx-pct:${Math.min(100, $lastContextUsage.used / $lastContextUsage.total * 100).toFixed(1)}%` : '--ctx-pct:0%'}>
-          <div class="ctx-above">
-            <div class="ctx-above-inner">
-              {#if $lastContextUsage}
-                ctx <em>{Math.round($lastContextUsage.used / 1000)}k / {Math.round($lastContextUsage.total / 1000)}k</em>
-                {#if $lastContextUsage.out}
-                  <span class="ctx-sep">·</span> last out: <em>{($lastContextUsage.out / 1000).toFixed(1)}k</em>
-                {/if}
-                {#if $lastContextUsage.cacheRead && $lastContextUsage.used}
-                  <span class="ctx-sep">·</span> input cache: <em>{Math.round($lastContextUsage.cacheRead / $lastContextUsage.used * 100)}%</em>
-                {/if}
-              {:else}
-                <span class="ctx-dim">no data yet — complete a turn first</span>
+      </div>
+      <div class="ctx-shell" class:ctx-open={ctxBarOpen}
+        style={$lastContextUsage ? `--ctx-pct:${Math.min(100, $lastContextUsage.used / $lastContextUsage.total * 100).toFixed(1)}%` : '--ctx-pct:0%'}>
+        <div class="ctx-above">
+          <div class="ctx-above-inner">
+            {#if $lastContextUsage}
+              ctx <em>{Math.round($lastContextUsage.used / 1000)}k / {Math.round($lastContextUsage.total / 1000)}k</em>
+              {#if $lastContextUsage.out}
+                <span class="ctx-sep">·</span> last out: <em>{($lastContextUsage.out / 1000).toFixed(1)}k</em>
               {/if}
-            </div>
+              {#if $lastContextUsage.cacheRead && $lastContextUsage.used}
+                <span class="ctx-sep">·</span> input cache: <em>{Math.round($lastContextUsage.cacheRead / $lastContextUsage.used * 100)}%</em>
+              {/if}
+            {:else}
+              <span class="ctx-dim">no data yet — complete a turn first</span>
+            {/if}
           </div>
-          <ChatInput
-            disabled={inputDisabled || sendPending}
-            placeholder={inputPlaceholder}
-            sendLabel={sendPending ? '…' : currentAgentActive ? 'send' : 'send & start'}
-            onSend={handleSend}
-          />
-          <button class="ctx-strip" onclick={() => ctxBarOpen = !ctxBarOpen} title="Token usage"></button>
         </div>
+        <ChatInput
+          disabled={inputDisabled || sendPending}
+          placeholder={inputPlaceholder}
+          sendLabel={sendPending ? '…' : currentAgentActive ? 'send' : 'send & start'}
+          onSend={handleSend}
+        />
+        <button class="ctx-strip" onclick={() => ctxBarOpen = !ctxBarOpen} title="Token usage"></button>
       </div>
     </div>
   </div>
 </div>
 
 <style>
-  .layout { display: flex; flex-direction: column; height: var(--app-height, 100dvh); }
+  .layout { display: flex; flex-direction: column; height: 100svh; }
   .body { display: flex; flex: 1; overflow: hidden; position: relative; }
   .chat { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
   .chat-main { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
@@ -802,4 +802,5 @@
   }
   .ctx-strip:hover::before { opacity: 1; }
   .ctx-shell.ctx-open .ctx-strip::before { opacity: 1; }
+
 </style>

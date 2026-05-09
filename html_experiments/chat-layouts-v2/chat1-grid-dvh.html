@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chat Layout v2 1: CSS Grid + 100dvh</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #1a1a2e; --bg2: #16213e; --bg3: #0f3460;
+  --accent: #e94560; --text: #e0e0e0; --dim: #888; --border: #2a2a4a;
+}
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 system-ui, sans-serif;
+}
+/* ── KEY TECHNIQUE ──────────────────────────────────────────────────────────
+   Grid on body. height: 100dvh — dynamic viewport height (shrinks when
+   keyboard appears). Middle row is 1fr: gets all remaining space, can scroll.
+   No JS needed. Works well when keyboard resize is acceptable.
+   Issue: on iOS pinch-zoom, dvh may reflow as visual viewport changes.
+   ────────────────────────────────────────────────────────────────────────── */
+body {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100dvh;
+}
+header {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 16px;
+  display: flex; flex-direction: column; gap: 2px;
+  flex-shrink: 0;
+}
+header h1 { font-size: .9rem; color: var(--accent); font-weight: 600; }
+header p  { font-size: .72rem; color: var(--dim); }
+.messages {
+  overflow-y: auto;
+  padding: 16px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.msg { max-width: 680px; width: 100%; }
+.msg.hn { align-self: flex-start; }
+.msg-label { font-size: .65rem; color: var(--dim); margin-bottom: 3px; }
+.msg-body {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: .85rem;
+  line-height: 1.5;
+}
+.msg-body a { color: var(--accent); text-decoration: none; }
+.msg-body a:hover { text-decoration: underline; }
+.msg-title { font-weight: 600; margin-bottom: 4px; }
+.msg-meta { font-size: .72rem; color: var(--dim); margin-top: 4px; }
+.loading { color: var(--dim); font-size: .85rem; text-align: center; padding: 40px; }
+footer {
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
+  padding: 10px 16px;
+  display: flex; gap: 8px; align-items: flex-end;
+}
+textarea {
+  flex: 1; background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); font: inherit; font-size: 16px;
+  padding: 8px 10px; resize: none; min-height: 36px; max-height: 160px;
+  overflow-y: hidden; line-height: 1.4;
+}
+textarea:focus { outline: none; border-color: var(--accent); }
+button {
+  background: var(--accent); border: none; border-radius: 6px;
+  color: #fff; font: inherit; font-size: .8rem; padding: 8px 14px;
+  cursor: pointer; flex-shrink: 0; align-self: flex-end;
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Layout 1 — CSS Grid + 100dvh (v2 — no zoom)</h1>
+  <p>body { display: grid; grid-template-rows: auto 1fr auto; height: 100dvh }</p>
+</header>
+<div class="messages" id="msgs">
+  <div class="loading">Loading HN top stories…</div>
+</div>
+<footer>
+  <textarea rows="1" placeholder="Type a message…" oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,160)+'px';this.style.overflowY=this.scrollHeight>160?'auto':'hidden'"></textarea>
+  <button>Send</button>
+</footer>
+<script>
+const container = document.getElementById('msgs');
+async function load() {
+  try {
+    const ids = await fetch('https://hacker-news.firebaseio.com/v0/topstories.json').then(r => r.json());
+    container.innerHTML = '';
+    const batch = ids.slice(0, 25);
+    for (const id of batch) {
+      const s = await fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`).then(r => r.json());
+      if (!s || !s.title) continue;
+      const el = document.createElement('div');
+      el.className = 'msg hn';
+      el.innerHTML = `
+        <div class="msg-label">hacker news · ${new Date(s.time*1000).toLocaleTimeString()}</div>
+        <div class="msg-body">
+          <div class="msg-title"><a href="${s.url||'#'}" target="_blank">${s.title}</a></div>
+          ${s.text ? `<div style="margin-top:6px;font-size:.8rem;color:var(--dim)">${s.text.replace(/<[^>]+>/g,'').slice(0,200)}…</div>` : ''}
+          <div class="msg-meta">▲ ${s.score} · ${s.descendants||0} comments · by ${s.by}</div>
+        </div>`;
+      container.appendChild(el);
+      container.scrollTop = container.scrollHeight;
+    }
+  } catch(e) {
+    container.innerHTML = `<div class="loading">Failed to load: ${e.message}</div>`;
+  }
+}
+load();
+
+document.querySelector("textarea").addEventListener("blur", () => window.scrollTo(0, 0));
+</script>
+</body>
+</html>
