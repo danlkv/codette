@@ -35,6 +35,7 @@
   }
 
   function keydown(e) {
+    if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); send(); return; }
     if (e.key === 'Enter' && !e.shiftKey && !window.matchMedia('(pointer: coarse)').matches) { e.preventDefault(); send(); }
     if (e.key === 'Tab' && matches.length) {
       e.preventDefault();
