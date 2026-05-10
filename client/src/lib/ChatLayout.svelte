@@ -20,32 +20,51 @@
 
   $effect(() => { localStorage.setItem('claudeweb_showFileChips', $showFileChips ? 'true' : 'false'); });
 
-  function extractFilesFromLines(lines) {
-    const files = new Set();
+  function resolvePath(p, cwd) {
+    if (!p || p.startsWith('/')) return p;
+    if (!cwd) return p;
+    const base = cwd.endsWith('/') ? cwd : cwd + '/';
+    const parts = (base + p).split('/').filter(Boolean);
+    const out = [];
+    for (const part of parts) {
+      if (part === '.') continue;
+      if (part === '..') out.pop();
+      else out.push(part);
+    }
+    return '/' + out.join('/');
+  }
+
+  function extractFilesFromLines(lines, cwd = null) {
+    const files = new Map(); // path → last-seen line index
     const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'NotebookEdit']);
-    for (const line of lines) {
+    for (let i = 0; i < lines.length; i++) {
       try {
-        const ev = JSON.parse(line);
+        const ev = JSON.parse(lines[i]);
         if (ev.type !== 'assistant') continue;
         const content = ev.message?.content;
         if (!Array.isArray(content)) continue;
         for (const block of content) {
           if (block.type === 'tool_use' && FILE_TOOLS.has(block.name)) {
-            const p = block.input?.file_path ?? block.input?.notebook_path;
-            if (p) files.add(p);
+            const raw = block.input?.file_path ?? block.input?.notebook_path;
+            const p = resolvePath(raw, cwd);
+            if (p) files.set(p, i);
           } else if (block.type === 'text' && block.text) {
             const re = /```sourcefile\r?\n([^\r\n:]+)/g;
             let m;
-            while ((m = re.exec(block.text)) !== null) files.add(m[1].trim());
+            while ((m = re.exec(block.text)) !== null) {
+              const p = resolvePath(m[1].trim(), cwd);
+              if (p) files.set(p, i);
+            }
           }
         }
       } catch {}
     }
-    return [...files];
+    return [...files.entries()].sort((a, b) => b[1] - a[1]).map(([f]) => f);
   }
 
   function updateSessionFiles(id, lines) {
-    const files = extractFilesFromLines(lines);
+    const cwd = get(sessions).find(s => s.id === id)?.cwd ?? null;
+    const files = extractFilesFromLines(lines, cwd);
     sessions.update(list => list.map(s => s.id === id ? { ...s, files } : s));
   }
 
@@ -171,7 +190,7 @@
         const raw = localStorage.getItem('history_' + s.id);
         if (raw) {
           const { lines } = JSON.parse(raw);
-          if (lines) filesMap[s.id] = extractFilesFromLines(lines);
+          if (lines) filesMap[s.id] = extractFilesFromLines(lines, s.cwd ?? null);
         }
       } catch {}
     }
@@ -327,7 +346,11 @@
       try { msg = JSON.parse(data); } catch { return; }
 
       if (msg.type === 'session_list') {
-        sessions.set(dedupById(msg.sessions ?? []));
+        const incoming = dedupById(msg.sessions ?? []);
+        sessions.update(list => {
+          const filesMap = new Map(list.map(s => [s.id, s.files]));
+          return incoming.map(s => filesMap.has(s.id) ? { ...s, files: filesMap.get(s.id) } : s);
+        });
         if (msg.hostCwd) hostCwd = msg.hostCwd;
       }
       else if (msg.type === 'claude_line') {

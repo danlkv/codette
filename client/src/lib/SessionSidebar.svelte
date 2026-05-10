@@ -99,6 +99,7 @@
                 {/if}
                 <span class="time">{fmtAge(s.ts)}</span>
                 {#if s.msgCount}<span class="count">{s.msgCount}</span>{/if}
+                {#if s.cwd}<span class="cwd" title={s.cwd}>{s.cwd.split('/').filter(Boolean).pop() ?? s.cwd}</span>{/if}
               </span>
               <span class="title">{s.title || s.id.slice(0, 8)}</span>
             </button>
@@ -129,7 +130,9 @@
           {#if showFileChips && s.files?.length}
             <div class="file-chips">
               {#each s.files as file}
-                <span class="chip" title={file}>{file.split('/').pop()}</span>
+                <button class="chip" title={file}
+                  onclick={(e) => { e.stopPropagation(); select(s.id); onFileOpen?.({ path: file }); }}
+                >{file.split('/').pop()}</button>
               {/each}
             </div>
           {/if}
@@ -159,7 +162,7 @@
 <style>
   .sidebar.hidden { display: none; }
   .sidebar {
-    width: 300px;
+    width: 360px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
@@ -252,14 +255,16 @@
   }
   .session-row.active .file-chips { max-height: 120px; }
   .chip {
-    font-size: .63rem; color: var(--text-dim);
+    font-size: .73rem !important; font-family: inherit; color: var(--text-dim);
     background: var(--bg-elevated); border: 1px solid var(--border);
     border-radius: 3px; padding: 1px 5px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    max-width: 110px; cursor: default;
-    transition: color .12s;
+    max-width: 110px; cursor: pointer;
+    transition: color .12s, border-color .12s;
   }
+  .chip:hover { color: var(--text); border-color: var(--accent-light); }
   .session-row.active .chip { color: var(--text-muted); border-color: #333; }
+  .session-row.active .chip:hover { color: var(--text); border-color: var(--accent-light); }
   .session-row.active {
     border-left-color: var(--accent-light);
     background: var(--bg-elevated);
@@ -344,6 +349,7 @@
 
   .time { font-size: .7rem; color: var(--text-dim); }
   .count { font-size: .65rem; color: var(--text-dim); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 0 5px; }
+  .cwd { font-size: .65rem; color: var(--text-dim); max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .title {
     overflow: hidden;
     text-overflow: ellipsis;

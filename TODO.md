@@ -40,7 +40,7 @@ Theme: no landmark for where context was reset.
    - Distinguish summarization events in the message list (visual separator or badge).
    - Allow scrolling/jumping to last summarization point.
 
-2. Files in context
+2. [x] Files in context
 Theme: choosing the right session requires opening each one to infer its state.
    - Display files read since the last summarization, shown as chips on each session list entry.
 
@@ -71,3 +71,8 @@ Theme: highlight theme stays fixed regardless of system light/dark mode.
 8. Workspace support
 Theme: session list grows unbounded with no grouping.
    - Sibling tab "Workspaces" in sidebar. Groups sessions by working directory.
+
+9. Incremental chat loading
+Theme: long sessions parse and render the full history on every load, causing lag.
+   - On open, render only from the last summarization boundary (or last N messages).
+   - Load earlier history on scroll-to-top.
