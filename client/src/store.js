@@ -14,6 +14,7 @@ export const vibrateOnDone  = writable(localStorage.getItem('vibrate') !== '0');
 export const fontStyle      = writable(localStorage.getItem('font') || 'mono');
 export const syntaxTheme    = writable(null);  // per-account; set by App.svelte
 export const accentColor    = writable(null);  // per-account; set by App.svelte
+export const showFileChips  = writable(localStorage.getItem('claudeweb_showFileChips') !== 'false');
 
 // Multi-session support
 export const sessions         = writable([]);    // Session[] list from server

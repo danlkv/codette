@@ -13,6 +13,7 @@
     hostCwd = null,
     sessionId = null,
     token = null,
+    showFileChips = true,
     onSelect,
     onDelete,
     onNewSession,
@@ -87,40 +88,52 @@
   <div class="list">
     {#each sessions as s (s.id)}
       <div class="session-row" class:active={s.id === currentId}>
-        <button class="session" onclick={() => select(s.id)} title={s.id}>
-          <span class="meta">
-            {#if s.agentState === 'idle'}
-              <span class="dot standby"></span>
-            {:else if s.agentState === 'running'}
-              <span class="dot running"></span>
-            {/if}
-            <span class="time">{fmtAge(s.ts)}</span>
-            {#if s.msgCount}<span class="count">{s.msgCount}</span>{/if}
-          </span>
-          <span class="title">{s.title || s.id.slice(0, 8)}</span>
-        </button>
+        <div class="row-wrap">
+          <div class="row-top">
+            <button class="session" onclick={() => select(s.id)} title={s.id}>
+              <span class="meta">
+                {#if s.agentState === 'idle'}
+                  <span class="dot standby"></span>
+                {:else if s.agentState === 'running'}
+                  <span class="dot running"></span>
+                {/if}
+                <span class="time">{fmtAge(s.ts)}</span>
+                {#if s.msgCount}<span class="count">{s.msgCount}</span>{/if}
+              </span>
+              <span class="title">{s.title || s.id.slice(0, 8)}</span>
+            </button>
 
-        {#if s.agentState}
-          <button
-            class="ctl interrupt"
-            onclick={(e) => interrupt(e, s.id)}
-            title="Interrupt agent"
-            aria-label="Interrupt agent"
-          >⊘</button>
-          <button
-            class="ctl stop"
-            onclick={(e) => stop(e, s.id)}
-            title="Stop agent"
-            aria-label="Stop agent"
-          >■</button>
-        {:else}
-          <button
-            class="del" class:confirming={confirmingId === s.id}
-            onclick={(e) => tryDelete(e, s.id)}
-            title="Delete session"
-            aria-label="Delete session"
-          >{confirmingId === s.id ? '?' : '×'}</button>
-        {/if}
+            {#if s.agentState}
+              <button
+                class="ctl interrupt"
+                onclick={(e) => interrupt(e, s.id)}
+                title="Interrupt agent"
+                aria-label="Interrupt agent"
+              >⊘</button>
+              <button
+                class="ctl stop"
+                onclick={(e) => stop(e, s.id)}
+                title="Stop agent"
+                aria-label="Stop agent"
+              >■</button>
+            {:else}
+              <button
+                class="del" class:confirming={confirmingId === s.id}
+                onclick={(e) => tryDelete(e, s.id)}
+                title="Delete session"
+                aria-label="Delete session"
+              >{confirmingId === s.id ? '?' : '×'}</button>
+            {/if}
+          </div>
+
+          {#if showFileChips && s.files?.length}
+            <div class="file-chips">
+              {#each s.files as file}
+                <span class="chip" title={file}>{file.split('/').pop()}</span>
+              {/each}
+            </div>
+          {/if}
+        </div>
       </div>
     {/each}
     {#if sessions.length === 0}
@@ -223,6 +236,30 @@
     align-items: stretch;
     border-left: 2px solid transparent;
   }
+  .row-wrap {
+    display: flex; flex-direction: column;
+    flex: 1; min-width: 0;
+  }
+  .row-top {
+    display: flex; align-items: stretch;
+  }
+  .file-chips {
+    display: flex; flex-wrap: wrap; gap: 3px;
+    padding: 2px 10px 7px 14px;
+    max-height: 44px;
+    overflow: hidden;
+    transition: max-height .15s ease;
+  }
+  .session-row.active .file-chips { max-height: 120px; }
+  .chip {
+    font-size: .63rem; color: var(--text-dim);
+    background: var(--bg-elevated); border: 1px solid var(--border);
+    border-radius: 3px; padding: 1px 5px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 110px; cursor: default;
+    transition: color .12s;
+  }
+  .session-row.active .chip { color: var(--text-muted); border-color: #333; }
   .session-row.active {
     border-left-color: var(--accent-light);
     background: var(--bg-elevated);

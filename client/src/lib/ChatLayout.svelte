@@ -7,7 +7,7 @@
 
   import { makeInlineFilePrompt } from '../../../shared/prompts.js';
   import { messages, lastCost, lastUsage, lastContextUsage, hostStatus, wsOk, highContrast, vibrateOnDone, fontStyle, syntaxTheme, accentColor,
-           sessions, currentSessionId, sessionData } from '../store.js';
+           sessions, currentSessionId, sessionData, showFileChips } from '../store.js';
   import { createParser } from './parser.js';
   import { summarizeOldLines, KEEP as SUMMARIZE_KEEP } from './summarize.js';
   import MessageList from './MessageList.svelte';
@@ -17,6 +17,32 @@
   import DiffView from './DiffView.svelte';
 
   let { token, accounts = [], activeIdx = 0, onLogout, onSwitch, onAddAccount } = $props();
+
+  $effect(() => { localStorage.setItem('claudeweb_showFileChips', $showFileChips ? 'true' : 'false'); });
+
+  function extractFilesFromLines(lines) {
+    const files = new Set();
+    for (const line of lines) {
+      try {
+        const ev = JSON.parse(line);
+        if (ev.type !== 'assistant') continue;
+        const content = ev.message?.content;
+        if (!content) continue;
+        const text = Array.isArray(content)
+          ? content.filter(b => b.type === 'text').map(b => b.text).join('\n')
+          : typeof content === 'string' ? content : '';
+        const re = /```sourcefile\r?\n([^\r\n:]+)/g;
+        let m;
+        while ((m = re.exec(text)) !== null) files.add(m[1].trim());
+      } catch {}
+    }
+    return [...files];
+  }
+
+  function updateSessionFiles(id, lines) {
+    const files = extractFilesFromLines(lines);
+    sessions.update(list => list.map(s => s.id === id ? { ...s, files } : s));
+  }
 
   const username = $derived.by(() => {
     try { return JSON.parse(atob(token.split('.')[1])).username; } catch { return ''; }
@@ -132,6 +158,21 @@
         console.warn('[history] initSessions: fetch failed', res.status);
       }
     } catch (e) { console.error('[history] initSessions: fetch error', e); }
+
+    // Pre-populate files from localStorage caches (no extra API calls)
+    const filesMap = {};
+    for (const s of sessionList) {
+      try {
+        const raw = localStorage.getItem('history_' + s.id);
+        if (raw) {
+          const { lines } = JSON.parse(raw);
+          if (lines) filesMap[s.id] = extractFilesFromLines(lines);
+        }
+      } catch {}
+    }
+    if (Object.keys(filesMap).length) {
+      sessions.update(list => list.map(s => filesMap[s.id] ? { ...s, files: filesMap[s.id] } : s));
+    }
 
     if (sessionList.length === 0) { console.log('[history] initSessions: no sessions, returning'); return; }
     const { sessionId: hashId, file: hashFile } = parseHash();
@@ -265,6 +306,8 @@
     currentLines = filtered;
     messages.set(parser.applyLines(filtered));
     if (storedContextWindow) lastContextUsage.update(v => v ? { ...v, total: storedContextWindow } : v);
+    const id = get(currentSessionId);
+    if (id && id !== '__new__') updateSessionFiles(id, filtered);
   }
 
   function connect() {
@@ -297,6 +340,7 @@
           } catch {}
           currentLines.push(line);
           parser.parseLine(line, true);
+          try { const ev = JSON.parse(line); if (ev.type === 'assistant') updateSessionFiles(sessionId, currentLines); } catch {}
         } else {
           if (!sessionData.has(sessionId)) sessionData.set(sessionId, []);
           sessionData.get(sessionId).push(line);
@@ -549,6 +593,11 @@
             <input type="checkbox" checked={$vibrateOnDone}
               onchange={() => vibrateOnDone.update(v => !v)} />
           </label>
+          <label class="menu-toggle">
+            <span>file chips in session list</span>
+            <input type="checkbox" checked={$showFileChips}
+              onchange={() => showFileChips.update(v => !v)} />
+          </label>
           <div class="menu-toggle">
             <span>font</span>
             <div class="font-pick">
@@ -612,6 +661,7 @@
       {hostCwd}
       sessionId={$currentSessionId}
       {token}
+      showFileChips={$showFileChips}
       onSelect={handleSelect}
       onDelete={handleDelete}
       onNewSession={handleNewSession}
