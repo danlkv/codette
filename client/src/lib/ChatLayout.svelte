@@ -22,18 +22,23 @@
 
   function extractFilesFromLines(lines) {
     const files = new Set();
+    const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'NotebookEdit']);
     for (const line of lines) {
       try {
         const ev = JSON.parse(line);
         if (ev.type !== 'assistant') continue;
         const content = ev.message?.content;
-        if (!content) continue;
-        const text = Array.isArray(content)
-          ? content.filter(b => b.type === 'text').map(b => b.text).join('\n')
-          : typeof content === 'string' ? content : '';
-        const re = /```sourcefile\r?\n([^\r\n:]+)/g;
-        let m;
-        while ((m = re.exec(text)) !== null) files.add(m[1].trim());
+        if (!Array.isArray(content)) continue;
+        for (const block of content) {
+          if (block.type === 'tool_use' && FILE_TOOLS.has(block.name)) {
+            const p = block.input?.file_path ?? block.input?.notebook_path;
+            if (p) files.add(p);
+          } else if (block.type === 'text' && block.text) {
+            const re = /```sourcefile\r?\n([^\r\n:]+)/g;
+            let m;
+            while ((m = re.exec(block.text)) !== null) files.add(m[1].trim());
+          }
+        }
       } catch {}
     }
     return [...files];
