@@ -37,7 +37,15 @@
   function extractFilesFromLines(lines, cwd = null) {
     const files = new Map(); // path → last-seen line index
     const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'NotebookEdit']);
-    for (let i = 0; i < lines.length; i++) {
+    // Find last compact_boundary; only scan lines after it
+    let start = 0;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const ev = JSON.parse(lines[i]);
+        if (ev.type === 'system' && ev.subtype === 'compact_boundary') { start = i + 1; break; }
+      } catch {}
+    }
+    for (let i = start; i < lines.length; i++) {
       try {
         const ev = JSON.parse(lines[i]);
         if (ev.type !== 'assistant') continue;

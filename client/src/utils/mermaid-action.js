@@ -28,6 +28,9 @@ function getConfig() {
       nodeTextColor:       v('--text'),
       activationBkgColor:  v('--bg-elevated'),
       activationBorderColor: v('--accent'),
+      noteBkgColor:        v('--bg-secondary'),
+      noteBorderColor:     v('--border'),
+      noteTextColor:       v('--text-muted'),
       fontSize:            '13px',
     },
   };
@@ -67,16 +70,40 @@ function wrapWithToggle(mermaidEl, source) {
   fsBtn.title = 'Fullscreen';
   fsBtn.addEventListener('click', () => openFullscreen(mermaidEl));
 
+  const zoomIn = document.createElement('button');
+  zoomIn.className = 'mermaid-toggle';
+  zoomIn.textContent = '+';
+  zoomIn.title = 'Zoom in';
+
+  const zoomOut = document.createElement('button');
+  zoomOut.className = 'mermaid-toggle';
+  zoomOut.textContent = '−';
+  zoomOut.title = 'Zoom out';
+
   const pre = document.createElement('pre');
   pre.className = 'mermaid-source';
   pre.textContent = source;
   pre.style.display = 'none';
 
+  const controls = document.createElement('div');
+  controls.className = 'mermaid-controls';
+  controls.appendChild(zoomOut);
+  controls.appendChild(zoomIn);
+  controls.appendChild(fsBtn);
+  controls.appendChild(btn);
+
   mermaidEl.parentNode.insertBefore(wrap, mermaidEl);
   wrap.appendChild(mermaidEl);
   wrap.appendChild(pre);
-  wrap.appendChild(fsBtn);
-  wrap.appendChild(btn);
+  wrap.appendChild(controls);
+
+  let zoom = 700;
+  const applyZoom = () => {
+    const svg = mermaidEl.querySelector('svg');
+    if (svg) svg.style.width = zoom + 'px';
+  };
+  zoomIn.addEventListener('click', () => { zoom = Math.min(zoom + 150, 2400); applyZoom(); });
+  zoomOut.addEventListener('click', () => { zoom = Math.max(zoom - 150, 300); applyZoom(); });
 
   btn.addEventListener('click', () => {
     const showingSource = pre.style.display !== 'none';

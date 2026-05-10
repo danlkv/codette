@@ -264,31 +264,12 @@
   :global(::-webkit-scrollbar-track) { background: transparent; }
   :global(::-webkit-scrollbar-thumb) { background: var(--bg-elevated); border-radius: 3px; }
 
-  :global(.mermaid-wrap) { position: relative; display: inline-block; max-width: 100%; }
-  :global(.mermaid-toggle) {
-    position: absolute; top: 4px; right: 4px;
-    background: var(--bg-elevated); border: 1px solid var(--border);
-    color: var(--text-dim); font-size: .65rem; font-family: inherit;
-    padding: 1px 6px; border-radius: 3px; cursor: pointer; opacity: 0;
-    transition: opacity .15s;
-  }
-  :global(.mermaid-wrap:hover .mermaid-toggle) { opacity: 1; }
-  :global(.mermaid-toggle:hover) { color: var(--text); border-color: var(--text-muted); }
-  :global(.mermaid-source) {
-    background: var(--bg-elevated); border: 1px solid var(--border);
-    border-radius: 4px; padding: 10px 14px; font-size: .78rem;
-    color: var(--text-muted); white-space: pre; overflow-x: auto;
-    margin: .4em 0; font-family: monospace;
-  }
-
   :global(.high-contrast) :global(.prose pre),
   :global(.high-contrast) :global(.prose code),
   :global(.high-contrast) :global(.prose blockquote),
   :global(.high-contrast) :global(.prose th),
   :global(.high-contrast) :global(.prose td),
-  :global(.high-contrast) :global(.tool),
-  :global(.high-contrast) :global(.mermaid-source),
-  :global(.high-contrast) :global(.mermaid-toggle) { border: none; }
+  :global(.high-contrast) :global(.tool) { border: none; }
   :global(.high-contrast) :global(.prose hr) { border-top: 1px solid var(--text-dim); }
 
   .account-overlay {

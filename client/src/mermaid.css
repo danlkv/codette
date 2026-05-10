@@ -1,0 +1,24 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright 2026 Danylo Lykov */
+
+.mermaid-wrap { position: relative; display: block; width: 100%; text-align: center; }
+.mermaid-wrap svg { width: 700px; max-width: 100%; height: auto; }
+.mermaid-controls {
+  position: absolute; top: 4px; right: 4px;
+  display: flex; gap: 3px; opacity: 0; transition: opacity .15s;
+}
+.mermaid-wrap:hover .mermaid-controls { opacity: 1; }
+.mermaid-toggle {
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  color: var(--text-dim); font-size: .65rem; font-family: inherit;
+  padding: 1px 6px; border-radius: 3px; cursor: pointer;
+}
+.mermaid-toggle:hover { color: var(--text); border-color: var(--text-muted); }
+.mermaid-source {
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 4px; padding: 10px 14px; font-size: .78rem;
+  color: var(--text-muted); white-space: pre; overflow-x: auto;
+  margin: .4em 0; font-family: monospace;
+}
+.high-contrast .mermaid-source,
+.high-contrast .mermaid-toggle { border: none; }

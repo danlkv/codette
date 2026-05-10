@@ -32,6 +32,19 @@ Theme: finding a past message or decision requires scrolling through individual 
    - Search bar over all sessions; results show session + message snippet.
    - Server-side search endpoint; no client-side indexing required.
 
+6. Conversation sharing
+Theme: no way to show someone a session without giving them account access.
+   - Server generates a signed share token for a session or a specific message range.
+   - Share link opens a view-only render — no auth required, no input controls.
+   - Expiry and revocation controlled by the owner.
+
+5. E2E encryption & device trust
+Theme: the server is a relay — it sees all session traffic in plaintext, so a compromised relay exposes full history.
+   - Encrypt messages on the client before sending; decrypt on receive — relay sees only ciphertext.
+   - Device pairing flow to share keys across devices.
+   - Device revocation invalidates a device's key without re-keying others.
+   - Periodic biometric re-authentication (Face ID / fingerprint) gates decryption.
+
 ## Polishes
 Improve existing workflows. Nothing is blocked without these.
 
