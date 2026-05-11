@@ -8,7 +8,7 @@
 
 <script>
   import { onMount } from 'svelte';
-  import { syntaxTheme } from '../store.js';
+  import { effectiveSyntaxTheme } from '../store.js';
   import { highlightLines, langFromPath } from '../utils/highlight.js';
 
   let { path, ranges = [], annotations = [], sessionId, token, onOpenFile = null, messageTime = null } = $props();
@@ -17,6 +17,8 @@
 
   let lines = $state(null);
   let hlLines = $state(null); // per-line highlighted HTML, or null if no theme
+  let hlBg    = $state(null); // theme background color
+  let hlFg    = $state(null); // theme foreground color (for plain text)
   let error = $state(null);
   let containerEl = $state(null);
   let preEl = $state(null);
@@ -94,12 +96,12 @@
 
   // Re-highlight whenever theme or loaded lines change
   $effect(() => {
-    const theme = $syntaxTheme;
+    const theme = $effectiveSyntaxTheme;
     const content = rawContent;
-    if (!theme || content === null || lines === null) { hlLines = null; return; }
+    if (!theme || content === null || lines === null) { hlLines = null; hlBg = null; hlFg = null; return; }
     const lang = langFromPath(path);
     const sliced = lines.join('\n');
-    highlightLines(sliced, lang, theme).then(hl => { hlLines = hl; }).catch(() => { hlLines = null; });
+    highlightLines(sliced, lang, theme).then(({ lines: hl, bg, fg }) => { hlLines = hl; hlBg = bg; hlFg = fg; }).catch(() => { hlLines = null; hlBg = null; hlFg = null; });
   });
 
   function scrollToLine(lineNum) {
@@ -181,7 +183,7 @@
     {:else if lines === null}
       <pre class="sf-pre sf-loading">loading…</pre>
     {:else}
-      <pre class="sf-pre" bind:this={preEl}>{#each lines as line, i}{@const lineNum = displayStart + i}<span
+      <pre class="sf-pre" bind:this={preEl} style:background={hlBg} style:color={hlFg}>{#each lines as line, i}{@const lineNum = displayStart + i}<span
           class="sf-line"
           class:sf-hl={hlSet.has(lineNum)}
         ><span class="sf-ln">{lineNum}</span><span class="sf-code">{@html hlLines ? hlLines[i] : esc(line)}</span>{#if showAnnotations && annMap.has(lineNum)}<span class="sf-ann">{annMap.get(lineNum)}</span>{/if}</span>{/each}</pre>
@@ -325,11 +327,9 @@
     white-space: nowrap;
     box-shadow: -3px 0px 8px 2px var(--bg-elevated);
   }
-  @media (prefers-color-scheme: light) {
-    .sf-ann {
-      border-left-color: rgba(140, 100, 0, 0.45);
-      color: rgba(130, 90, 0, 0.9);
-    }
+  :global([data-theme="light"]) .sf-ann {
+    border-left-color: rgba(140, 100, 0, 0.45);
+    color: rgba(130, 90, 0, 0.9);
   }
   .sf-ln {
     display: inline-block;

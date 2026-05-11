@@ -304,7 +304,7 @@
     transition: color .15s;
   }
   .del:active { color: var(--text-muted); }
-  .del.confirming { color: #e06c75; font-weight: 700; }
+  .del.confirming { color: var(--error); font-weight: 700; }
 
   /* Agent control buttons */
   .ctl {
@@ -324,7 +324,7 @@
   .ctl.interrupt { color: var(--text-dim); }
   .ctl.interrupt:hover { color: #e5c07b; }
   .ctl.stop { color: var(--text-dim); }
-  .ctl.stop:hover { color: #e06c75; }
+  .ctl.stop:hover { color: var(--error); }
 
   .meta {
     display: flex;
@@ -336,7 +336,7 @@
     border-radius: 50%;
     flex-shrink: 0;
   }
-  .dot.standby { background: #5a5; }
+  .dot.standby { background: var(--status-ok); }
   .dot.running {
     background: var(--accent-light);
     animation: pulse 1.4s ease-in-out infinite;

@@ -182,7 +182,7 @@
     display: block;
     padding: 4px 16px;
     font-size: .72rem;
-    color: #e06c75;
+    color: var(--error);
     word-break: break-all;
   }
 </style>

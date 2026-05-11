@@ -1,5 +1,10 @@
 # TODO
 
+## Bugs
+
+1. Question tool not supported in `--json` mode — remove it or figure out how to support.
+2. WebSocket status reported as inactive if host is inactive at start.
+
 ## Enablers & Blockers
 Unblock workflows that are not possible today.
 
@@ -77,7 +82,7 @@ Theme: session list shows only AI-generated slugs — no way to label sessions b
    - Inline rename on double-click or via context menu.
    - Persisted per-session.
 
-7. Syntax theme auto-switching
+7. [x] Syntax theme auto-switching
 Theme: highlight theme stays fixed regardless of system light/dark mode.
    - Map each theme to a light/dark variant pair; switch on `prefers-color-scheme` change.
 

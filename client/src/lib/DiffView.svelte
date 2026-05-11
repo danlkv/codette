@@ -138,7 +138,7 @@
     font-size: .8rem;
     color: var(--text-dim);
   }
-  .dv-error { color: #e06c75; }
+  .dv-error { color: var(--error); }
 
   .diff {
     margin: 0;
@@ -160,7 +160,7 @@
   }
   .diff :global(.del) {
     display: block;
-    color: #e06c75;
+    color: var(--error);
     background: rgba(224, 108, 117, .08);
   }
   .diff :global(.hunk) {

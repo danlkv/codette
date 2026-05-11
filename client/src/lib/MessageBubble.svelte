@@ -7,7 +7,7 @@
   import { sourceFileRender } from '../utils/sourcefile-action.js';
   import { syntaxHighlight } from '../utils/syntax-highlight-action.js';
   import { fmtTime } from '../utils/time.js';
-  import { syntaxTheme } from '../store.js';
+  import { effectiveSyntaxTheme } from '../store.js';
   import ToolBlock from './ToolBlock.svelte';
   import QuestionBlock from './QuestionBlock.svelte';
   import TodoBlock from './TodoBlock.svelte';
@@ -36,7 +36,7 @@
       {#if msg.role === 'user'}
         <p class="user-text">{msg.text}</p>
       {:else}
-        <div class="prose" use:mermaidRender={msg.text} use:sourceFileRender={{ text: msg.text, sessionId, token, onOpenFile, messageTime: msg.ts ?? null }} use:syntaxHighlight={{ theme: $syntaxTheme, streaming: isStreaming }}>
+        <div class="prose" use:mermaidRender={msg.text} use:sourceFileRender={{ text: msg.text, sessionId, token, onOpenFile, messageTime: msg.ts ?? null }} use:syntaxHighlight={{ theme: $effectiveSyntaxTheme, streaming: isStreaming }}>
           {@html renderMd(msg.text)}{#if isStreaming}<span class="cur">▌</span>{/if}
         </div>
       {/if}
@@ -90,10 +90,20 @@
     font-size: .88em; color: var(--accent-light); font-family: monospace;
   }
   .prose :global(pre:not(.sf-pre)) {
+    position: relative;
     background: var(--bg-elevated); border: 1px solid var(--border);
     border-radius: 5px; padding: 10px 14px; overflow-x: auto; margin: .5em 0;
     font-family: monospace;
   }
+  .prose :global(.copy-btn) {
+    position: absolute; top: 6px; right: 6px;
+    padding: 2px 7px; font-size: 11px; font-family: var(--font-ui, sans-serif);
+    background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text-muted); cursor: pointer;
+    opacity: 0; transition: opacity .15s;
+  }
+  .prose :global(pre:hover .copy-btn) { opacity: 1; }
+  .prose :global(.copy-btn:hover)     { color: var(--text); }
   .prose :global(pre code) { background: none; border: none; padding: 0; color: var(--text); font-size: .88em; }
   .prose :global(ul),.prose :global(ol) { padding-left: 1.5em; margin: .4em 0; }
   .prose :global(li)    { margin: .2em 0; }

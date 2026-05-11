@@ -35,12 +35,23 @@ const EXT_LANG = {
   mojo: 'mojo', '🔥': 'mojo',
 };
 
+// Paired theme families: selecting a family auto-applies dark/light variant based on UI theme
+export const THEME_PAIRS = {
+  'github':     { dark: 'github-dark',               light: 'github-light' },
+  'rose-pine':  { dark: 'rose-pine',                 light: 'rose-pine-dawn' },
+  'solarized':  { dark: 'solarized-dark',            light: 'solarized-light' },
+  'vitesse':    { dark: 'vitesse-dark',              light: 'vitesse-light' },
+  'catppuccin': { dark: 'catppuccin-mocha',          light: 'catppuccin-latte' },
+  'github-hc':  { dark: 'github-dark-high-contrast', light: 'github-light-high-contrast' },
+};
+
 // Theme id → shiki bundle import
 const THEME_IMPORTS = {
   'github-dark':     () => import('shiki/themes/github-dark.mjs'),
   'github-light':    () => import('shiki/themes/github-light.mjs'),
   'one-dark-pro':    () => import('shiki/themes/one-dark-pro.mjs'),
-  'catppuccin-mocha':() => import('shiki/themes/catppuccin-mocha.mjs'),
+  'catppuccin-mocha': () => import('shiki/themes/catppuccin-mocha.mjs'),
+  'catppuccin-latte': () => import('shiki/themes/catppuccin-latte.mjs'),
   'nord':            () => import('shiki/themes/nord.mjs'),
   'dracula':         () => import('shiki/themes/dracula.mjs'),
   'tokyo-night':     () => import('shiki/themes/tokyo-night.mjs'),
@@ -162,17 +173,17 @@ export async function highlightLines(code, lang, themeId) {
   if (resolvedLang !== 'text') await ensureLang(hl, resolvedLang);
 
   const result = hl.codeToTokens(code, { lang: resolvedLang, theme: themeId });
-  return result.tokens.map(lineTokens =>
+  const lines = result.tokens.map(lineTokens =>
     lineTokens.map(t => {
       const style = t.color ? ` style="color:${t.color}"` : '';
       const fontStyle = t.fontStyle;
       // fontStyle flags: 1=italic, 2=bold, 4=underline
-      let tag = 'span';
       let extra = style;
       if (fontStyle & 2) extra += ' class="shiki-bold"';
       return `<span${extra}>${esc(t.content)}</span>`;
     }).join('')
   );
+  return { lines, bg: result.bg ?? 'transparent', fg: result.fg ?? null };
 }
 
 export { THEME_IMPORTS };

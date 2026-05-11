@@ -6,7 +6,7 @@
   import { get } from 'svelte/store';
 
   import { makeInlineFilePrompt } from '../../../shared/prompts.js';
-  import { messages, lastCost, lastUsage, lastContextUsage, hostStatus, wsOk, highContrast, vibrateOnDone, fontStyle, syntaxTheme, accentColor,
+  import { messages, lastCost, lastUsage, lastContextUsage, hostStatus, wsOk, colorScheme, highContrast, vibrateOnDone, fontStyle, syntaxTheme, accentColor,
            sessions, currentSessionId, sessionData, showFileChips } from '../store.js';
   import { createParser } from './parser.js';
   import { summarizeOldLines, KEEP as SUMMARIZE_KEEP } from './summarize.js';
@@ -619,6 +619,15 @@
           <button class="logout-btn" onclick={() => { userMenuOpen = false; onLogout(); }}>logout</button>
           <div class="menu-sep"></div>
           <div class="menu-section-label">settings</div>
+          <div class="menu-toggle">
+            <span>theme</span>
+            <div class="font-pick">
+              {#each ['system', 'light', 'dark'] as s}
+                <button class="font-btn" class:active={$colorScheme === s}
+                  onclick={() => colorScheme.set(s)}>{s}</button>
+              {/each}
+            </div>
+          </div>
           <label class="menu-toggle">
             <span>high contrast</span>
             <input type="checkbox" checked={$highContrast}
@@ -658,26 +667,21 @@
             <select class="theme-select" value={$syntaxTheme ?? ''}
               onchange={e => syntaxTheme.set(e.currentTarget.value || null)}>
               <option value="">none</option>
+              <optgroup label="auto">
+                <option value="github">github</option>
+                <option value="rose-pine">rose pine</option>
+                <option value="solarized">solarized</option>
+                <option value="vitesse">vitesse</option>
+                <option value="catppuccin">catppuccin</option>
+              </optgroup>
               <optgroup label="dark">
-                <option value="github-dark">github dark</option>
                 <option value="one-dark-pro">one dark pro</option>
-                <option value="catppuccin-mocha">catppuccin mocha</option>
                 <option value="nord">nord</option>
                 <option value="dracula">dracula</option>
                 <option value="tokyo-night">tokyo night</option>
-                <option value="rose-pine">rose pine</option>
-                <option value="solarized-dark">solarized dark</option>
-                <option value="vitesse-dark">vitesse dark</option>
               </optgroup>
-              <optgroup label="light">
-                <option value="github-light">github light</option>
-                <option value="rose-pine-dawn">rose pine dawn</option>
-                <option value="solarized-light">solarized light</option>
-                <option value="vitesse-light">vitesse light</option>
-              </optgroup>
-              <optgroup label="high contrast">
-                <option value="github-dark-high-contrast">github dark hc</option>
-                <option value="github-light-high-contrast">github light hc</option>
+              <optgroup label="high contrast auto">
+                <option value="github-hc">github hc</option>
               </optgroup>
             </select>
           </div>
@@ -792,9 +796,9 @@
   }
   .indicators { display: flex; align-items: center; gap: 8px; }
   .dot { font-size: .72rem; color: var(--text-dim); }
-  .dot.on { color: #5a5; }
+  .dot.on { color: var(--status-ok); }
   .dot.ai.on { color: var(--accent-light); }
-  .dot.ai.idle { color: #5a5; }
+  .dot.ai.idle { color: var(--status-ok); }
   .cost { font-size: .72rem; color: var(--text-dim); }
   .user-menu-wrap { position: relative; }
   .user-btn {

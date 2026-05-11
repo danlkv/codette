@@ -4,7 +4,8 @@
 <script>
   import Login        from './lib/Login.svelte';
   import ChatLayout   from './lib/ChatLayout.svelte';
-  import { highContrast, fontStyle, syntaxTheme, accentColor, resetStores } from './store.js';
+  import { colorScheme, highContrast, fontStyle, syntaxTheme, effectiveSyntaxTheme, accentColor, resetStores } from './store.js';
+  import { THEME_PAIRS } from './utils/highlight.js';
 
   function lightenHex(hex, amount = 0.08) {
     const r = parseInt(hex.slice(1,3),16)/255, g = parseInt(hex.slice(3,5),16)/255, b = parseInt(hex.slice(5,7),16)/255;
@@ -129,6 +130,26 @@
     }
   });
 
+  // Apply color scheme + resolve effective syntax theme
+  // JS always sets data-theme so CSS never needs @media
+  const _mq = window.matchMedia('(prefers-color-scheme: light)');
+  $effect(() => {
+    const scheme = $colorScheme;
+    const themeKey = $syntaxTheme;
+    const apply = () => {
+      const effective = scheme === 'system' ? (_mq.matches ? 'light' : 'dark') : scheme;
+      document.documentElement.setAttribute('data-theme', effective);
+      const pair = THEME_PAIRS[themeKey];
+      effectiveSyntaxTheme.set(pair ? pair[effective] : themeKey);
+    };
+    apply();
+    localStorage.setItem('colorScheme', scheme);
+    if (scheme === 'system') {
+      _mq.addEventListener('change', apply);
+      return () => _mq.removeEventListener('change', apply);
+    }
+  });
+
   // Persist high-contrast preference and apply class to <html>
   $effect(() => {
     if (typeof document !== 'undefined') {
@@ -181,6 +202,7 @@
     --user-label:   #88a;
     --user-text:    #b8b8e8;
     --status-ok:    #4f4;
+    --error:        #e06c75;
     --code-bg:      #1e1e2e;
     --code-color:   #e8c97a;
     --pre-bg:       #161620;
@@ -191,29 +213,28 @@
     --btn-hover:    #3a3a8a;
     --cursor:       #7af;
   }
-  @media (prefers-color-scheme: light) {
-    :global(:root) {
-      --bg-primary:   #f5f5f5;
-      --bg-secondary: #ffffff;
-      --bg-elevated:  #e8e8e8;
-      --border:       #d0d0d0;
-      --text:         #1a1a1a;
-      --text-muted:   #666;
-      --text-dim:     #aaa;
-      --user-color:   #5050a8;
-      --user-label:   #668;
-      --user-text:    #3030a0;
-      --status-ok:    #0a0;
-      --code-bg:      #eef0f8;
-      --code-color:   #8b6914;
-      --pre-bg:       #f4f4fc;
-      --pre-code:     #2a2a5a;
-      --link:         #1a6bc4;
-      --tool-name:    #8b5a10;
-      --btn-bg:       #d0d8f0;
-      --btn-hover:    #b8c4e8;
-      --cursor:       #36c;
-    }
+  :global(:root[data-theme="light"]) {
+    --bg-primary:   #f5f5f5;
+    --bg-secondary: #ffffff;
+    --bg-elevated:  #e8e8e8;
+    --border:       #d0d0d0;
+    --text:         #1a1a1a;
+    --text-muted:   #666;
+    --text-dim:     #aaa;
+    --user-color:   #5050a8;
+    --user-label:   #668;
+    --user-text:    #3030a0;
+    --status-ok:    #009500;
+    --error:        #c0392b;
+    --code-bg:      #eef0f8;
+    --code-color:   #8b6914;
+    --pre-bg:       #f4f4fc;
+    --pre-code:     #2a2a5a;
+    --link:         #1a6bc4;
+    --tool-name:    #8b5a10;
+    --btn-bg:       #d0d8f0;
+    --btn-hover:    #b8c4e8;
+    --cursor:       #36c;
   }
   :global(.high-contrast) {
     --border:       #888888;
@@ -232,24 +253,22 @@
     --tool-name:    #ffcc44;
     --cursor:       #66ccff;
   }
-  @media (prefers-color-scheme: light) {
-    :global(.high-contrast) {
-      --border:       #555555;
-      --text:         #000000;
-      --text-muted:   #333333;
-      --text-dim:     #666666;
-      --accent:       #b84400;
-      --accent-light: #cc5500;
-      --user-color:   #2020aa;
-      --user-label:   #334499;
-      --user-text:    #1010aa;
-      --status-ok:    #006600;
-      --code-color:   #7a5000;
-      --pre-code:     #11115a;
-      --link:         #0044cc;
-      --tool-name:    #7a4400;
-      --cursor:       #0044cc;
-    }
+  :global([data-theme="light"] .high-contrast) {
+    --border:       #555555;
+    --text:         #000000;
+    --text-muted:   #333333;
+    --text-dim:     #666666;
+    --accent:       #b84400;
+    --accent-light: #cc5500;
+    --user-color:   #2020aa;
+    --user-label:   #334499;
+    --user-text:    #1010aa;
+    --status-ok:    #006600;
+    --code-color:   #7a5000;
+    --pre-code:     #11115a;
+    --link:         #0044cc;
+    --tool-name:    #7a4400;
+    --cursor:       #0044cc;
   }
   :global(body) {
     font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;

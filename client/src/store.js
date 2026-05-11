@@ -9,11 +9,13 @@ export const lastUsage          = writable(null); // { input_tokens, output_toke
 export const lastContextUsage   = writable(null); // { used: number, total: number } from modelUsage
 export const hostStatus     = writable('disconnected');
 export const wsOk           = writable(false);
+export const colorScheme    = writable(localStorage.getItem('colorScheme') || 'system');
 export const highContrast   = writable(localStorage.getItem('hc') === '1');
 export const vibrateOnDone  = writable(localStorage.getItem('vibrate') !== '0');
 export const fontStyle      = writable(localStorage.getItem('font') || 'mono');
-export const syntaxTheme    = writable(null);  // per-account; set by App.svelte
-export const accentColor    = writable(null);  // per-account; set by App.svelte
+export const syntaxTheme          = writable(null);  // per-account; set by App.svelte
+export const effectiveSyntaxTheme = writable(null);  // resolved shiki theme id (family → dark/light variant)
+export const accentColor          = writable(null);  // per-account; set by App.svelte
 export const showFileChips  = writable(localStorage.getItem('claudeweb_showFileChips') !== 'false');
 
 // Multi-session support

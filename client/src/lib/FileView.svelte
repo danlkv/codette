@@ -240,7 +240,7 @@
     font-size: .8rem;
     color: var(--text-dim);
   }
-  .fv-error { color: #e06c75; }
+  .fv-error { color: var(--error); }
 
   .fv-pre {
     margin: 0;

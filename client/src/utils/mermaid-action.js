@@ -6,7 +6,8 @@ import mermaid from 'mermaid';
 function getConfig() {
   const s = getComputedStyle(document.documentElement);
   const v = name => s.getPropertyValue(name).trim();
-  const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const forced = document.documentElement.getAttribute('data-theme');
+  const dark = forced === 'dark' || (!forced && !window.matchMedia('(prefers-color-scheme: light)').matches);
   return {
     startOnLoad: false,
     theme: 'base',

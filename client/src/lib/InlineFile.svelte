@@ -129,5 +129,5 @@
     font-style: italic;
     font-size: .85em;
   }
-  .if-error { color: #e06c75; font-style: normal; }
+  .if-error { color: var(--error); font-style: normal; }
 </style>

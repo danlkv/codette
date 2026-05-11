@@ -87,7 +87,7 @@
   textarea {
     flex: 1; background: var(--bg-elevated);
     border: 1px solid var(--border); border-radius: 6px;
-    color: var(--text); font: inherit; font-size: .9rem;
+    color: var(--text); font: inherit; font-size: 16px;
     padding: 7px 10px; line-height: 1.5;
     resize: none; min-height: 36px; max-height: 200px; overflow-y: auto;
     transition: border-color .15s;

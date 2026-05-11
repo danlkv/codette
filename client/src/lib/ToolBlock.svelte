@@ -110,10 +110,8 @@
   }
   .badge.running { background: #78350f; color: #fcd34d; }
   .badge.done    { background: #14532d; color: #86efac; }
-  @media (prefers-color-scheme: light) {
-    .badge.running { background: #fef3c7; color: #92400e; }
-    .badge.done    { background: #dcfce7; color: #065f46; }
-  }
+  :global([data-theme="light"]) .badge.running { background: #fef3c7; color: #92400e; }
+  :global([data-theme="light"]) .badge.done    { background: #dcfce7; color: #065f46; }
   .chevron { color: var(--text-dim); font-size: .7rem; }
   .detail {
     border-top: 1px solid var(--border);
@@ -167,8 +165,6 @@
   .diff-line.add { background: #0a2d14; color: #86efac; }
   .diff-sig { user-select: none; opacity: 0.6; min-width: 1ch; }
   .diff-text { flex: 1; }
-  @media (prefers-color-scheme: light) {
-    .diff-line.del { background: #fde8e8; color: #9b1c1c; }
-    .diff-line.add { background: #dcfce7; color: #14532d; }
-  }
+  :global([data-theme="light"]) .diff-line.del { background: #fde8e8; color: #9b1c1c; }
+  :global([data-theme="light"]) .diff-line.add { background: #dcfce7; color: #14532d; }
 </style>
