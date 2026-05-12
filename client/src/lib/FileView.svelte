@@ -5,7 +5,7 @@
   import { renderMd } from '../utils/markdown.js';
   import { mermaidRender } from '../utils/mermaid-action.js';
   import { syntaxHighlight } from '../utils/syntax-highlight-action.js';
-  import { sessions, currentSessionId, syntaxTheme } from '../store.js';
+  import { sessions, currentSessionId, effectiveSyntaxTheme } from '../store.js';
   import { highlightLines, langFromPath } from '../utils/highlight.js';
   import ImagePreview from './ImagePreview.svelte';
 
@@ -29,11 +29,11 @@
   let renderedHtml = $derived(isMarkdown && content ? renderMd(content) : null);
 
   $effect(() => {
-    const theme = $syntaxTheme;
+    const theme = $effectiveSyntaxTheme;
     if (!theme || !content || isMarkdown) { hlHtml = null; return; }
     const lang = langFromPath(path);
     highlightLines(content, lang, theme)
-      .then(lineHtmls => { hlHtml = lineHtmls.join('\n'); })
+      .then(({ lines }) => { hlHtml = lines.join('\n'); })
       .catch(() => { hlHtml = null; });
   });
 
@@ -175,7 +175,7 @@
       {/if}
       <div class="fv-pdf" bind:this={pdfContainerEl}></div>
     {:else if renderedHtml}
-      <div class="fv-md" use:mermaidRender={renderedHtml} use:syntaxHighlight={{ theme: $syntaxTheme }}>{@html renderedHtml}</div>
+      <div class="fv-md" use:mermaidRender={renderedHtml} use:syntaxHighlight={{ theme: $effectiveSyntaxTheme }}>{@html renderedHtml}</div>
     {:else if hlHtml}
       <pre class="fv-pre fv-hl">{@html hlHtml}</pre>
     {:else}

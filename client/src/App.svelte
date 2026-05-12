@@ -253,7 +253,7 @@
     --tool-name:    #ffcc44;
     --cursor:       #66ccff;
   }
-  :global([data-theme="light"] .high-contrast) {
+  :global([data-theme="light"].high-contrast) {
     --border:       #555555;
     --text:         #000000;
     --text-muted:   #333333;
