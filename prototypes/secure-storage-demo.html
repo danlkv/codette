@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Secure storage — device pairing demo</title>
+<style>
+  :root {
+    --bg:      #f6f8fa; --bg2:    #ffffff; --bg3:    #f0f2f5;
+    --border:  #d0d7de; --text:   #1f2328; --muted:  #57606a;
+    --dim:     #8c959f; --accent: #0969da; --accent2: #1a7fe8;
+    --green:   #1a7f37; --yellow: #9a6700; --red:    #d1242f;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 13px/1.5 'SF Mono', 'Fira Code', monospace;
+    padding: 32px 24px; min-height: 100vh;
+  }
+  h1 { color: var(--accent); font-size: .95rem; font-weight: 600; margin-bottom: 3px; }
+  .subtitle { color: var(--dim); font-size: .75rem; margin-bottom: 24px; }
+
+  .layout {
+    display: flex; flex-direction: column;
+    gap: 16px; max-width: 480px;
+  }
+
+  /* main card */
+  .card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .card-header {
+    padding: 11px 18px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px; font-size: .82rem;
+  }
+  .badge {
+    font-size: .65rem; padding: 2px 7px; border-radius: 3px;
+    font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+  }
+  .badge-store  { background: #dbeafe; color: var(--accent); }
+  .badge-restore{ background: #dcfce7; color: var(--green); }
+  .card-body { padding: 22px 18px; display: flex; flex-direction: column; gap: 14px; min-height: 220px; }
+
+  /* step */
+  .step-meta { font-size: .68rem; color: var(--dim); letter-spacing: .08em; text-transform: uppercase; }
+  .step-title { font-size: .92rem; margin-top: 2px; }
+
+  /* fields */
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field-label { font-size: .72rem; color: var(--muted); }
+  .field-hint  { font-size: .68rem; color: var(--dim); }
+  input[type=text], input[type=password] {
+    background: var(--bg3); border: 1px solid var(--border); color: var(--text);
+    padding: 7px 10px; border-radius: 6px; font: inherit; outline: none; width: 100%;
+  }
+  input:focus { border-color: var(--accent); }
+
+  /* code digits */
+  .digits { display: flex; gap: 8px; }
+  .digit {
+    width: 46px; height: 54px; background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); font: 1.4rem/1 'SF Mono', monospace;
+    text-align: center; outline: none;
+  }
+  .digit:focus { border-color: var(--accent); }
+
+  /* status */
+  .status {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 13px; border-radius: 6px; font-size: .8rem;
+  }
+  .s-info    { background: #dbeafe; color: var(--accent); }
+  .s-ok      { background: #dcfce7; color: var(--green); }
+  .s-warn    { background: #fef9c3; color: var(--yellow); }
+  .s-err     { background: #fee2e2; color: var(--red); }
+  .s-dim     { background: var(--bg3); color: var(--muted); }
+
+  /* buttons */
+  .actions { display: flex; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+  .btn {
+    background: none; border: 1px solid var(--accent); color: var(--accent);
+    padding: 7px 14px; border-radius: 6px; cursor: pointer; font: inherit;
+    transition: color .15s, border-color .15s;
+  }
+  .btn:hover:not(:disabled) { color: var(--accent2); border-color: var(--accent2); }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .btn-ghost { border-color: var(--border); color: var(--dim); }
+  .btn-ghost:hover:not(:disabled) { color: var(--muted); border-color: var(--muted); }
+  .btn-sm { padding: 4px 10px; font-size: .72rem; }
+
+  /* terminal mock */
+  .terminal {
+    background: #1b1f23; border: 1px solid var(--border); border-radius: 6px;
+    padding: 11px 13px; font-size: .78rem; color: #7ee787; line-height: 1.6;
+  }
+  .terminal .prompt { color: #6e7681; }
+  .terminal .code-hi { color: #ffff00; font-size: 1.05em; letter-spacing: .2em; }
+  .terminal .note    { color: #555; font-size: .82em; }
+
+  /* progress nav */
+  .flow-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 20px; flex-wrap: wrap; }
+  .step-pip {
+    font-size: .68rem; padding: 2px 9px; border-radius: 3px;
+    border: 1px solid var(--border); color: var(--dim); white-space: nowrap;
+  }
+  .step-pip.cur  { border-color: var(--accent); color: var(--accent); background: #dbeafe; }
+  .step-pip.done { border-color: #bbf7d0; color: var(--green); background: #dcfce7; }
+  .arrow { color: var(--border); font-size: .75rem; }
+
+  /* user list (paired phase) */
+  .user-list { display: flex; flex-direction: column; gap: 8px; }
+  .user-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px; background: var(--bg3); border-radius: 7px;
+  }
+  .user-item-info { flex: 1; min-width: 0; }
+  .user-item-name { font-size: .85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .user-item-hw   { font-size: .68rem; color: var(--dim); margin-top: 1px; }
+  .user-item-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+  /* vault panel */
+  .vault {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 18px; display: flex; flex-direction: row; align-items: center; gap: 16px;
+  }
+  .vault-title { font-size: .68rem; color: var(--dim); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 8px; }
+  .vault-rows { display: flex; flex-direction: row; gap: 10px; flex: 1; flex-wrap: wrap; }
+  .chip-wrap { display: flex; align-items: center; flex-shrink: 0; }
+  .chip { transition: filter .4s; }
+  .chip.active { filter: drop-shadow(0 0 6px var(--accent)); }
+  .chip.stored { filter: drop-shadow(0 0 6px var(--green)); }
+  .vault-row {
+    display: flex; flex-direction: column; gap: 3px;
+    padding: 7px 10px; background: var(--bg3); border-radius: 6px; font-size: .72rem;
+    min-width: 100px;
+  }
+  .vault-row-label { color: var(--dim); }
+  .vault-row-value { color: var(--text); word-break: break-all; }
+  .vault-row-value.empty { color: var(--dim); font-style: italic; }
+  .vault-note { font-size: .68rem; color: var(--dim); line-height: 1.5; }
+
+  /* raw authData dump */
+  .authdata-toggle {
+    font-size: .68rem; color: var(--accent); cursor: pointer; background: none;
+    border: none; padding: 0; font: inherit; text-decoration: underline dotted;
+  }
+  .authdata-hex {
+    font-size: .65rem; color: var(--muted); word-break: break-all; line-height: 1.7;
+    background: var(--bg3); border-radius: 5px; padding: 8px 10px; margin-top: 6px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    display: none;
+  }
+  .authdata-hex.open { display: block; }
+  .authdata-hex .ab-section { color: var(--dim); font-size: .62rem; display: block; margin-bottom: 2px; margin-top: 6px; }
+  .authdata-hex .ab-section:first-child { margin-top: 0; }
+  .authdata-hex .ab-highlight { color: var(--accent); }
+  .authdata-hex .ab-aaguid { color: var(--green); }
+
+  /* divider */
+  .divider { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: .68rem; }
+  .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+  @keyframes pulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+  .pulse { animation: pulse 1.1s ease-in-out infinite; }
+</style>
+</head>
+<body>
+
+<h1>Device pairing — secure storage demo</h1>
+<p class="subtitle">Store and restore a WebAuthn device key in OS hardware (Secure Enclave / TPM / StrongBox)</p>
+
+<div class="flow-nav" id="flow-nav"></div>
+
+<div class="layout">
+  <div class="card">
+    <div class="card-header" id="card-header"></div>
+    <div class="card-body"   id="card-body"></div>
+  </div>
+
+  <div class="vault">
+    <div class="chip-wrap">
+      <svg class="chip" id="chip-svg" width="48" height="48" viewBox="0 0 64 64" fill="none">
+        <line x1="16" y1="16" x2="8"  y2="16" stroke="var(--dim)" stroke-width="2" stroke-linecap="round"/>
+        <line x1="16" y1="24" x2="8"  y2="24" stroke="var(--dim)" stroke-width="2" stroke-linecap="round"/>
+        <line x1="16" y1="32" x2="8"  y2="32" stroke="var(--dim)" stroke-width="2" stroke-linecap="round"/>
+        <line x1="16" y1="40" x2="8"  y2="40" stroke="var(--dim)" stroke-width="2" stroke-linecap="round"/>
+        <line x1="16" y1="48" x2="8"  y2="48" stroke="var(--dim)" stroke-width="2" stroke-linecap="round"/>
+        <line x1="48" y1="16" x2="56" y2="16" stroke="var(--dim)" stroke-width="2" stroke-linecap="round"/>
+        <line x1="48" y1="24" x2="56" y2="24" stroke="var(--dim)" stroke-width="2" stroke-linecap="round"/>
+        <line x1="48" y1="32" x2="56" y2="32" stroke="var(--dim)" stroke-width="2" stroke-linecap="round"/>
+        <line x1="48" y1="40" x2="56" y2="40" stroke="var(--dim)" stroke-width="2" stroke-linecap="round"/>
+        <line x1="48" y1="48" x2="56" y2="48" stroke="var(--dim)" stroke-width="2" stroke-linecap="round"/>
+        <rect id="chip-body" x="14" y="10" width="36" height="44" rx="4"
+          stroke="var(--border)" stroke-width="1.5" fill="var(--bg3)"/>
+        <rect id="chip-die" x="22" y="20" width="20" height="24" rx="2"
+          stroke="var(--dim)" stroke-width="1" fill="var(--bg)"/>
+        <g id="chip-lock" transform="translate(32,32)">
+          <rect x="-5" y="-2" width="10" height="8" rx="1.5" fill="none" stroke="var(--dim)" stroke-width="1.2"/>
+          <path d="M-3 -2 v-3 a3 3 0 0 1 6 0 v3" fill="none" stroke="var(--dim)" stroke-width="1.2"/>
+          <circle cx="0" cy="2" r="1" fill="var(--dim)"/>
+        </g>
+      </svg>
+    </div>
+    <div>
+      <div class="vault-title">OS Secure Storage</div>
+      <div class="vault-rows">
+        <div class="vault-row">
+          <div class="vault-row-label">user</div>
+          <div class="vault-row-value" id="v-user"><span class="empty">—</span></div>
+        </div>
+        <div class="vault-row">
+          <div class="vault-row-label">hardware</div>
+          <div class="vault-row-value" id="v-hw"><span class="empty">—</span></div>
+        </div>
+        <div class="vault-row">
+          <div class="vault-row-label">credential id</div>
+          <div class="vault-row-value" id="v-cred"><span class="empty">not stored</span></div>
+        </div>
+        <div class="vault-row">
+          <div class="vault-row-label">algorithm</div>
+          <div class="vault-row-value" id="v-algo"><span class="empty">—</span></div>
+        </div>
+        <div class="vault-row">
+          <div class="vault-row-label">aaguid</div>
+          <div class="vault-row-value" id="v-aaguid"><span class="empty">—</span></div>
+        </div>
+      </div>
+      <div id="v-authdata-wrap" style="margin-top:10px;display:none">
+        <button class="authdata-toggle" id="authdata-toggle" onclick="toggleAuthData()">▶ raw authenticatorData</button>
+        <div class="authdata-hex" id="authdata-hex"></div>
+      </div>
+      <div class="vault-note" id="v-note" style="margin-top:8px">Private key never leaves the hardware boundary.</div>
+    </div>
+  </div>
+</div>
+
+<div style="max-width:480px;margin-top:8px;display:flex;justify-content:flex-end">
+  <button class="btn btn-sm btn-ghost" onclick="clearStorage()">clear localStorage</button>
+</div>
+
+<script>
+// ── constants ─────────────────────────────────────────────────────────────────
+
+const PHASES = ['unpaired','connecting','code','enrolling','storing','paired','authenticating','authed'];
+const CREDS_KEY = 'demo_secure_creds_v2';
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+const rand = n => crypto.getRandomValues(new Uint8Array(n));
+const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf)))
+  .replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+const b64uD = s => {
+  s = s.replace(/-/g,'+').replace(/_/g,'/');
+  while (s.length%4) s+='=';
+  return Uint8Array.from(atob(s), c=>c.charCodeAt(0));
+};
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+function log(msg, data) {
+  if (data !== undefined) console.log('[demo]', msg, data);
+  else console.log('[demo]', msg);
+}
+
+function platformLabel() {
+  const ua = navigator.userAgent;
+  if (/iPhone|iPad|iPod/.test(ua)) return 'Secure Enclave (iOS)';
+  if (/Mac/.test(ua) && !/iPhone|iPad/.test(ua)) return 'Secure Enclave (macOS)';
+  if (/Android/.test(ua)) return 'StrongBox / TEE';
+  if (/Windows/.test(ua)) return 'Windows Hello / TPM';
+  return 'Platform authenticator';
+}
+
+// AAGUID → authenticator name. Source: passkeydeveloper.github.io/passkey-authenticator-aaguids
+const AAGUIDS = {
+  'a11a5faa-9f32-4b8c-8c5d-2f7d13e8c942': 'AliasVault',
+  'ea9b8d66-4d01-1d21-3ce4-b6b48cb575d4': 'Google Password Manager',
+  'adce0002-35bc-c60a-648b-0b25f1f05503': 'Chrome on Mac',
+  '08987058-cadc-4b81-b6e1-30de50dcbe96': 'Windows Hello',
+  '9ddd1817-af5a-4672-a2b9-3e3dd95000a9': 'Windows Hello',
+  '6028b017-b1d4-4c02-b4b3-afcdafc96bb2': 'Windows Hello',
+  'dd4ec289-e01d-41c9-bb89-70fa845d4bf2': 'iCloud Keychain (Managed)',
+  '531126d6-e717-415c-9320-3d9aa6981239': 'Dashlane',
+  'bada5566-a7aa-401f-bd96-45619a55120d': '1Password',
+  'b84e4048-15dc-4dd0-8640-f4f60813c8af': 'NordPass',
+  '0ea242b4-43c4-4a1b-8b17-dd6d0b6baec6': 'Keeper',
+  'f3809540-7f14-49c1-a8b3-8f813b225541': 'Enpass',
+  'b5397666-4885-aa6b-cebf-e52262a439a2': 'Chromium Browser',
+  '771b48fd-d3d4-4f74-9232-fc157ab0507a': 'Edge on Mac',
+  '39a5647e-1853-446c-a1f6-a79bae9f5bc7': 'IDmelon',
+  'd548826e-79b4-db40-a3d8-11116f7e8349': 'Bitwarden',
+  'fbfc3007-154e-4ecc-8c0b-6e020557d7bd': 'Apple Passwords',
+  '53414d53-554e-4700-0000-000000000000': 'Samsung Pass',
+  'd3452668-01fd-4c12-926c-83a4204853aa': 'Microsoft Password Manager',
+  '00000000-0000-0000-0000-000000000000': null, // attestation omitted
+};
+
+// Extract authenticatorData buffer from a create() credential.
+// .authenticatorData is standard but absent in some authenticators (Bitwarden, older FF).
+// Fall back to decoding it out of the always-present CBOR attestationObject.
+function getAuthDataBuf(cred) {
+  const direct = cred.response.authenticatorData;
+  if (direct instanceof ArrayBuffer && direct.byteLength > 32) return direct;
+  if (typeof cred.response.getAuthenticatorData === 'function') {
+    const m = cred.response.getAuthenticatorData();
+    if (m instanceof ArrayBuffer && m.byteLength > 32) return m;
+  }
+  return extractAuthDataFromAttestation(cred.response.attestationObject);
+}
+
+// Minimal CBOR byte-search: find the "authData" key in an attestationObject map
+// and return its byte-string value as an ArrayBuffer.
+function extractAuthDataFromAttestation(attestObj) {
+  if (!attestObj) return null;
+  try {
+    const bytes = new Uint8Array(attestObj);
+    // CBOR text(8) "authData" encodes as: 0x68 61 75 74 68 44 61 74 61
+    const KEY = [0x68, 0x61, 0x75, 0x74, 0x68, 0x44, 0x61, 0x74, 0x61];
+    outer: for (let i = 0; i < bytes.length - KEY.length; i++) {
+      for (let j = 0; j < KEY.length; j++) if (bytes[i+j] !== KEY[j]) continue outer;
+      let p = i + KEY.length;
+      const maj = bytes[p] >> 5, info = bytes[p] & 0x1f; p++;
+      if (maj !== 2) continue; // must be a CBOR byte string
+      let len;
+      if      (info <= 23)  len = info;
+      else if (info === 24) len = bytes[p++];
+      else if (info === 25) { len = (bytes[p] << 8) | bytes[p+1]; p += 2; }
+      else continue;
+      if (len > 32) return bytes.slice(p, p + len).buffer;
+    }
+  } catch {}
+  return null;
+}
+
+function aaguidFromCred(cred) {
+  try {
+    const buf = getAuthDataBuf(cred);
+    if (!buf) return null;
+    const authData = new Uint8Array(buf);
+    // authData layout: rpIdHash[32] | flags[1] | signCount[4] | aaguid[16] | ...
+    if (authData.length < 53) return null;
+    const flags = authData[32];
+    if (!(flags & 0x40)) return null; // AT flag not set — no attested credential data
+    const b = authData.slice(37, 53);
+    const h = [...b].map(x => x.toString(16).padStart(2,'0')).join('');
+    return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
+  } catch { return null; }
+}
+
+function shortId(s) { return s.slice(0,10)+'…'+s.slice(-5); }
+
+// ── storage (multi-user) ───────────────────────────────────────────────────────
+
+function loadAllCreds() {
+  try { return JSON.parse(localStorage.getItem(CREDS_KEY)) || {}; } catch { return {}; }
+}
+function loadCred(user) { return loadAllCreds()[user] || null; }
+function saveCred(o) {
+  log('saveCred', { user: o.user, hw: o.hw, credId: o.id?.slice(0,12)+'…' });
+  const all = loadAllCreds();
+  all[o.user] = o;
+  localStorage.setItem(CREDS_KEY, JSON.stringify(all));
+}
+function clearCred(user) {
+  log('clearCred', user);
+  const all = loadAllCreds();
+  delete all[user];
+  if (Object.keys(all).length) localStorage.setItem(CREDS_KEY, JSON.stringify(all));
+  else localStorage.removeItem(CREDS_KEY);
+}
+function clearStorage() {
+  log('clearStorage: removing demo localStorage keys', [CREDS_KEY, 'demo_secure_cred_v1']);
+  localStorage.removeItem(CREDS_KEY);
+  localStorage.removeItem('demo_secure_cred_v1');
+  selectedUser = '';
+  username = '';
+  discoverableFlow = false;
+  go('unpaired');
+}
+
+// ── state ─────────────────────────────────────────────────────────────────────
+
+let phase = 'unpaired';
+let username = '';          // user being paired
+let selectedUser = '';      // user being restored / currently authed
+let pairCode = '';
+let errorMsg = '';
+let discoverableFlow = false;  // true when using passkey picker (allowCredentials: [])
+
+// ── render ────────────────────────────────────────────────────────────────────
+
+function render() {
+  renderNav();
+  renderCard();
+  renderVault();
+}
+
+function renderNav() {
+  const labels = {
+    unpaired:'unpaired', connecting:'connect', code:'verify code',
+    enrolling:'biometric enroll', storing:'store key',
+    paired:'users', authenticating:'biometric auth', authed:'session active'
+  };
+  const cur = PHASES.indexOf(phase);
+  document.getElementById('flow-nav').innerHTML = PHASES.map((p,i) => {
+    const cls = i === cur ? 'cur' : i < cur ? 'done' : '';
+    return `<span class="step-pip ${cls}">${labels[p]}</span>`
+      + (i < PHASES.length-1 ? '<span class="arrow">›</span>' : '');
+  }).join('');
+}
+
+function renderCard() {
+  const HEADERS = {
+    unpaired:      ['store',   'Pair this device'],
+    connecting:    ['store',   'Connecting to host…'],
+    code:          ['store',   'Verify pairing code'],
+    enrolling:     ['store',   'Biometric enrollment'],
+    storing:       ['store',   'Writing to secure hardware…'],
+    paired:        ['restore', 'Paired users'],
+    authenticating:['restore', discoverableFlow ? 'Passkey picker' : 'Biometric authentication'],
+    authed:        ['restore', 'Session active'],
+  };
+  const [badgeType, title] = HEADERS[phase];
+  document.getElementById('card-header').innerHTML =
+    `<span class="badge badge-${badgeType}">${badgeType}</span><span>${title}</span>`;
+  document.getElementById('card-body').innerHTML = bodyHTML();
+  bind();
+}
+
+function err() {
+  return errorMsg ? `<div class="status s-err">✕ ${errorMsg}</div>` : '';
+}
+
+function bodyHTML() {
+  const allCreds = loadAllCreds();
+  const hasUsers = Object.keys(allCreds).length > 0;
+
+  switch (phase) {
+
+    case 'unpaired': return `
+      <div><div class="step-meta">step 1 of 4 — store</div>
+      <div class="step-title">${hasUsers ? 'Pair another user' : 'No device key stored yet'}</div></div>
+      <p style="color:var(--muted);font-size:.8rem;line-height:1.6">
+        Pairing generates a hardware-backed keypair. The private key is sealed inside the OS
+        secure enclave and never exported — only biometric unlocks it.
+      </p>
+      <div class="field"><div class="field-label">Username</div>
+        <input id="inp-user" type="text" autocomplete="username" placeholder="john" value="${esc(username)}"></div>
+      <div class="field"><div class="field-label">Password <span class="field-hint">(shared secret for this pairing window only)</span></div>
+        <input id="inp-pass" type="password" autocomplete="current-password" placeholder="••••••••"></div>
+      <div class="actions">
+        <button class="btn" id="btn-connect">Connect to host</button>
+        ${hasUsers ? '<button class="btn btn-ghost" id="btn-back-users">← users</button>' : ''}
+      </div>
+      <div class="divider" style="margin-top:4px">or</div>
+      <div class="actions">
+        <button class="btn btn-ghost" id="btn-discoverable">Sign in with passkey</button>
+      </div>
+      <div style="font-size:.68rem;color:var(--dim);line-height:1.5">
+        Uses OS passkey picker — works even if localStorage was cleared.
+        Credential ID and username are recovered from the authenticator.
+      </div>
+      ${err()}`;
+
+    case 'connecting': return `
+      <div><div class="step-meta">connecting</div>
+      <div class="step-title">Routing to host…</div></div>
+      <div class="status s-info pulse">
+        ⟳ Server forwarding pair request to <strong>${esc(username)}</strong>'s host
+      </div>
+      <p style="color:var(--dim);font-size:.78rem;line-height:1.5">
+        Host verifies password, generates a fresh 4-digit code and ephemeral X25519 keypair.
+        Code is displayed in the host terminal — never sent to server.
+      </p>`;
+
+    case 'code': return `
+      <div><div class="step-meta">step 2 of 4 — store</div>
+      <div class="step-title">Enter the code from host terminal</div></div>
+      <div class="terminal">
+        <div class="prompt">$ host-cli --username ${esc(username)} --password ****</div>
+        <div>Pairing request received from server.</div>
+        <div>Code: <span class="code-hi">${pairCode}</span></div>
+        <div class="note">Single-use · 60 s TTL · rate-limited</div>
+      </div>
+      <div class="field"><div class="field-label">Type the code shown above</div>
+        <div class="digits">
+          ${[0,1,2,3].map(i=>`<input class="digit" id="d${i}" maxlength="1" inputmode="numeric" data-i="${i}">`).join('')}
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="btn-verify">Verify &amp; register device</button>
+        <button class="btn btn-ghost" id="btn-back">back</button>
+      </div>
+      ${err()}`;
+
+    case 'enrolling': return `
+      <div><div class="step-meta">step 3 of 4 — store</div>
+      <div class="step-title">Waiting for biometric…</div></div>
+      <div class="status s-warn pulse">
+        ⬡ OS biometric prompt active — use fingerprint or Face ID
+      </div>
+      <p style="color:var(--dim);font-size:.78rem;line-height:1.5">
+        The OS generates an ES256 keypair inside secure hardware.<br>
+        The private key is bound to this device and never leaves it.<br>
+        <strong>user.id = TextEncoder(username)</strong> — authenticator stores username as userHandle,
+        enabling credential recovery without localStorage.
+      </p>`;
+
+    case 'storing': return `
+      <div><div class="step-meta">step 4 of 4 — store</div>
+      <div class="step-title">Sealing key in ${platformLabel()}…</div></div>
+      <div class="status s-info pulse">↓ Writing credential to secure hardware</div>`;
+
+    case 'paired': {
+      const users = Object.keys(allCreds);
+      const rows = users.map(u => `
+        <div class="user-item">
+          <div class="user-item-info">
+            <div class="user-item-name">${esc(u)}</div>
+            <div class="user-item-hw">${esc(allCreds[u].hw)}</div>
+          </div>
+          <div class="user-item-actions">
+            <button class="btn btn-sm btn-auth-user" data-user="${esc(u)}">Authenticate →</button>
+            <button class="btn btn-sm btn-ghost btn-forget-user" data-user="${esc(u)}">forget</button>
+          </div>
+        </div>`).join('');
+      return `
+        <div><div class="step-meta">paired devices</div>
+        <div class="step-title">${users.length} user${users.length !== 1 ? 's' : ''} on this device</div></div>
+        <div class="user-list">${rows}</div>
+        <div class="actions">
+          <button class="btn btn-ghost" id="btn-add-user">+ Pair new user</button>
+        </div>
+        <div class="divider" style="margin-top:4px">or</div>
+        <div class="actions">
+          <button class="btn btn-ghost" id="btn-discoverable">Sign in with passkey</button>
+        </div>
+        <div style="font-size:.68rem;color:var(--dim)">OS picker — no username needed</div>
+        ${err()}`;
+    }
+
+    case 'authenticating': return `
+      <div><div class="step-meta">restore — ${discoverableFlow ? 'passkey picker' : esc(selectedUser)}</div>
+      <div class="step-title">Waiting for biometric…</div></div>
+      <div class="status s-warn pulse">
+        ⬡ OS ${discoverableFlow ? 'passkey picker active — select your account' : 'unlocking sealed credential — use fingerprint or Face ID'}
+      </div>
+      <p style="color:var(--dim);font-size:.78rem;line-height:1.5">
+        ${discoverableFlow
+          ? 'allowCredentials: [] — authenticator presents all stored passkeys for this origin. userHandle in response encodes the username.'
+          : 'The key stays in hardware. OS performs ES256 signature over host\'s nonce and returns only the signature. Device identity proven without exposing key material.'}
+      </p>
+      ${err()}`;
+
+    case 'authed': return `
+      <div><div class="step-meta">session active — ${esc(selectedUser)}</div>
+      <div class="step-title">Authenticated</div></div>
+      <div class="status s-ok">✓ Host verified device signature. Short-lived session token issued.</div>
+      <p style="color:var(--dim);font-size:.78rem;line-height:1.5">
+        No password exchanged. Server never saw keys. Host verified directly via device signature.
+        Token expires; next session re-runs biometric restore — no re-pairing needed.
+      </p>
+      <div class="actions">
+        <button class="btn btn-ghost" id="btn-again">Authenticate again</button>
+        <button class="btn btn-ghost" id="btn-switch">Switch user</button>
+        <button class="btn btn-ghost" id="btn-forget">Forget ${esc(selectedUser)}</button>
+      </div>`;
+  }
+}
+
+// ── vault panel ───────────────────────────────────────────────────────────────
+
+function renderVault() {
+  // During pairing flow show the user being enrolled; otherwise show selectedUser.
+  const enrolling = phase === 'enrolling' || phase === 'storing';
+  const viewUser = enrolling ? username : selectedUser;
+  const cred = viewUser ? loadCred(viewUser) : null;
+  const allCreds = loadAllCreds();
+  const active = enrolling;
+  const stored = Object.keys(allCreds).length > 0;
+
+  const svg = document.getElementById('chip-svg');
+  svg.className = 'chip' + (active ? ' active' : stored ? ' stored' : '');
+
+  const chipColor = active ? 'var(--accent)' : stored ? 'var(--green)' : 'var(--border)';
+  const lockColor = active ? 'var(--accent)' : stored ? 'var(--green)' : 'var(--dim)';
+  document.getElementById('chip-body').setAttribute('stroke', chipColor);
+  document.getElementById('chip-die').setAttribute('stroke', active ? 'var(--accent2)' : stored ? 'var(--green)' : 'var(--dim)');
+  document.querySelectorAll('#chip-lock rect, #chip-lock path, #chip-lock circle')
+    .forEach(el => {
+      if (el.tagName === 'circle') el.setAttribute('fill', lockColor);
+      else el.setAttribute('stroke', lockColor);
+    });
+
+  if (cred) {
+    document.getElementById('v-user').textContent = cred.user;
+    document.getElementById('v-hw').textContent = cred.hw;
+    document.getElementById('v-cred').textContent = shortId(cred.id);
+    document.getElementById('v-algo').textContent = 'ES256 (P-256)';
+    const aaguidEl = document.getElementById('v-aaguid');
+    if (cred.aaguid) {
+      const known = AAGUIDS[cred.aaguid];
+      aaguidEl.textContent = known !== undefined
+        ? (known ?? 'omitted by authenticator')
+        : cred.aaguid.slice(0,13) + '…';
+      aaguidEl.title = cred.aaguid;
+    } else {
+      aaguidEl.innerHTML = '<span class="empty">not available</span>';
+    }
+    document.getElementById('v-note').textContent =
+      'Private key sealed in hardware. Never exported. Biometric-gated.';
+
+    const wrap = document.getElementById('v-authdata-wrap');
+    const hexEl = document.getElementById('authdata-hex');
+    wrap.style.display = '';
+    if (cred.authHex) {
+      hexEl.innerHTML = buildAuthDataHTML(cred.authHex);
+    } else {
+      hexEl.innerHTML = '<span style="color:var(--dim);font-style:italic">not captured — forget &amp; re-pair to record authenticatorData</span>';
+      hexEl.classList.add('open');
+      document.getElementById('authdata-toggle').textContent = '▼ raw authenticatorData';
+    }
+  } else {
+    document.getElementById('v-user').innerHTML = phase === 'authed' && selectedUser
+      ? esc(selectedUser) + ' <span style="color:var(--dim);font-size:.65rem">(localStorage cleared — recovered via userHandle)</span>'
+      : '<span class="empty">—</span>';
+    document.getElementById('v-hw').innerHTML = '<span class="empty">—</span>';
+    document.getElementById('v-cred').innerHTML = stored ? '<span class="empty">select user</span>' : '<span class="empty">not stored</span>';
+    document.getElementById('v-algo').innerHTML = '<span class="empty">—</span>';
+    document.getElementById('v-aaguid').innerHTML = '<span class="empty">—</span>';
+    document.getElementById('v-authdata-wrap').style.display = 'none';
+    document.getElementById('v-note').textContent = stored
+      ? `${Object.keys(allCreds).length} credential(s) stored. Select a user to view.`
+      : phase === 'authed'
+        ? 'Authenticated via passkey picker. localStorage was cleared — credential metadata not available.'
+        : 'Private key never leaves the hardware boundary.';
+  }
+}
+
+function buildAuthDataHTML(hex) {
+  const chunk = (s, size) => s.match(new RegExp(`.{1,${size}}`, 'g')) || [];
+  const seg = (label, cls, h) =>
+    `<span class="ab-section">${label} [${h.length/2} bytes]</span><span class="${cls}">${chunk(h,2).join(' ')}</span>`;
+
+  const totalBytes = hex.length / 2;
+  const parts = [];
+
+  if (totalBytes >= 32)  parts.push(seg('rpIdHash [0–31]', 'ab-highlight', hex.slice(0, 64)));
+  if (totalBytes >= 33)  parts.push(seg('flags [32]',      'ab-highlight', hex.slice(64, 66)));
+  if (totalBytes >= 37)  parts.push(seg('signCount [33–36]','ab-highlight', hex.slice(66, 74)));
+  if (totalBytes >= 53)  parts.push(seg('aaguid [37–52]',  'ab-aaguid',   hex.slice(74, 106)));
+  if (totalBytes >= 55)  parts.push(seg('credIdLen [53–54]','ab-highlight', hex.slice(106, 110)));
+  if (totalBytes > 55) {
+    const credIdLenBytes = parseInt(hex.slice(106,110), 16);
+    const credEnd = 55 + credIdLenBytes;
+    if (totalBytes >= credEnd)
+      parts.push(seg(`credId [55–${credEnd-1}]`, 'ab-highlight', hex.slice(110, 110 + credIdLenBytes*2)));
+    if (totalBytes > credEnd)
+      parts.push(seg(`remainder [${credEnd}–${totalBytes-1}]`, '', hex.slice(110 + credIdLenBytes*2)));
+  }
+  if (!parts.length) parts.push(`<span>${hex}</span>`);
+
+  return parts.join('');
+}
+
+function toggleAuthData() {
+  const hexEl = document.getElementById('authdata-hex');
+  const btn   = document.getElementById('authdata-toggle');
+  const open  = hexEl.classList.toggle('open');
+  btn.textContent = (open ? '▼' : '▶') + ' raw authenticatorData';
+}
+
+// ── events ────────────────────────────────────────────────────────────────────
+
+function bind() {
+  q('inp-user')?.addEventListener('input', e => { username = e.target.value; });
+  q('btn-connect')?.addEventListener('click', doConnect);
+  q('btn-verify')?.addEventListener('click', doVerify);
+  q('btn-back')?.addEventListener('click', () => go('unpaired'));
+  q('btn-back-users')?.addEventListener('click', () => go('paired'));
+  q('btn-add-user')?.addEventListener('click', () => { username = ''; go('unpaired'); });
+  q('btn-again')?.addEventListener('click', () => {
+    const cred = loadCred(selectedUser);
+    if (cred) doRestore();
+    else doDiscoverableAuth();
+  });
+  q('btn-switch')?.addEventListener('click', () => {
+    selectedUser = '';
+    go(Object.keys(loadAllCreds()).length ? 'paired' : 'unpaired');
+  });
+  q('btn-forget')?.addEventListener('click', () => {
+    clearCred(selectedUser);
+    selectedUser = '';
+    go(Object.keys(loadAllCreds()).length ? 'paired' : 'unpaired');
+  });
+  q('btn-discoverable')?.addEventListener('click', doDiscoverableAuth);
+
+  // per-user buttons in the paired (user list) phase
+  document.querySelectorAll('.btn-auth-user').forEach(btn => {
+    btn.addEventListener('click', () => {
+      selectedUser = btn.dataset.user;
+      doRestore();
+    });
+  });
+  document.querySelectorAll('.btn-forget-user').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (selectedUser === btn.dataset.user) selectedUser = '';
+      clearCred(btn.dataset.user);
+      go(Object.keys(loadAllCreds()).length ? 'paired' : 'unpaired');
+    });
+  });
+
+  // digit auto-advance
+  document.querySelectorAll('.digit').forEach((d, i, all) => {
+    d.addEventListener('input', e => {
+      e.target.value = e.target.value.replace(/\D/g,'').slice(-1);
+      if (e.target.value && i < 3) all[i+1].focus();
+    });
+    d.addEventListener('keydown', e => {
+      if (e.key==='Backspace' && !e.target.value && i>0) all[i-1].focus();
+    });
+  });
+}
+
+function q(id) { return document.getElementById(id); }
+function go(p) { phase = p; errorMsg = ''; render(); }
+function fail(msg, p) { errorMsg = msg; phase = p; render(); }
+
+// ── flow ──────────────────────────────────────────────────────────────────────
+
+function doConnect() {
+  username = q('inp-user')?.value.trim() || '';
+  if (!username) { q('inp-user').focus(); return; }
+  const pw = q('inp-pass')?.value || '';
+  if (!pw) { q('inp-pass').focus(); return; }
+  log('doConnect', { username });
+  go('connecting');
+  pairCode = String(1000 + Math.floor(Math.random() * 9000));
+  setTimeout(() => go('code'), 900);
+}
+
+function doVerify() {
+  const entered = [0,1,2,3].map(i => q('d'+i)?.value||'').join('');
+  if (entered.length < 4) { q('d'+[0,1,2,3].find(i=>!q('d'+i)?.value))?.focus(); return; }
+  log('doVerify', { entered, expected: pairCode, match: entered === pairCode });
+  if (entered !== pairCode) {
+    fail('Wrong code — check the host terminal.', 'code');
+    return;
+  }
+  go('enrolling');
+  enrollWebAuthn();
+}
+
+async function enrollWebAuthn() {
+  log('enrollWebAuthn: start', { username });
+  if (!window.PublicKeyCredential) {
+    log('enrollWebAuthn: WebAuthn API not available');
+    fail('WebAuthn not available — open this page over HTTPS.', 'code');
+    return;
+  }
+  const hasPlatform = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().catch(() => false);
+  log('enrollWebAuthn: platform authenticator available', hasPlatform);
+  if (!hasPlatform) {
+    fail('No platform authenticator on this device (no Touch ID / Windows Hello / TPM).', 'code');
+    return;
+  }
+  // user.id = username bytes so userHandle in future get() responses identifies the user,
+  // enabling credential recovery even if localStorage is cleared.
+  const userId = new TextEncoder().encode(username);
+  log('enrollWebAuthn: calling navigator.credentials.create', {
+    rp: location.hostname,
+    user: username,
+    userId: b64u(userId),
+    residentKey: 'required',
+  });
+  try {
+    const cred = await navigator.credentials.create({ publicKey: {
+      challenge: rand(32),
+      rp: { name: 'Claude Agent', id: location.hostname },
+      user: { id: userId, name: username, displayName: username },
+      pubKeyCredParams: [
+        { type: 'public-key', alg: -7 },   // ES256
+        { type: 'public-key', alg: -257 },  // RS256
+      ],
+      authenticatorSelection: {
+        authenticatorAttachment: 'platform',
+        userVerification: 'required',
+        residentKey: 'required',
+      },
+      timeout: 60000,
+    }});
+    log('enrollWebAuthn: credential created', { rawId: b64u(cred.rawId) });
+    const authBuf = getAuthDataBuf(cred);
+    const authHex = authBuf ? [...new Uint8Array(authBuf)].map(x => x.toString(16).padStart(2,'0')).join('') : null;
+    const aaguid = aaguidFromCred(cred);
+    log('enrollWebAuthn: extracted', { aaguid, authHexLen: authHex?.length });
+    doStore(b64u(cred.rawId), aaguid, authHex);
+  } catch (e) {
+    log('enrollWebAuthn: error', { name: e.name, message: e.message });
+    fail(e.name === 'NotAllowedError' ? 'Biometric prompt cancelled — try again.' : 'WebAuthn error: ' + e.message, 'code');
+  }
+}
+
+function doStore(credId, aaguid, authHex) {
+  const knownName = aaguid && AAGUIDS[aaguid];
+  const hw = knownName !== undefined
+    ? (knownName ?? platformLabel())
+    : (aaguid ? `${platformLabel()} (aaguid: ${aaguid.slice(0,8)}…)` : platformLabel());
+  log('doStore', { user: username, credId: credId.slice(0,12)+'…', hw, aaguid });
+  go('storing');
+  saveCred({ id: credId, hw, aaguid, authHex, user: username });
+  selectedUser = username;
+  setTimeout(() => go('paired'), 900);
+}
+
+async function doRestore() {
+  const cred = loadCred(selectedUser);
+  if (!cred) { go('paired'); return; }
+  if (!window.PublicKeyCredential) { fail('WebAuthn not available — open this page over HTTPS.', 'paired'); return; }
+  log('doRestore: start', { user: selectedUser, credId: cred.id.slice(0,12)+'…' });
+  discoverableFlow = false;
+  go('authenticating');
+  try {
+    log('doRestore: calling navigator.credentials.get', { allowCredentials: [cred.id.slice(0,12)+'…'] });
+    const assertion = await navigator.credentials.get({ publicKey: {
+      challenge: rand(32),
+      allowCredentials: [{ id: b64uD(cred.id), type: 'public-key' }],
+      userVerification: 'required',
+      timeout: 60000,
+    }});
+    log('doRestore: assertion received', { id: b64u(assertion.rawId) });
+    go('authed');
+  } catch (e) {
+    log('doRestore: error', { name: e.name, message: e.message });
+    fail(e.name === 'NotAllowedError' ? 'Biometric prompt cancelled — try again.' : 'WebAuthn error: ' + e.message, 'paired');
+  }
+}
+
+async function doDiscoverableAuth() {
+  if (!window.PublicKeyCredential) { fail('WebAuthn not available — open this page over HTTPS.', phase); return; }
+  log('doDiscoverableAuth: starting passkey picker flow (allowCredentials: [])');
+  discoverableFlow = true;
+  selectedUser = '';
+  go('authenticating');
+  try {
+    log('doDiscoverableAuth: calling navigator.credentials.get');
+    const assertion = await navigator.credentials.get({ publicKey: {
+      challenge: rand(32),
+      allowCredentials: [],   // empty → OS presents passkey picker
+      userVerification: 'required',
+      timeout: 60000,
+    }});
+    log('doDiscoverableAuth: assertion received', { id: b64u(assertion.rawId) });
+
+    // Recover username from userHandle (set to TextEncoder(username) at enrollment time).
+    // Only works for credentials enrolled after this change.
+    let recoveredUser = '';
+    if (assertion.response.userHandle && assertion.response.userHandle.byteLength > 0) {
+      recoveredUser = new TextDecoder().decode(assertion.response.userHandle);
+      log('doDiscoverableAuth: userHandle decoded', recoveredUser);
+    } else {
+      log('doDiscoverableAuth: no userHandle in response (credential enrolled before discoverable support)');
+    }
+
+    selectedUser = recoveredUser;
+    discoverableFlow = false;
+
+    // If this user isn't in localStorage (e.g. storage was cleared), save a partial
+    // record from the assertion so they appear in the user list going forward.
+    if (recoveredUser && !loadCred(recoveredUser)) {
+      log('doDiscoverableAuth: user not in localStorage — saving partial record', recoveredUser);
+      saveCred({
+        id: b64u(assertion.rawId),
+        user: recoveredUser,
+        hw: platformLabel() + ' (recovered)',
+        aaguid: null,
+        authHex: null,
+      });
+    }
+
+    log('doDiscoverableAuth: success', { user: selectedUser || '(unknown)' });
+    go('authed');
+  } catch (e) {
+    log('doDiscoverableAuth: error', { name: e.name, message: e.message });
+    discoverableFlow = false;
+    const fallbackPhase = Object.keys(loadAllCreds()).length ? 'paired' : 'unpaired';
+    fail(e.name === 'NotAllowedError' ? 'Biometric prompt cancelled — try again.' : 'WebAuthn error: ' + e.message, fallbackPhase);
+  }
+}
+
+// ── init ──────────────────────────────────────────────────────────────────────
+
+// Migrate old single-cred format
+try {
+  const old = localStorage.getItem('demo_secure_cred_v1');
+  if (old) {
+    const o = JSON.parse(old);
+    if (o?.user) {
+      log('init: migrating demo_secure_cred_v1', o.user);
+      saveCred(o);
+      localStorage.removeItem('demo_secure_cred_v1');
+    }
+  }
+} catch {}
+
+const initCreds = loadAllCreds();
+log('init', { users: Object.keys(initCreds), phase: Object.keys(initCreds).length ? 'paired' : 'unpaired' });
+if (Object.keys(initCreds).length > 0) { phase = 'paired'; }
+render();
+</script>
+</body>
+</html>
