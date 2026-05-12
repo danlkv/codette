@@ -6,19 +6,51 @@
   import MessageBubble from './MessageBubble.svelte';
   import { tweened } from 'svelte/motion';
   import { cubicOut } from 'svelte/easing';
-  let { hostStatus, historyLoading = false, sessionId = null, token = null, onOpenFile = null } = $props();
+  let { hostStatus, historyLoading = false, sessionId = null, token = null, onOpenFile = null,
+        hasMoreHistory = false, onLoadEarlier = () => {} } = $props();
 
   let el = $state();
   let pinned = $state(true);
 
+  // Scroll-to-bottom when pinned and new messages arrive
   $effect(() => {
     void $messages;
     if (pinned && el) el.scrollTop = el.scrollHeight;
   });
 
+  // Scroll position preservation during prepend (for browsers without overflow-anchor support)
+  let firstMsgId = null;
+  let scrollSnap = null;
+  $effect.pre(() => {
+    const newFirst = $messages[0]?.id ?? null;
+    if (newFirst !== firstMsgId && firstMsgId !== null && el) {
+      scrollSnap = { top: el.scrollTop, height: el.scrollHeight };
+    }
+    firstMsgId = newFirst;
+  });
+  $effect(() => {
+    void $messages;
+    if (scrollSnap && el) {
+      el.scrollTop = scrollSnap.top + (el.scrollHeight - scrollSnap.height);
+      scrollSnap = null;
+    }
+  });
+
+  // IntersectionObserver sentinel to prefetch earlier history
+  function sentinel(node) {
+    const obs = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting) onLoadEarlier();
+    }, { threshold: 0 });
+    obs.observe(node);
+    return { destroy: () => obs.disconnect() };
+  }
+
+  const sentinelIndex = $derived(Math.floor($messages.length * 0.45));
+
   function onScroll() {
     if (!el) return;
     pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    if (hasMoreHistory && el.scrollTop < el.clientHeight) onLoadEarlier();
   }
 
   function scrollToBottom() {
@@ -83,7 +115,10 @@
         </div>
       {/if}
 
-      {#each $messages as m (m.id)}
+      {#each $messages as m, i (m.id)}
+        {#if hasMoreHistory && i === sentinelIndex}
+          <div use:sentinel style="height:1px;margin:0"></div>
+        {/if}
         <MessageBubble msg={m} isStreaming={!!m.streaming} {sessionId} {token} {onOpenFile} />
       {/each}
     </div>

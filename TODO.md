@@ -4,6 +4,8 @@
 
 1. Question tool not supported in `--json` mode — remove it or figure out how to support.
 2. WebSocket status reported as inactive if host is inactive at start.
+3. First message in a new session is not displayed in the client UI.
+4. Host crashes if the directory for a new session does not exist.
 
 ## Enablers & Blockers
 Unblock workflows that are not possible today.

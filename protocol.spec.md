@@ -86,7 +86,7 @@ JWT in `Authorization: Bearer <token>` header (obtained from `POST /api/login`).
 |--------|------|------|----------|-------|
 | `POST` | `/api/login` | `{username, password}` | `{token}` | no auth |
 | `GET` | `/api/sessions` | — | `{sessions: Session[], hostCwd: string}` | list all sessions; `hostCwd` is host's `process.cwd()` |
-| `GET` | `/api/sessions/:id/history` | `?offset=N` | `{lines: string[], incremental: bool}` | raw JSONL lines; `offset` = line count client already has; host returns `raw.slice(offset)` |
+| `GET` | `/api/sessions/:id/history` | `?offset=N` / `?limit=N` / `?offset=N&limit=M` | `{lines: string[], totalLines: number, incremental: bool}` | raw JSONL lines; `?limit=N` → last N lines; `?offset=N&limit=M` → lines [N, N+M); `?offset=N` → lines [N, end). Server dedup key: `sessionId:offset:limit` |
 | `POST` | `/api/sessions` | `{cwd?: string, firstMessage?: string}` | 202 | create session; `firstMessage` bootstraps `system.init`; client auto-switches on `agent_event: started` |
 | `DELETE` | `/api/sessions/:id` | — | 204 | broadcasts new `session_list` from host  over WS |
 | `GET` | `/api/logs` | `?fmt=text` | JSON array or plain text | `x-host-key` auth |
@@ -119,15 +119,18 @@ Push events and stateful commands only.
 
 **User message echo (host):** The server does not echo user messages — it forwards them to the host, which emits a `claude_line({type:'user'})` after writing to Claude's stdin. This ensures the echo confirms delivery to the agent. On the sending client, the send button switches to a progress indicator immediately on send; it clears and the message bubble renders only when the echo `claude_line` arrives. Other clients receive the same `claude_line` broadcast and render the bubble identically.
 
-**History relay (server):** `GET /api/sessions/:id/history?offset=N` parks the HTTP response in
-`pendingHistoryHttp: Map<sessionId, entry[]>` and sends `get_session_history { sessionId, offset }` to host over WS.
-Host replies `history { sessionId, lines }` with `raw.slice(offset)`. Server drains the map and sends HTTP response.
-Multiple concurrent requests for the same sessionId coalesce into one WS request to host.
+**History relay (server):** `GET /api/sessions/:id/history` parks the HTTP response in
+`pendingHistory: Map<key, entry[]>` and sends `get_session_history { sessionId, offset?, limit? }` to host over WS.
+Host replies `history { sessionId, lines, totalLines }`. Server drains the map and sends HTTP response.
+Concurrent requests for the same session coalesce into one WS request. Dedup key is `${sessionId}:${offset??''}:${limit??''}` — requests with different params get separate WS round-trips.
 
 **Client history cache:** `localStorage` stores `{ lines: string[], lineCount: number }` per session.
-On load: display cache immediately, then always fetch `?offset=lineCount` for incremental update.
-If response is empty (`incremental: true, lines: []`), cache was fresh — no re-render.
-`saveCurrentCache()` called on session switch and `beforeunload` — no clock dependency.
+`lineCount` = server `totalLines` at last fetch + live lines pushed since. It is **not** `lines.length` — these diverge with windowed fetches. `startLine` is derived: `lineCount - lines.length`.
+On load: apply cache immediately, fetch `?offset=lineCount` for new lines.
+If `totalLines < lineCount`, file was truncated — drop cache and refetch `?limit=200`.
+`saveCurrentCache()` called on session switch and `beforeunload`.
+
+**Client in-memory store:** `sessionData: Map<sessionId, string[]>` is the authoritative in-memory store for non-current sessions. On switch-away, `currentLines` is saved into `sessionData`; background `claude_line` events push directly into it. On switch-back, `currentLines` is restored from `sessionData` with no HTTP fetch — the incremental fetch is skipped. HTTP fetch only on: initial load (no sessionData, no localStorage), page reload (sessionData gone), or WS reconnect (potential gap).
 
 **New session flow:** clicking "+ new" switches client to local `__new__` state (no network call).
 First message send POSTs `{ cwd, firstMessage }` to `/api/sessions` with `awaitingNewSession = true` set
@@ -143,10 +146,6 @@ preventing them from timing out after 30 s.
 **Delete confirmation:** server only resolves pending `DELETE /api/sessions/:id` responses when
 the session id is absent from the host's next `session_list` broadcast.
 
-**Client in-memory cache:** `sessionData: Map<sessionId, string[]>` stores raw JSONL lines for
-background sessions. On session switch, `currentLines` (raw lines) is saved into `sessionData`
-before switching; on switch-back lines are replayed through `parseLine`. Background `claude_line`
-events push directly into `sessionData` — no parsed-object mixing.
 
 ---
 
@@ -158,6 +157,89 @@ agents: Map<sessionId, { active: bool, streaming: bool }>  // from agent_events
 sessionCache: Session[]                                     // from last session_list
 logBuffer: Entry[]                                         // capped at 500
 ```
+
+---
+
+## Client State Traces
+
+Key variables: `CL` = `currentLines` count, `LC` = `lineCount`, `SD[A]` = `sessionData[A]` count, `LS` = localStorage cache. File has 1000 lines. Windowed fetch loads last 200 (lines 800–1000).
+
+### First load (no cache)
+
+| Step | Event | CL | LC | LS | Action |
+|---|---|---|---|---|---|
+| 1 | App open | 0 | 0 | miss | Fetch `/api/sessions` |
+| 2 | Sessions received | 0 | 0 | miss | Fetch `?limit=200` |
+| 3 | `{lines:200, totalLines:1000}` | 200 | 1000 | — | `applyLines(lines.slice(boundary))` |
+| 4 | Store cache | 200 | 1000 | `{lines:200, LC:1000}` | done; `startLine = 1000−200 = 800` |
+
+### Streaming
+
+| Step | Event | CL | LC | Action |
+|---|---|---|---|---|
+| 0 | After first load | 200 | 1000 | — |
+| 1 | `claude_line` arrives | 201 | 1001 | `CL.push(line)`, `LC++`, `parseLine(line, true)` |
+| 2 | `claude_line` arrives | 202 | 1002 | same |
+
+`LC` and `CL.length` stay in sync; `startLine = LC − CL.length = 800` remains constant.
+
+### Switch to other session while streaming
+
+| Step | Event | CL(A) | LC(A) | SD[A] | CL(B) | LC(B) | Action |
+|---|---|---|---|---|---|---|---|
+| 0 | Viewing A, streaming | 202 | 1002 | 0 | — | — | — |
+| 1 | User clicks B | 202 | 1002 | 0 | — | — | `saveCurrentCache()` → `LS[A]={lines:202, LC:1002}` |
+| 2 | Save in-mem | — | — | 202 | — | — | `sessionData.set(A, [...CL])` |
+| 3 | Reset + load B | — | — | 202 | 200 | 800 | `loadSessionHistory(B)` |
+| 4 | A line arrives | — | — | 203 | 200 | 800 | `sessionData.get(A).push(line)` |
+| 5 | A line arrives | — | — | 204 | 200 | 800 | same |
+
+### Switch back to A
+
+| Step | Event | CL | LC | SD[A] | Action |
+|---|---|---|---|---|---|
+| 0 | `SD[A]`=204, `LS[A]={LC:1002}` | — | — | 204 | — |
+| 1 | User clicks A | 204 | 1004 | 204 | `CL=[...SD[A]]`; `LC = LS[A].LC + (SD[A].length − LS[A].lines.length) = 1002+2 = 1004`; no HTTP fetch |
+
+### Close tab while streaming
+
+| Step | Event | CL | LC | LS | Action |
+|---|---|---|---|---|---|
+| 0 | Streaming | 202 | 1002 | stale | — |
+| 1 | `beforeunload` | 202 | 1002 | — | `saveCurrentCache()` → `LS={lines:202, LC:1002}` |
+
+`LC=1002` not `CL.length=202` — correct because `CL` is a window, not the full file.
+
+### Reopen (page reload)
+
+| Step | Event | CL | LC | Action |
+|---|---|---|---|---|
+| 0 | `LS` hit: `{lines:202, LC:1002}` | 0 | 0 | — |
+| 1 | Apply cache | 202 | 1002 | `applyHistoryLines(LS.lines)` |
+| 2a | Fetch `?offset=1002` → `{totalLines:1002, lines:[]}` | 202 | 1002 | Cache fresh, no change |
+| 2b | Fetch `?offset=1002` → `{totalLines:1010, lines:8}` | 210 | 1010 | `CL=[...LS.lines,...8]`, `LC=1010` |
+| 2c | Fetch `?offset=1002` → `{totalLines:400, …}` | — | — | `400 < LC=1002` → truncation, full refetch |
+| 3 | Full refetch `?limit=200` → `{lines:200, totalLines:400}` | 200 | 400 | Full reset; `startLine=200` |
+
+### Scroll back (load earlier history)
+
+| Step | Event | CL | LC | Action |
+|---|---|---|---|---|
+| 0 | `startLine = LC−CL.length = 800 > 0` | 202 | 1002 | — |
+| 1 | Sentinel fires at 30% mark | 202 | 1002 | Background fetch `?offset=500&limit=300` |
+| 2 | `{lines:300, totalLines:1002}` received | 202 | 1002 | — |
+| 3 | Prepend + preserve scroll | 502 | 1002 | `CL=[...300,...CL]`; `startLine=1002−502=500`; browser `overflow-anchor` keeps viewport stable (Safari: `$effect.pre`/`$effect` delta) |
+| 4 | Re-render | 502 | 1002 | `applyLines(CL.slice(findBoundary(CL)))` |
+| 5 | Sentinel fires again | 502 | 1002 | `startLine=500 > 0`; fetch `?offset=200&limit=300` |
+| 6 | `startLine` reaches 0 | — | — | Sentinel disabled — at beginning of file |
+
+### File on disk truncated
+
+| Step | Event | CL | LC | Action |
+|---|---|---|---|---|
+| 0 | `LS={lines:202, LC:1002}` applied | 202 | 1002 | — |
+| 1 | Fetch `?offset=1002` → `{totalLines:400, lines:[], incremental:true}` | 202 | 1002 | `400 < 1002` → truncation detected |
+| 2 | Full refetch `?limit=200` → `{lines:200, totalLines:400}` | 200 | 400 | Drop old cache; full reset |
 
 ---
 

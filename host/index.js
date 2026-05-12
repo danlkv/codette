@@ -42,7 +42,7 @@ Example:
 const A = {
   reset:  '\x1b[0m', bold:  '\x1b[1m', dim:   '\x1b[2m',
   cyan:   '\x1b[36m', green: '\x1b[32m', yellow: '\x1b[33m',
-  blue:   '\x1b[34m', gray:  '\x1b[90m', white:  '\x1b[97m',
+  blue:   '\x1b[34m', gray:  '\x1b[90m', white:  '\x1b[97m', red: '\x1b[31m',
 };
 const w  = (s) => process.stdout.write(s);
 const hr = () => w(`${A.dim}${'─'.repeat(60)}${A.reset}\n`);
@@ -51,7 +51,7 @@ const hr = () => w(`${A.dim}${'─'.repeat(60)}${A.reset}\n`);
 const logQueue = [];  // buffer while ws not yet connected
 
 function log(level, msg, data = null) {
-  const color = level === 'error' ? A.yellow : level === 'warn' ? A.yellow : A.gray;
+  const color = level === 'error' ? A.red : level === 'warn' ? A.yellow : A.gray;
   w(`${color}[${level}] ${msg}${data ? ' ' + JSON.stringify(data) : ''}${A.reset}\n`);
   const entry = { type: 'log', ts: Date.now(), level, msg, ...(data && { data }) };
   if (ws?.readyState === WebSocket.OPEN) {
@@ -288,6 +288,7 @@ const rpc = new RpcServer();
 const ALLOWED_PREFIXES = ['/tmp'];
 function resolveFsPath(p, sessionCwd) {
   if (!p) return null;
+  if (p === '~' || p.startsWith('~/')) p = homedir() + p.slice(1);
   if (!p.startsWith('/') && sessionCwd) return join(sessionCwd, p);
   return p;
 }
@@ -318,9 +319,8 @@ const BINARY_MIME = {
 rpc.register('get_file', (msg) => {
   const sessionCwd = getSessionCwd(msg.sessionId);
   const filePath = resolveFsPath(msg.path, sessionCwd);
-  log('info', 'get_file attempt', { raw: msg.path, resolved: filePath, cwd: sessionCwd });
   if (!filePath || !pathAllowed(filePath, sessionCwd)) {
-    log('warn', 'get_file rejected', { raw: msg.path, resolved: filePath, cwd: sessionCwd });
+    log('error', 'get_file rejected', { raw: msg.path, resolved: filePath, cwd: sessionCwd });
     throw new Error('path outside session cwd');
   }
   const ext = filePath.split('.').pop().toLowerCase();
@@ -455,22 +455,30 @@ function connect() {
     }
 
     if (msg.type === 'get_session_history') {
-      const { sessionId, offset } = msg;
+      const { sessionId, offset, limit } = msg;
       const file = findSessionFile(sessionId);
       let lines = [];
       let totalLines = 0;
       if (file) {
         try {
           const raw = readFileSync(file, 'utf8').trim().split('\n').filter(Boolean);
-          lines = (offset != null && offset > 0) ? raw.slice(offset) : raw;
           totalLines = raw.length;
-          log('info', `history sent (${lines.length} lines, offset ${offset ?? 0}, total ${totalLines})`, { sessionId: String(sessionId).slice(0, 8) });
+          if (limit != null && offset == null) {
+            lines = raw.slice(-limit);                      // tail: last N lines
+          } else if (offset != null && limit != null) {
+            lines = raw.slice(offset, offset + limit);      // window [N, N+M)
+          } else if (offset != null && offset > 0) {
+            lines = raw.slice(offset);                      // [N, end) — incremental sync
+          } else {
+            lines = raw;
+          }
+          log('info', `history sent (${lines.length} lines, offset ${offset ?? 0}, limit ${limit ?? 'none'}, total ${totalLines})`, { sessionId: String(sessionId).slice(0, 8) });
         } catch (e) { log('error', `history read error: ${e.message}`); }
       } else {
         log('warn', `session file not found`, { sessionId: String(sessionId).slice(0, 8) });
       }
       if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'history', sessionId, lines, totalLines }));
+        ws.send(JSON.stringify({ type: 'history', sessionId, lines, totalLines, reqOffset: msg.offset ?? null, reqLimit: msg.limit ?? null }));
       }
       return;
     }

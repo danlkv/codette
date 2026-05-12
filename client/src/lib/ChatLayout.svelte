@@ -10,6 +10,7 @@
            sessions, currentSessionId, sessionData, showFileChips } from '../store.js';
   import { createParser } from './parser.js';
   import { summarizeOldLines, KEEP as SUMMARIZE_KEEP } from './summarize.js';
+  import { fetchHistory } from '../utils/api.js';
   import MessageList from './MessageList.svelte';
   import ChatInput from './ChatInput.svelte';
   import SessionSidebar from './SessionSidebar.svelte';
@@ -103,7 +104,9 @@
   let fileViewPath = $state(null);
   let diffViewCommit = $state(null);
   let historyLoading = $state(true);
-  let currentLines = [];       // raw jsonl lines for current session (for cache writes)
+  let currentLines = $state([]);   // raw jsonl lines for current session (for cache writes)
+  let lineCount = $state(0);       // server totalLines at last fetch + live lines since; offset for next incremental fetch
+  let loadingEarlier = false;      // guard against concurrent earlier-batch fetches
   let sessionTitle = $state('');
   let awaitingNewSession = false;
   let pendingCwd = null;
@@ -268,8 +271,8 @@
   function saveCurrentCache() {
     const id = get(currentSessionId);
     if (!id || currentLines.length === 0) return;
-    console.log('[history] saveCurrentCache:', id, currentLines.length, 'lines');
-    tryStoreHistory('history_' + id, currentLines, currentLines.length, sessionTitle, storedContextWindow);
+    console.log('[history] saveCurrentCache:', id, currentLines.length, 'lines, lineCount=', lineCount);
+    tryStoreHistory('history_' + id, currentLines, lineCount, sessionTitle, storedContextWindow);
   }
 
   async function loadSessionHistory(id) {
@@ -288,22 +291,22 @@
     if (cached) {
       if (cached.title) sessionTitle = cached.title;
       if (cached.contextWindow) storedContextWindow = cached.contextWindow;
+      lineCount = cached.lineCount;
       applyHistoryLines(cached.lines);
-      console.log('[history] loadSessionHistory: applied localStorage cache, messages.length=', cached.lines.length);
+      console.log('[history] loadSessionHistory: applied localStorage cache, messages.length=', cached.lines.length, 'lineCount=', lineCount);
     }
     await fetchAndApplyHistory(id, cached, cacheKey);
   }
 
+  const LOAD_LIMIT = 200;
+  const BATCH_SIZE = 400;
+
   async function fetchAndApplyHistory(id, cached, cacheKey) {
     try {
       const offset = cached ? cached.lineCount : null;
-      const params = offset ? `?offset=${offset}` : '';
-      console.log('[history] fetchAndApplyHistory', id, '— offset:', offset ?? 'none (full fetch)');
-      const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/history${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) { console.warn('[history] fetchAndApplyHistory: server returned', res.status); return; }
-      const data = await res.json();
+      const fetchParams = offset != null ? { offset } : { limit: LOAD_LIMIT };
+      console.log('[history] fetchAndApplyHistory', id, '—', fetchParams);
+      const data = await fetchHistory(id, fetchParams, token);
       const lines = data.lines ?? [];
       console.log('[history] fetchAndApplyHistory: got', lines.length, 'lines, incremental=', data.incremental, 'totalLines=', data.totalLines);
 
@@ -314,19 +317,42 @@
             await fetchAndApplyHistory(id, null, cacheKey);
           } else {
             console.log('[history] fetchAndApplyHistory: no new lines, cache is up to date');
+            lineCount = data.totalLines ?? cached.lineCount;
           }
           return;
         }
         const merged = [...cached.lines, ...lines];
         console.log('[history] fetchAndApplyHistory: merged', cached.lines.length, '+', lines.length, '=', merged.length, 'lines');
+        lineCount = data.totalLines;
         applyHistoryLines(merged);
-        tryStoreHistory(cacheKey, merged, merged.length, sessionTitle, storedContextWindow);
+        tryStoreHistory(cacheKey, merged, data.totalLines, sessionTitle, storedContextWindow);
       } else {
         console.log('[history] fetchAndApplyHistory: applying', lines.length, 'lines (full)');
+        lineCount = data.totalLines;
         applyHistoryLines(lines);
-        tryStoreHistory(cacheKey, lines, lines.length, sessionTitle, storedContextWindow);
+        tryStoreHistory(cacheKey, lines, data.totalLines, sessionTitle, storedContextWindow);
       }
     } catch (e) { console.error('fetchAndApplyHistory:', e); }
+  }
+
+  async function loadEarlierHistory() {
+    const id = get(currentSessionId);
+    if (!id || id === '__new__' || loadingEarlier) return;
+    const startLine = lineCount - currentLines.length;
+    if (startLine <= 0) return;
+    loadingEarlier = true;
+    try {
+      const offset = Math.max(0, startLine - BATCH_SIZE);
+      const limit = startLine - offset;
+      console.log('[history] loadEarlierHistory: fetching offset=', offset, 'limit=', limit);
+      const data = await fetchHistory(id, { offset, limit }, token);
+      const batch = data.lines ?? [];
+      if (batch.length === 0) return;
+      console.log('[history] loadEarlierHistory: prepending', batch.length, 'lines');
+      applyHistoryLines([...batch, ...currentLines]);
+      // lineCount unchanged — prepend doesn't change server file size
+    } catch (e) { console.error('loadEarlierHistory:', e); }
+    finally { loadingEarlier = false; }
   }
 
   function applyHistoryLines(lines) {
@@ -375,6 +401,7 @@
             }
           } catch {}
           currentLines.push(line);
+          lineCount++;
           parser.parseLine(line, true);
           try { const ev = JSON.parse(line); if (ev.type === 'assistant') updateSessionFiles(sessionId, currentLines); } catch {}
         } else {
@@ -421,22 +448,34 @@
 
     currentSessionId.set(id);
     currentLines = [];
+    lineCount = 0;
     sessionTitle = '';
     storedContextWindow = null;
     parser.resetTurnState();
 
-    // Show in-memory cache only if there's no localStorage cache that will
-    // immediately replace it — avoids a double-render flash.
-    const cached = sessionData.get(id);
-    const hasLocalCache = !!localStorage.getItem('history_' + id);
-    if (cached?.length > 0 && !hasLocalCache) {
-      messages.set(parser.applyLines(cached));
-      currentLines = [...cached];
+    const sd = sessionData.get(id);
+    if (sd?.length > 0) {
+      // Restore from sessionData — no HTTP fetch needed
+      let lsCached = null;
+      try {
+        const raw = localStorage.getItem('history_' + id);
+        if (raw) lsCached = JSON.parse(raw);
+      } catch {}
+      if (lsCached?.title) sessionTitle = lsCached.title;
+      if (lsCached?.contextWindow) storedContextWindow = lsCached.contextWindow;
+      currentLines = [...sd];
+      lineCount = lsCached
+        ? lsCached.lineCount + (sd.length - lsCached.lines.length)
+        : sd.length;
+      console.log('[history] switchSession: restoring from sessionData', sd.length, 'lines, lineCount=', lineCount);
+      applyHistoryLines(currentLines);
     } else {
-      messages.set([]);
+      // Show in-memory cache only if there's no localStorage cache that will
+      // immediately replace it — avoids a double-render flash.
+      const hasLocalCache = !!localStorage.getItem('history_' + id);
+      if (!hasLocalCache) messages.set([]);
+      await loadSessionHistory(id);
     }
-
-    await loadSessionHistory(id);
   }
 
   function sysMsg(text) {
@@ -726,7 +765,7 @@
         />
       {/if}
       <div class="chat-main" class:hidden={fileViewPath || diffViewCommit}>
-        <MessageList hostStatus={$hostStatus} {historyLoading} sessionId={$currentSessionId} {token} onOpenFile={path => handleFileOpen({ path })} />
+        <MessageList hostStatus={$hostStatus} {historyLoading} sessionId={$currentSessionId} {token} onOpenFile={path => handleFileOpen({ path })} hasMoreHistory={lineCount - currentLines.length > 0} onLoadEarlier={loadEarlierHistory} />
       </div>
       <div class="ctx-shell" class:ctx-open={ctxBarOpen}
         style={$lastContextUsage ? `--ctx-pct:${Math.min(100, $lastContextUsage.used / $lastContextUsage.total * 100).toFixed(1)}%` : '--ctx-pct:0%'}>

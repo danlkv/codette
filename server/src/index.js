@@ -131,32 +131,34 @@ app.get('/api/sessions', requireJwt, (req, res) => {
 app.get('/api/sessions/:id/history', requireJwt, requireHost, (req, res) => {
   const host = req.claudeHost;
   const id = req.params.id;
-  const offsetStr = req.query.offset;
-  const offset = offsetStr !== undefined ? Number(offsetStr) : null;
+  const offset = req.query.offset !== undefined ? Number(req.query.offset) : null;
+  const limit  = req.query.limit  !== undefined ? Number(req.query.limit)  : null;
+  const key = `${id}:${offset ?? ''}:${limit ?? ''}`;
 
   const timer = setTimeout(() => {
-    const pending = host.pendingHistory.get(id);
+    const pending = host.pendingHistory.get(key);
     if (pending) {
       const idx = pending.findIndex(e => e.res === res);
       if (idx !== -1) pending.splice(idx, 1);
-      if (pending.length === 0) host.pendingHistory.delete(id);
+      if (pending.length === 0) host.pendingHistory.delete(key);
     }
     if (!res.headersSent) res.status(504).json({ error: 'History request timed out' });
   }, 30000);
 
   res.on('close', () => clearTimeout(timer));
 
-  const entry = { res, incremental: offset !== null && offset > 0, offset };
+  const entry = { res, incremental: offset !== null && offset > 0, offset, limit };
 
-  if (host.pendingHistory.has(id)) {
-    host.pendingHistory.get(id).push(entry);
+  if (host.pendingHistory.has(key)) {
+    host.pendingHistory.get(key).push(entry);
   } else {
-    host.pendingHistory.set(id, [entry]);
+    host.pendingHistory.set(key, [entry]);
     if (host.ws.readyState === WebSocket.OPEN) {
       host.ws.send(JSON.stringify({
         type: 'get_session_history',
         sessionId: id,
-        offset: offset !== null && offset > 0 ? offset : undefined,
+        offset: offset != null ? offset : undefined,
+        limit: limit ?? undefined,
       }));
     }
   }
@@ -264,13 +266,15 @@ wss.on('connection', (ws, req) => {
     host.broadcast({ type: 'host_status', connected: true });
 
     // Re-send pending history requests that arrived while host was down
-    for (const [sessionId, entries] of host.pendingHistory) {
+    for (const [key, entries] of host.pendingHistory) {
       if (entries.length === 0) continue;
-      const { offset } = entries[0];
+      const { offset, limit } = entries[0];
+      const sessionId = key.split(':')[0];
       ws.send(JSON.stringify({
         type: 'get_session_history',
         sessionId,
-        offset: offset !== null && offset > 0 ? offset : undefined,
+        offset: offset != null ? offset : undefined,
+        limit: limit ?? undefined,
       }));
     }
 
@@ -328,13 +332,14 @@ wss.on('connection', (ws, req) => {
       }
 
       if (ev?.type === 'history') {
-        const { sessionId, lines, totalLines } = ev;
-        const pending = host.pendingHistory.get(sessionId);
+        const { sessionId, lines, totalLines, reqOffset, reqLimit } = ev;
+        const key = `${sessionId}:${reqOffset ?? ''}:${reqLimit ?? ''}`;
+        const pending = host.pendingHistory.get(key);
         if (pending) {
           for (const { res, incremental } of pending) {
             if (!res.headersSent) res.json({ lines: stripThinking(lines), incremental, totalLines });
           }
-          host.pendingHistory.delete(sessionId);
+          host.pendingHistory.delete(key);
         }
         return;
       }
