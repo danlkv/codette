@@ -6,7 +6,8 @@
 
   let { sessionId = null, sessionCwd = null, token = null, onFileOpen } = $props();
 
-  let sectionOpen = $state(true);
+  let sectionOpen = $state(localStorage.getItem('claudeweb_fileExplorer') !== 'false');
+  $effect(() => { localStorage.setItem('claudeweb_fileExplorer', sectionOpen ? 'true' : 'false'); });
   let treeNodes = $state({});
 
   let cwdBasename = $derived(sessionCwd ? (sessionCwd.split('/').filter(Boolean).pop() || sessionCwd) : '');

@@ -100,9 +100,11 @@
   let sysCounter = 0;
 
   let sidebarOpen = $state(true);
+  $effect(() => { if (window.innerWidth > 640) localStorage.setItem('claudeweb_sidebarOpen', sidebarOpen ? 'true' : 'false'); });
   let hostCwd = $state(null);
   let fileViewPath = $state(null);
   let diffViewCommit = $state(null);
+  let diffViewFile = $state(null);
   let historyLoading = $state(true);
   let currentLines = $state([]);   // raw jsonl lines for current session (for cache writes)
   let lineCount = $state(0);       // server totalLines at last fetch + live lines since; offset for next incremental fetch
@@ -157,7 +159,9 @@
   }
 
   onMount(async () => {
-    sidebarOpen = window.innerWidth > 640;
+    sidebarOpen = window.innerWidth > 640
+      ? (localStorage.getItem('claudeweb_sidebarOpen') !== 'false')
+      : false;
     window.addEventListener('beforeunload', saveCurrentCache);
     window.addEventListener('popstate', onPopState);
     console.log('[history] onMount: calling initSessions');
@@ -441,7 +445,7 @@
     history.pushState(null, '', makeHash(id));
 
     fileViewPath = null;
-    diffViewCommit = null;
+    diffViewCommit = null; diffViewFile = null;
     saveCurrentCache();
 
     if (get(currentSessionId)) { console.log('[history] switchSession: saving', currentLines.length, 'lines to sessionData for', get(currentSessionId)); sessionData.set(get(currentSessionId), [...currentLines]); }
@@ -583,7 +587,7 @@
 
   function handleSelect(id) {
     fileViewPath = null;
-    diffViewCommit = null;
+    diffViewCommit = null; diffViewFile = null;
     switchSession(id);
     if (window.innerWidth <= 640) sidebarOpen = false;
   }
@@ -592,7 +596,7 @@
     pendingCwd = cwd || null;
     pendingSettings = settings;
     fileViewPath = null;
-    diffViewCommit = null;
+    diffViewCommit = null; diffViewFile = null;
     saveCurrentCache();
     history.pushState(null, '', makeHash('new'));
     currentSessionId.set('__new__');
@@ -619,12 +623,13 @@
 
   function handleFileOpen({ path }) {
     fileViewPath = path;
-    diffViewCommit = null;
+    diffViewCommit = null; diffViewFile = null;
     history.pushState(null, '', makeHash(get(currentSessionId), path));
   }
 
-  function handleDiffOpen({ commit }) {
+  function handleDiffOpen({ commit = null, file = null }) {
     diffViewCommit = commit;
+    diffViewFile = file;
     fileViewPath = null;
   }
 </script>
@@ -749,12 +754,13 @@
       onDiffOpen={handleDiffOpen}
     />
     <div class="chat">
-      {#if diffViewCommit}
+      {#if diffViewCommit || diffViewFile}
         <DiffView
           sessionId={$currentSessionId}
           commit={diffViewCommit}
+          file={diffViewFile}
           {token}
-          onClose={() => diffViewCommit = null}
+          onClose={() => { diffViewCommit = null; diffViewFile = null; }}
         />
       {:else if fileViewPath}
         <FileView
@@ -764,7 +770,7 @@
           onClose={() => { fileViewPath = null; history.pushState(null, '', makeHash(get(currentSessionId))); }}
         />
       {/if}
-      <div class="chat-main" class:hidden={fileViewPath || diffViewCommit}>
+      <div class="chat-main" class:hidden={fileViewPath || diffViewCommit || diffViewFile}>
         <MessageList hostStatus={$hostStatus} {historyLoading} sessionId={$currentSessionId} {token} onOpenFile={path => handleFileOpen({ path })} hasMoreHistory={lineCount - currentLines.length > 0} onLoadEarlier={loadEarlierHistory} />
       </div>
       <div class="ctx-shell" class:ctx-open={ctxBarOpen}

@@ -42,7 +42,7 @@ Example:
 const A = {
   reset:  '\x1b[0m', bold:  '\x1b[1m', dim:   '\x1b[2m',
   cyan:   '\x1b[36m', green: '\x1b[32m', yellow: '\x1b[33m',
-  blue:   '\x1b[34m', gray:  '\x1b[90m', white:  '\x1b[97m', red: '\x1b[31m',
+  blue:   '\x1b[34m', gray:  '\x1b[90m', red: '\x1b[31m',
 };
 const w  = (s) => process.stdout.write(s);
 const hr = () => w(`${A.dim}${'─'.repeat(60)}${A.reset}\n`);
@@ -352,13 +352,40 @@ rpc.register('get_git_log', (msg) => {
   return { commits, branch };
 });
 
+rpc.register('get_git_status', (msg) => {
+  const sessionCwd = getSessionCwd(msg.sessionId);
+  if (!sessionCwd) throw new Error('no cwd for session');
+  const out = execSync('git status --porcelain', { cwd: sessionCwd }).toString();
+  const files = out.trim() ? out.trim().split('\n').map(l => ({
+    xy: l.slice(0, 2),
+    path: l.slice(3),
+  })) : [];
+  log('info', 'get_git_status', { files: files.length });
+  return { files };
+});
+
+rpc.register('get_git_file_diff', (msg) => {
+  const sessionCwd = getSessionCwd(msg.sessionId);
+  if (!sessionCwd) throw new Error('no cwd for session');
+  if (!msg.path) throw new Error('path required');
+  const MAX = 256 * 1024;
+  const diff = execSync(`git diff HEAD -- ${JSON.stringify(msg.path)}`, { cwd: sessionCwd, maxBuffer: MAX + 1 }).toString();
+  log('info', 'get_git_file_diff', { path: msg.path, size: diff.length });
+  return { diff: diff.slice(0, MAX) };
+});
+
 rpc.register('get_git_diff', (msg) => {
   const sessionCwd = getSessionCwd(msg.sessionId);
   if (!sessionCwd) throw new Error('no cwd for session');
   const MAX = 256 * 1024;
   const diff = execSync(`git show --unified=3 ${msg.commit}`, { cwd: sessionCwd, maxBuffer: MAX + 1 }).toString();
-  log('info', 'get_git_diff', { commit: msg.commit, size: diff.length });
-  return { diff: diff.slice(0, MAX) };
+  const statOut = execSync(`git diff-tree --no-commit-id -r --numstat ${msg.commit}`, { cwd: sessionCwd }).toString().trim();
+  const stat = statOut ? statOut.split('\n').map(l => {
+    const [added, deleted, path] = l.split('\t');
+    return { added: +added, deleted: +deleted, path };
+  }) : [];
+  log('info', 'get_git_diff', { commit: msg.commit, size: diff.length, files: stat.length });
+  return { diff: diff.slice(0, MAX), stat };
 });
 
 // ── Server connection ─────────────────────────────────────────────────────────
@@ -372,7 +399,7 @@ function connect() {
     while (logQueue.length) ws.send(JSON.stringify(logQueue.shift()));
     hr();
     w(`${A.bold}${A.cyan}Claude Web Host${A.reset}  ${A.gray}${SERVER_URL}${A.reset}\n`);
-    w(`${A.dim}Serving clients as: ${A.reset}${A.white}${CLIENT_USERNAME}${A.reset}  ${A.dim}password: ${A.reset}${A.white}${CLIENT_PASSWORD}${A.reset}\n`);
+    w(`${A.dim}Serving clients as: ${A.reset}${A.bold}${CLIENT_USERNAME}${A.reset}  ${A.dim}password: ${A.reset}${A.bold}${CLIENT_PASSWORD}${A.reset}\n`);
     if (NO_DIR_PRIVACY) w(`${A.yellow}[warn] --no-dir-privacy: file access unrestricted${A.reset}\n`);
     hr();
     log('info', 'host connected to server', { url: SERVER_URL });
@@ -420,6 +447,13 @@ function connect() {
       const firstMessage = msg.firstMessage || null;
       const settings = msg.claudeweb_settings ?? {};
       log('info', 'new session requested', { cwd, hasMsg: !!firstMessage });
+      if (cwd) {
+        try { statSync(cwd); } catch {
+          log('error', 'new_session: cwd does not exist', { cwd });
+          ws.send(JSON.stringify({ type: 'error', message: `cwd does not exist: ${cwd}` }));
+          return;
+        }
+      }
       const extraArgs = (settings.inlineFiles !== false)
         ? ['--append-system-prompt', makeInlineFilePrompt(cwd)]
         : [];

@@ -35,8 +35,8 @@
   }
 
   function keydown(e) {
-    if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); send(); return; }
-    if (e.key === 'Enter' && !e.shiftKey && !window.matchMedia('(pointer: coarse)').matches) { e.preventDefault(); send(); }
+    const isPhone = window.matchMedia('(pointer: coarse)').matches && window.innerWidth < 768;
+    if (e.key === 'Enter' && !e.shiftKey && !isPhone) { e.preventDefault(); send(); }
     if (e.key === 'Tab' && matches.length) {
       e.preventDefault();
       complete(matches[0].cmd);

@@ -79,7 +79,7 @@ export class ClaudeRenderer {
       if (b.type === 'text') {
         if (!this._inTurn) { out += `\n${tag}${C.bold}${C.green}claude${C.reset}  `; this._inTurn = true; }
         if (this._needsNewline) { out += '\n'; this._needsNewline = false; }
-        out += `${C.white}${b.text}${C.reset}`;
+        out += b.text;
       }
     }
 

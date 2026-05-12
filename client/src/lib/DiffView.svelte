@@ -2,13 +2,15 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
-  let { sessionId = null, commit = null, token = null, onClose } = $props();
+  let { sessionId = null, commit = null, file = null, token = null, onClose } = $props();
 
   let loading = $state(true);
   let error = $state(null);
   let diffText = $state(null);
+  let stat = $state([]);
 
   let shortHash = $derived(commit ? commit.slice(0, 7) : '');
+  let title = $derived(file ? file.split('/').pop() : shortHash);
   let diffHtml = $derived(diffText ? buildDiffHtml(diffText) : '');
 
   function escapeHtml(str) {
@@ -41,20 +43,22 @@
   });
 
   async function fetchDiff() {
-    if (!sessionId || !commit || !token) return;
+    if (!sessionId || !token || (!commit && !file)) return;
     loading = true;
     error = null;
     diffText = null;
+    stat = [];
     try {
-      const url = `/api/sessions/${encodeURIComponent(sessionId)}/git/diff?commit=${encodeURIComponent(commit)}`;
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const url = file
+        ? `/api/sessions/${encodeURIComponent(sessionId)}/git/file-diff?path=${encodeURIComponent(file)}`
+        : `/api/sessions/${encodeURIComponent(sessionId)}/git/diff?commit=${encodeURIComponent(commit)}`;
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       if (data.error) {
         error = data.error;
       } else {
         diffText = data.diff ?? '';
+        stat = data.stat ?? [];
       }
     } catch (e) {
       error = String(e);
@@ -66,10 +70,23 @@
 
 <div class="diff-view">
   <div class="dv-header">
-    <span class="dv-commit" title={commit}>{shortHash}</span>
+    <span class="dv-commit" title={file ?? commit}>{title}</span>
     <button class="dv-close" onclick={onClose} title="Close diff view" aria-label="Close">×</button>
   </div>
+  {#if !file && stat.length > 0}
+    <div class="dv-section-header">Summary</div>
+    <div class="dv-stat">
+      {#each stat as f (f.path)}
+        <div class="stat-row">
+          <span class="stat-path">{f.path}</span>
+          {#if f.added !== 0}<span class="stat-add">+{f.added}</span>{/if}
+          {#if f.deleted !== 0}<span class="stat-del">-{f.deleted}</span>{/if}
+        </div>
+      {/each}
+    </div>
+  {/if}
 
+  <div class="dv-section-header">Full diff</div>
   <div class="dv-body">
     {#if loading}
       <div class="dv-status">Loading diff…</div>
@@ -127,6 +144,46 @@
   }
   .dv-close:hover { color: var(--text); }
 
+  .dv-section-header {
+    font-size: .65rem;
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    padding: 5px 12px 3px;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .dv-stat {
+    overflow-y: auto;
+    max-height: 120px;
+    padding: 4px 0;
+    flex-shrink: 0;
+  }
+  .stat-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 2px 12px;
+    font-family: monospace;
+    font-size: .72rem;
+    min-width: 0;
+  }
+  .stat-path {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-muted);
+    min-width: 0;
+  }
+  .stat-add { color: #98c379; flex-shrink: 0; }
+  @media (prefers-color-scheme: light) {
+    .stat-add { color: #388203; }
+  }
+  .stat-del { color: var(--error); flex-shrink: 0; }
+
   .dv-body {
     flex: 1;
     overflow: auto;
@@ -157,6 +214,9 @@
     display: block;
     color: #98c379;
     background: rgba(152, 195, 121, .08);
+  }
+  @media (prefers-color-scheme: light) {
+    .diff :global(.add) { color: #388203; background: rgba(56, 130, 3, .08); }
   }
   .diff :global(.del) {
     display: block;

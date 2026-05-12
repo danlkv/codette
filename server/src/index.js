@@ -190,12 +190,30 @@ app.get('/api/sessions/:id/git/log', requireJwt, requireHost, (req, res) => {
   res.on('close', () => req.claudeHost.rpc.cancel(rid));
 });
 
+// ── Git status ────────────────────────────────────────────────────────────────
+app.get('/api/sessions/:id/git/status', requireJwt, requireHost, (req, res) => {
+  const rid = req.claudeHost.rpc.call(req.claudeHost.ws, 'get_git_status',
+    { sessionId: req.params.id },
+    (err, result) => { if (!res.headersSent) err ? res.status(504).json({ error: err.message }) : res.json(result); });
+  res.on('close', () => req.claudeHost.rpc.cancel(rid));
+});
+
 // ── Git diff ──────────────────────────────────────────────────────────────────
 app.get('/api/sessions/:id/git/diff', requireJwt, requireHost, (req, res) => {
   const commit = req.query.commit;
   if (!commit) return res.status(400).json({ error: 'commit required' });
   const rid = req.claudeHost.rpc.call(req.claudeHost.ws, 'get_git_diff',
     { sessionId: req.params.id, commit },
+    (err, result) => { if (!res.headersSent) err ? res.status(504).json({ error: err.message }) : res.json(result); });
+  res.on('close', () => req.claudeHost.rpc.cancel(rid));
+});
+
+// ── Git file diff ─────────────────────────────────────────────────────────────
+app.get('/api/sessions/:id/git/file-diff', requireJwt, requireHost, (req, res) => {
+  const filePath = req.query.path;
+  if (!filePath) return res.status(400).json({ error: 'path required' });
+  const rid = req.claudeHost.rpc.call(req.claudeHost.ws, 'get_git_file_diff',
+    { sessionId: req.params.id, path: filePath },
     (err, result) => { if (!res.headersSent) err ? res.status(504).json({ error: err.message }) : res.json(result); });
   res.on('close', () => req.claudeHost.rpc.cancel(rid));
 });
