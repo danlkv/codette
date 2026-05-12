@@ -369,7 +369,8 @@ rpc.register('get_git_file_diff', (msg) => {
   if (!sessionCwd) throw new Error('no cwd for session');
   if (!msg.path) throw new Error('path required');
   const MAX = 256 * 1024;
-  const diff = execSync(`git diff HEAD -- ${JSON.stringify(msg.path)}`, { cwd: sessionCwd, maxBuffer: MAX + 1 }).toString();
+  let diff = execSync(`git diff HEAD -- ${JSON.stringify(msg.path)}`, { cwd: sessionCwd, maxBuffer: MAX + 1 }).toString();
+  if (!diff.trim()) diff = execSync(`git diff --cached -- ${JSON.stringify(msg.path)}`, { cwd: sessionCwd, maxBuffer: MAX + 1 }).toString();
   log('info', 'get_git_file_diff', { path: msg.path, size: diff.length });
   return { diff: diff.slice(0, MAX) };
 });

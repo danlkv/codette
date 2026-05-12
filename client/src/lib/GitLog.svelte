@@ -24,9 +24,15 @@
   let prevSessionId = null;
   $effect(() => {
     if (sessionId !== prevSessionId) {
+      const first = prevSessionId === null;
       prevSessionId = sessionId;
-      files = []; changesError = null; changesOpen = false;
-      commits = []; logError = null; logOpen = false; branch = null;
+      files = []; changesError = null;
+      commits = []; logError = null; branch = null;
+      if (!first) { changesOpen = false; logOpen = false; }
+      else {
+        if (changesOpen) fetchStatus();
+        if (logOpen) fetchLog();
+      }
     }
   });
 
