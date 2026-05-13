@@ -4,17 +4,39 @@
 
 import { spawn, execSync } from 'child_process';
 import { WebSocket } from 'ws';
-import { readFileSync, readdirSync, statSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { ClaudeRenderer, toolSummary } from './renderer.js';
 import { RpcServer } from './rpc.js';
 import { makeInlineFilePrompt } from '../shared/prompts.js';
 
+const APP_NAME         = 'claudeweb';
 const SERVER_URL       = process.env.SERVER_URL       || 'ws://localhost:3000';
 const CLIENT_USERNAME  = process.env.CLIENT_USERNAME  || execSync('whoami').toString().trim();
 const CLIENT_PASSWORD  = process.env.CLIENT_PASSWORD  || 'changeme';
 const HOST_TOKEN       = process.env.HOST_KEY         || 'host-key-change-me';
+
+// ── App data directory ────────────────────────────────────────────────────────
+function getDataDir() {
+  if (process.env.XDG_DATA_HOME) return join(process.env.XDG_DATA_HOME, APP_NAME);
+  if (process.platform === 'win32') return join(process.env.APPDATA || homedir(), APP_NAME);
+  if (process.platform === 'darwin') return join(homedir(), 'Library', 'Application Support', APP_NAME);
+  return join(homedir(), '.local', 'share', APP_NAME);
+}
+const DATA_DIR   = getDataDir();
+const NAMES_FILE = join(DATA_DIR, 'session-names.json');
+
+function loadNames() {
+  try { return JSON.parse(readFileSync(NAMES_FILE, 'utf8')); } catch { return {}; }
+}
+
+function saveName(id, name) {
+  const names = loadNames();
+  if (name) names[id] = name; else delete names[id];
+  mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+  writeFileSync(NAMES_FILE, JSON.stringify(names, null, 2));
+}
 
 // --no-dir-privacy: disable cwd-restriction check on get_fs / get_file
 const NO_DIR_PRIVACY = process.argv.includes('--no-dir-privacy');
@@ -97,6 +119,7 @@ function listSessions() {
   const claudeDir = join(homedir(), '.claude', 'projects');
   const sessions = [];
   const activeIds = new Set(agents.keys());
+  const names = loadNames();
   try {
     for (const project of readdirSync(claudeDir)) {
       const projectDir = join(claudeDir, project);
@@ -128,7 +151,7 @@ function listSessions() {
               sessionMetaCache.set(filePath, { mtime: ts, title, msgCount, cwd });
             }
           } catch {}
-          sessions.push({ id, title, ts, agentActive: activeIds.has(id), msgCount, cwd });
+          sessions.push({ id, title, ts, agentActive: activeIds.has(id), msgCount, cwd, ...(names[id] && { name: names[id] }) });
         }
       } catch {}
     }
@@ -387,6 +410,14 @@ rpc.register('get_git_diff', (msg) => {
   }) : [];
   log('info', 'get_git_diff', { commit: msg.commit, size: diff.length, files: stat.length });
   return { diff: diff.slice(0, MAX), stat };
+});
+
+rpc.register('set_session_name', (msg) => {
+  if (!msg.sessionId) throw new Error('sessionId required');
+  saveName(msg.sessionId, msg.name || null);
+  log('info', 'set_session_name', { session: msg.sessionId.slice(0, 8), name: msg.name });
+  sendSessionList();
+  return { ok: true };
 });
 
 // ── Server connection ─────────────────────────────────────────────────────────

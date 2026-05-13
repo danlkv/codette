@@ -30,8 +30,20 @@
   let newCwd = $state('');
   let inlineFiles = $state(localStorage.getItem('claudeweb_inlineFiles') !== 'false');
 
+  let menuId = $state(null);
+  let menuName = $state('');
+
   $effect(() => {
     if (showNew && !newCwd && hostCwd) newCwd = hostCwd;
+  });
+
+  $effect(() => {
+    if (!menuId) return;
+    function onDocClick(e) {
+      if (!e.target.closest('.session-menu') && !e.target.closest('.ctl.more')) menuId = null;
+    }
+    document.addEventListener('click', onDocClick, true);
+    return () => document.removeEventListener('click', onDocClick, true);
   });
 
   function select(id) {
@@ -51,6 +63,7 @@
     if (confirmingId === id) {
       clearTimeout(confirmTimer);
       confirmingId = null;
+      menuId = null;
       onDelete?.(id);
     } else {
       confirmingId = id;
@@ -62,11 +75,36 @@
   function interrupt(e, id) {
     e.stopPropagation();
     onAgentCtl?.({ id, event: 'interrupt' });
+    menuId = null;
   }
 
   function stop(e, id) {
     e.stopPropagation();
     onAgentCtl?.({ id, event: 'stop' });
+    menuId = null;
+  }
+
+  function openMenu(e, s) {
+    e.stopPropagation();
+    if (menuId === s.id) { menuId = null; return; }
+    menuId = s.id;
+    menuName = s.name || s.title || s.id.slice(0, 8);
+    confirmingId = null;
+  }
+
+  async function saveMenuName(id) {
+    const v = menuName.trim();
+    menuId = null;
+    await fetch(`/api/sessions/${encodeURIComponent(id)}/name`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: v || null }),
+    });
+  }
+
+  function menuNameKeydown(e, id) {
+    if (e.key === 'Enter') { e.preventDefault(); saveMenuName(id); }
+    if (e.key === 'Escape') { e.preventDefault(); menuId = null; }
   }
 </script>
 
@@ -101,31 +139,31 @@
                 {#if s.msgCount}<span class="count">{s.msgCount}</span>{/if}
                 {#if s.cwd}<span class="cwd" title={s.cwd}>{s.cwd.split('/').filter(Boolean).pop() ?? s.cwd}</span>{/if}
               </span>
-              <span class="title">{s.title || s.id.slice(0, 8)}</span>
+              <span class="title">{s.name || s.title || s.id.slice(0, 8)}</span>
             </button>
-
-            {#if s.agentState}
-              <button
-                class="ctl interrupt"
-                onclick={(e) => interrupt(e, s.id)}
-                title="Interrupt agent"
-                aria-label="Interrupt agent"
-              >⊘</button>
-              <button
-                class="ctl stop"
-                onclick={(e) => stop(e, s.id)}
-                title="Stop agent"
-                aria-label="Stop agent"
-              >■</button>
-            {:else}
-              <button
-                class="del" class:confirming={confirmingId === s.id}
-                onclick={(e) => tryDelete(e, s.id)}
-                title="Delete session"
-                aria-label="Delete session"
-              >{confirmingId === s.id ? '?' : '×'}</button>
-            {/if}
+            <button class="ctl more" onclick={(e) => openMenu(e, s)}
+              title="Session options" aria-label="Session options"
+              class:open={menuId === s.id}
+            >⋮</button>
           </div>
+
+          {#if menuId === s.id}
+            <div class="session-menu">
+              <input class="menu-name" bind:value={menuName}
+                placeholder="Session name"
+                onkeydown={(e) => menuNameKeydown(e, s.id)}
+              />
+              <div class="menu-actions">
+                {#if s.agentState}
+                  <button class="menu-btn" onclick={(e) => interrupt(e, s.id)}>⊘ interrupt</button>
+                  <button class="menu-btn warn" onclick={(e) => stop(e, s.id)}>■ stop</button>
+                {/if}
+                <button class="menu-btn danger" class:confirming={confirmingId === s.id}
+                  onclick={(e) => tryDelete(e, s.id)}
+                >{confirmingId === s.id ? 'confirm?' : '× delete'}</button>
+              </div>
+            </div>
+          {/if}
 
           {#if showFileChips && s.files?.length}
             <div class="file-chips">
@@ -288,43 +326,68 @@
   }
   .session-row.active .session { color: var(--text); }
 
-  .del {
-    flex-shrink: 0;
-    width: 36px;
-    background: none;
-    border: none;
-    cursor: pointer;
-    color: var(--text-dim);
-    font-size: 1rem;
-    line-height: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    transition: color .15s;
-  }
-  .del:active { color: var(--text-muted); }
-  .del.confirming { color: var(--error); font-weight: 700; }
-
-  /* Agent control buttons */
   .ctl {
     flex-shrink: 0;
-    width: 28px;
+    width: 32px;
     background: none;
     border: none;
     cursor: pointer;
-    font-size: .85rem;
+    font-size: 1.1rem;
     line-height: 1;
+    letter-spacing: .05em;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 0;
-    transition: color .15s;
+    transition: color .15s, opacity .15s;
   }
-  .ctl.interrupt { color: var(--text-dim); }
-  .ctl.interrupt:hover { color: #e5c07b; }
-  .ctl.stop { color: var(--text-dim); }
-  .ctl.stop:hover { color: var(--error); }
+  .ctl.more {
+    color: var(--text-dim);
+  }
+  .ctl.more:hover, .ctl.more.open { color: var(--text); }
+
+  .session-menu {
+    padding: 6px 10px 8px 12px;
+    border-top: 1px solid var(--border-subtle, var(--border));
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .menu-name {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font: inherit;
+    font-size: .78rem;
+    padding: 4px 8px;
+    outline: none;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .menu-name:focus { border-color: var(--accent); }
+  .menu-actions {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .menu-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-dim);
+    cursor: pointer;
+    font: inherit;
+    font-size: .72rem;
+    padding: 3px 8px;
+    transition: color .12s, border-color .12s, background .12s;
+  }
+  .menu-btn:hover { color: var(--text); border-color: var(--text-dim); }
+  .menu-btn.warn { color: #e5c07b; }
+  .menu-btn.warn:hover { border-color: #e5c07b; }
+  .menu-btn.danger { color: var(--error); }
+  .menu-btn.danger:hover { border-color: var(--error); }
+  .menu-btn.confirming { background: var(--error); color: #fff; border-color: var(--error); }
 
   .meta {
     display: flex;

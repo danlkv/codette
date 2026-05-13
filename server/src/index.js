@@ -218,6 +218,15 @@ app.get('/api/sessions/:id/git/file-diff', requireJwt, requireHost, (req, res) =
   res.on('close', () => req.claudeHost.rpc.cancel(rid));
 });
 
+// ── Session name ──────────────────────────────────────────────────────────────
+app.put('/api/sessions/:id/name', requireJwt, requireHost, (req, res) => {
+  const { name } = req.body || {};
+  const rid = req.claudeHost.rpc.call(req.claudeHost.ws, 'set_session_name',
+    { sessionId: req.params.id, name: name || null },
+    (err, result) => { if (!res.headersSent) err ? res.status(504).json({ error: err.message }) : res.json(result); });
+  res.on('close', () => req.claudeHost.rpc.cancel(rid));
+});
+
 // ── Create session ────────────────────────────────────────────────────────────
 app.post('/api/sessions', requireJwt, requireHost, (req, res) => {
   const { cwd, firstMessage, claudeweb_settings } = req.body || {};
