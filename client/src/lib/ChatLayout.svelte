@@ -10,7 +10,8 @@
            sessions, currentSessionId, sessionData, showFileChips } from '../store.js';
   import { createParser } from './parser.js';
   import { summarizeOldLines, KEEP as SUMMARIZE_KEEP } from './summarize.js';
-  import { fetchHistory } from '../utils/api.js';
+  import { fetchHistory, fetchSessions, createSession, deleteSession } from '../utils/api.js';
+  import { wtrace } from '../utils/trace.js';
   import MessageList from './MessageList.svelte';
   import ChatInput from './ChatInput.svelte';
   import SessionSidebar from './SessionSidebar.svelte';
@@ -184,18 +185,11 @@
     let sessionList = [];
     console.log('[history] initSessions: fetching sessions');
     try {
-      const res = await fetch('/api/sessions', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        sessionList = data.sessions ?? data;
-        if (data.hostCwd) hostCwd = data.hostCwd;
-        sessions.set(dedupById(sessionList));
-        console.log('[history] initSessions: got', sessionList.length, 'sessions');
-      } else {
-        console.warn('[history] initSessions: fetch failed', res.status);
-      }
+      const data = await fetchSessions(token);
+      sessionList = data.sessions ?? data;
+      if (data.hostCwd) hostCwd = data.hostCwd;
+      sessions.set(dedupById(sessionList));
+      console.log('[history] initSessions: got', sessionList.length, 'sessions');
     } catch (e) { console.error('[history] initSessions: fetch error', e); }
 
     // Pre-populate files from localStorage caches (no extra API calls)
@@ -372,6 +366,12 @@
     if (id && id !== '__new__') updateSessionFiles(id, filtered);
   }
 
+  function wsSend(msg) {
+    if (ws?.readyState !== 1) return;
+    if (msg.type !== 'log') wtrace('client', 'server', msg.type, msg.sessionId);
+    ws.send(JSON.stringify(msg));
+  }
+
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${proto}//${location.host}/ws?token=${encodeURIComponent(token)}`);
@@ -382,6 +382,7 @@
       if (destroyed) return;
       let msg;
       try { msg = JSON.parse(data); } catch { return; }
+      if (msg.type !== 'log') wtrace('server', 'client', msg.type, msg.sessionId);
 
       if (msg.type === 'session_list') {
         const incoming = dedupById(msg.sessions ?? []);
@@ -493,7 +494,7 @@
       case '/clear':
         messages.set([]); lastCost.set(null);
         parser.resetTurnState();
-        if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'clear' }));
+        wsSend({ type: 'clear' });
         return true;
       case '/status': {
         const h = get(hostStatus);
@@ -529,23 +530,13 @@
         return true;
       }
       case '/btw':
-        if (arg && ws?.readyState === 1)
-          ws.send(JSON.stringify({
-            type: 'user',
-            sessionId: get(currentSessionId),
-            message: { role: 'user', content: arg },
-          }));
+        if (arg) wsSend({ type: 'user', sessionId: get(currentSessionId), message: { role: 'user', content: arg } });
         return true;
       case '/claudeweb-inline-files': {
         const sid = get(currentSessionId);
         const cwd = get(sessions).find(s => s.id === sid)?.cwd ?? null;
         const prompt = makeInlineFilePrompt(cwd);
-        if (ws?.readyState === 1)
-          ws.send(JSON.stringify({
-            type: 'user',
-            sessionId: sid,
-            message: { role: 'user', content: prompt },
-          }));
+        wsSend({ type: 'user', sessionId: sid, message: { role: 'user', content: prompt } });
         sysMsg('inline file viewer enabled');
         return true;
       }
@@ -560,11 +551,7 @@
     if (get(currentSessionId) === '__new__') {
       awaitingNewSession = true;
       try {
-        await fetch('/api/sessions', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cwd: pendingCwd, firstMessage: text, claudeweb_settings: pendingSettings ?? undefined }),
-        });
+        await createSession(token, { cwd: pendingCwd, firstMessage: text, claudeweb_settings: pendingSettings ?? undefined });
         clearFn?.();
       } catch { awaitingNewSession = false; }
       return;
@@ -578,11 +565,7 @@
       sendPending = false;
       pendingClearFn = null;
     }, 8000);
-    ws.send(JSON.stringify({
-      type: 'user',
-      sessionId: get(currentSessionId),
-      message: { role: 'user', content: text },
-    }));
+    wsSend({ type: 'user', sessionId: get(currentSessionId), message: { role: 'user', content: text } });
   }
 
   function handleSelect(id) {
@@ -608,17 +591,12 @@
 
   async function handleDelete(id) {
     try {
-      await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      await deleteSession(id, token);
     } catch (e) { console.error('handleDelete fetch:', e); }
   }
 
   function handleAgentCtl({ id, event }) {
-    if (ws?.readyState === 1) {
-      ws.send(JSON.stringify({ type: 'agent_ctl', sessionId: id, event }));
-    }
+    wsSend({ type: 'agent_ctl', sessionId: id, event });
   }
 
   function handleFileOpen({ path }) {

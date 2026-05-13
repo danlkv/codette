@@ -3,6 +3,7 @@
 
 <script>
   import TreeLevel from './TreeLevel.svelte';
+  import { listDir } from '../utils/api.js';
 
   let { sessionId = null, sessionCwd = null, token = null, onFileOpen } = $props();
 
@@ -41,19 +42,7 @@
     };
 
     try {
-      const url = `/api/sessions/${encodeURIComponent(sessionId)}/fs?path=${encodeURIComponent(path)}`;
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        treeNodes = {
-          ...treeNodes,
-          [path]: { ...treeNodes[path], loading: false, error: `Error ${res.status}: ${text}` },
-        };
-        return;
-      }
-      const data = await res.json();
+      const data = await listDir(sessionId, path, token);
       treeNodes = {
         ...treeNodes,
         [path]: { entries: data.entries ?? [], open: true, loading: false, error: null },

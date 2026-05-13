@@ -3,6 +3,7 @@
 
 <script>
   import { renderMd } from '../utils/markdown.js';
+  import { fetchFile as apiFetchFile } from '../utils/api.js';
   import { mermaidRender } from '../utils/mermaid-action.js';
   import { syntaxHighlight } from '../utils/syntax-highlight-action.js';
   import { sessions, currentSessionId, effectiveSyntaxTheme } from '../store.js';
@@ -58,11 +59,7 @@
     pdfDoc = null;
     pdfNumPages = 0;
     try {
-      const url = `/api/sessions/${encodeURIComponent(sessionId)}/file?path=${encodeURIComponent(path)}`;
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
+      const data = await apiFetchFile(sessionId, path, token);
       if (data.error) {
         error = data.error;
       } else if (data.base64) {

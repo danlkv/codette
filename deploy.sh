@@ -11,7 +11,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 
 case "$REMOTE" in
   example.com)
-    REMOTE_DIR="/home/<user>/webchat"
+    REMOTE_DIR="/home/user/codette"
     DOMAIN="chat.example.com"
     ;;
   *)
@@ -32,9 +32,9 @@ rsync -az --delete --exclude={node_modules,.env} \
 ssh "$REMOTE" bash <<ENVSSH
 set -e
 if [ ! -f "${REMOTE_DIR}/.env" ]; then
-  p=\$(openssl rand -hex 16); j=\$(openssl rand -hex 32)
-  h=\$(openssl rand -hex 32); r=\$(openssl rand -hex 32)
-  printf 'CHAT_USERNAME=admin\nCHAT_PASSWORD=%s\nJWT_SECRET=%s\nHOST_KEY=%s\n    "\$p" "\$j" "\$h" "\$r" > "${REMOTE_DIR}/.env"
+  p=\$(openssl rand -hex 16); j=\$(openssl rand -hex 32); h=\$(openssl rand -hex 32)
+  printf 'CHAT_USERNAME=admin\nCHAT_PASSWORD=%s\nJWT_SECRET=%s\nHOST_KEY=%s\n' \
+    "\$p" "\$j" "\$h" > "${REMOTE_DIR}/.env"
   echo "==> .env created:"; cat "${REMOTE_DIR}/.env"
 fi
 cd "${REMOTE_DIR}" && docker-compose down && docker-compose up -d --build server
@@ -42,13 +42,13 @@ ENVSSH
 
 echo "==> verifying"
 for i in 1 2 3 4 5; do
-  code=$(curl -so /dev/null -w "%{http_code}" --max-time 5 "https://${DOMAIN}/api/login" \
+  code=$(curl -so /dev/null -w "%{http_code}" --max-time 5 "https://${DOMAIN}/api/auth/challenge" \
     -X POST -H "Content-Type: application/json" -d '{}' 2>/dev/null || echo 0)
-  [ "$code" = "401" ] && break
+  [ "$code" = "503" ] && break
   echo "  attempt $i: got $code, retrying…"; sleep 3
 done
-if [ "$code" = "401" ]; then
-  echo "OK https://${DOMAIN} (login endpoint responds)"
+if [ "$code" = "503" ]; then
+  echo "OK https://${DOMAIN} (auth endpoint responds)"
 else
   echo "WARN: login endpoint returned $code — containers may still be starting"
 fi

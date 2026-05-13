@@ -80,17 +80,17 @@ One persistent connection. Host reconnects on drop.
 
 ### REST API
 
-JWT in `Authorization: Bearer <token>` header (obtained from `POST /api/login`).
+JWT in `Authorization: Bearer <token>` header (obtained via challenge/verify flow).
 
 | method | path | body / query | response | notes |
 |--------|------|------|----------|-------|
-| `POST` | `/api/login` | `{username, password}` | `{token}` | no auth |
+| `POST` | `/api/auth/challenge` | `{username}` | `{nonce}` | no auth; server forwards to host RPC |
+| `POST` | `/api/auth/verify` | `{username, nonce, response}` | `{token}` | HMAC-SHA256 response; sets `username` cookie |
 | `GET` | `/api/sessions` | — | `{sessions: Session[], hostCwd: string}` | list all sessions; `hostCwd` is host's `process.cwd()` |
 | `GET` | `/api/sessions/:id/history` | `?offset=N` / `?limit=N` / `?offset=N&limit=M` | `{lines: string[], totalLines: number, incremental: bool}` | raw JSONL lines; `?limit=N` → last N lines; `?offset=N&limit=M` → lines [N, N+M); `?offset=N` → lines [N, end). Server dedup key: `sessionId:offset:limit` |
 | `POST` | `/api/sessions` | `{cwd?: string, firstMessage?: string}` | 202 | create session; `firstMessage` bootstraps `system.init`; client auto-switches on `agent_event: started` |
 | `DELETE` | `/api/sessions/:id` | — | 204 | broadcasts new `session_list` from host  over WS |
 | `GET` | `/api/logs` | `?fmt=text` | JSON array or plain text | `x-host-key` auth |
-| `POST` | `/api/relay/chat` | `{messages[]}` | SSE stream | `x-relay-key` auth |
 | `GET` | `/*` | — | `index.html` | SPA fallback |
 
 ### WebSocket `/ws?token=JWT`

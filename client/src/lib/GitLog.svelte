@@ -3,6 +3,7 @@
 
 <script>
   import { relativeTime } from '../utils/time.js';
+  import { fetchGitStatus, fetchGitLog } from '../utils/api.js';
 
   let { sessionId = null, sessionCwd = null, token = null, onDiffOpen } = $props();
 
@@ -41,10 +42,7 @@
     changesLoading = true;
     changesError = null;
     try {
-      const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/git/status`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
+      const data = await fetchGitStatus(sessionId, token);
       if (data.error) { changesError = data.error; files = []; }
       else { files = data.files ?? []; }
     } catch (e) {
@@ -59,10 +57,7 @@
     logLoading = true;
     logError = null;
     try {
-      const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/git/log`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
+      const data = await fetchGitLog(sessionId, token);
       if (data.error) { logError = data.error; commits = []; branch = null; }
       else {
         commits = data.commits ?? [];

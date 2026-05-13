@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Message Trace Visualizer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: monospace; font-size: 13px; background: #111; color: #ccc; padding: 16px; }
+  h1 { font-size: 1rem; color: #888; margin-bottom: 12px; }
+
+  .inputs { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+  .input-col label { display: block; font-size: .75rem; color: #555; margin-bottom: 4px; }
+  textarea {
+    width: 100%; height: 140px; background: #1a1a1a; border: 1px solid #333;
+    color: #aaa; font: 12px monospace; padding: 6px; resize: vertical;
+    border-radius: 4px;
+  }
+  textarea:focus { outline: none; border-color: #555; }
+
+  .controls { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  button {
+    background: #222; border: 1px solid #444; color: #aaa;
+    padding: 5px 14px; cursor: pointer; font: inherit; border-radius: 4px;
+  }
+  button:hover { border-color: #888; color: #fff; }
+  button.primary { border-color: #c70; color: #c70; }
+  button.primary:hover { border-color: #fa0; color: #fa0; }
+  input[type=text] {
+    background: #1a1a1a; border: 1px solid #333; color: #aaa;
+    padding: 5px 8px; font: inherit; border-radius: 4px; width: 180px;
+  }
+  input[type=text]:focus { outline: none; border-color: #555; }
+
+  #out { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; min-width: 700px; }
+  th {
+    background: #1c1c1c; border-bottom: 1px solid #333; color: #666;
+    padding: 4px 10px; text-align: left; font-weight: normal;
+    font-size: .72rem; white-space: nowrap;
+  }
+  td { padding: 2px 10px; border-bottom: 1px solid #1e1e1e; white-space: nowrap; }
+  tr:hover td { background: #181818; }
+
+  .ts { color: #444; font-size: .78rem; }
+  .col-client, .col-server, .col-host { min-width: 180px; }
+
+  .arrow { display: inline-flex; align-items: center; gap: 4px; }
+  .tag {
+    font-size: .72rem; padding: 1px 6px; border-radius: 3px;
+    border: 1px solid; font-weight: 600; letter-spacing: .02em;
+  }
+  .line { color: #333; }
+
+  /* type colors */
+  .t-user      { color: #5b9cf6; border-color: #2a4a80; background: #101826; }
+  .t-claude    { color: #4caf84; border-color: #1e4a34; background: #0d1e16; }
+  .t-agent     { color: #d97a30; border-color: #5c3210; background: #1c1008; }
+  .t-auth      { color: #9b6fdb; border-color: #3d2060; background: #130b1e; }
+  .t-session   { color: #3ab8c8; border-color: #144850; background: #071418; }
+  .t-host      { color: #6a9f3c; border-color: #2a4018; background: #0c1408; }
+  .t-connect   { color: #888; border-color: #333; background: #111; }
+  .t-rpc       { color: #666; border-color: #2a2a2a; background: #0e0e0e; }
+  .t-other     { color: #888; border-color: #333; background: #111; }
+
+  .hidden { display: none; }
+  #stats { font-size: .72rem; color: #444; margin-left: auto; }
+</style>
+</head>
+<body>
+<h1>trace visualizer — paste TRACE lines from each console, click Render</h1>
+
+<div class="inputs">
+  <div class="input-col">
+    <label>HOST terminal output</label>
+    <textarea id="ta-host" placeholder="Paste host process stdout here…&#10;TRACE {&quot;ts&quot;:…,&quot;src&quot;:&quot;host&quot;,…}"></textarea>
+  </div>
+  <div class="input-col">
+    <label>SERVER terminal output</label>
+    <textarea id="ta-server" placeholder="Paste server process stdout here…&#10;TRACE {&quot;ts&quot;:…,&quot;src&quot;:&quot;server&quot;,…}"></textarea>
+  </div>
+  <div class="input-col">
+    <label>CLIENT browser console</label>
+    <textarea id="ta-client" placeholder="Paste browser devtools console here…&#10;TRACE {&quot;ts&quot;:…,&quot;src&quot;:&quot;client&quot;,…}"></textarea>
+  </div>
+</div>
+
+<div class="controls">
+  <button class="primary" onclick="render()">Render</button>
+  <button onclick="clearAll()">Clear</button>
+  <input type="text" id="filter" placeholder="filter by type…" oninput="applyFilter()" />
+  <span id="stats"></span>
+</div>
+
+<div id="out"></div>
+
+<script>
+const TYPE_CLASS = {
+  user:             't-user',
+  agent_ctl:        't-user',
+  claude_line:      't-claude',
+  agent_event:      't-agent',
+  auth_challenge:   't-auth',
+  auth_verify:      't-auth',
+  host_pubkey:      't-host',
+  session_list:     't-session',
+  history:          't-session',
+  get_session_history: 't-session',
+  new_session:      't-session',
+  delete_session:   't-session',
+  list_sessions:    't-session',
+  host_status:      't-host',
+  connect:          't-connect',
+  disconnect:       't-connect',
+};
+
+function typeClass(t) { return TYPE_CLASS[t] ?? 't-other'; }
+
+function parseTA(ta) {
+  const text = ta.value;
+  const rows = [];
+  for (const line of text.split('\n')) {
+    // browser console may prefix with "TRACE " or just have TRACE as first token
+    const m = line.match(/TRACE\s+(\{.+\})/);
+    if (!m) continue;
+    try { rows.push(JSON.parse(m[1])); } catch {}
+  }
+  return rows;
+}
+
+function fmt(ts) {
+  const d = new Date(ts);
+  const h = d.getHours().toString().padStart(2,'0');
+  const m = d.getMinutes().toString().padStart(2,'0');
+  const s = d.getSeconds().toString().padStart(2,'0');
+  const ms = d.getMilliseconds().toString().padStart(3,'0');
+  return `${h}:${m}:${s}.${ms}`;
+}
+
+const NODES = ['host', 'server', 'client'];
+
+function arrow(src, dst) {
+  // returns { col, label } — col is where to place the arrow cell
+  const si = NODES.indexOf(src), di = NODES.indexOf(dst);
+  if (si === -1 || di === -1) return null;
+  return { si, di };
+}
+
+function renderRow(entry) {
+  const tc = typeClass(entry.type);
+  const ts = fmt(entry.ts);
+  const sid = entry.sessionId ? ` <span style="color:#333">${entry.sessionId}</span>` : '';
+  const si = NODES.indexOf(entry.src), di = NODES.indexOf(entry.dst);
+  const ci = entry._col ?? 0;
+  const base = `<span class="tag ${tc}">${entry.type}</span>${sid}`;
+
+  const cells = ['', '', ''];
+  if (si === ci && di !== -1 && si !== di) {
+    // outgoing from this column's node — arrow leads, points toward destination
+    cells[ci] = di < ci ? `← ${base}` : `${base} →`;
+  } else if (di === ci && si !== -1 && si !== di) {
+    // incoming to this column's node — arrow trails, shows source direction
+    cells[ci] = si > ci ? `${base} ←` : `→ ${base}`;
+  } else {
+    cells[ci] = base;
+  }
+
+  return `<tr data-type="${entry.type}">
+    <td class="ts">${ts}</td>
+    <td class="col-host">${cells[0]}</td>
+    <td class="col-server">${cells[1]}</td>
+    <td class="col-client">${cells[2]}</td>
+  </tr>`;
+}
+
+let allRows = [];
+
+function render() {
+  const entries = [
+    ...parseTA(document.getElementById('ta-host')).map(e => ({...e, _col: 0})),
+    ...parseTA(document.getElementById('ta-server')).map(e => ({...e, _col: 1})),
+    ...parseTA(document.getElementById('ta-client')).map(e => ({...e, _col: 2})),
+  ];
+  entries.sort((a, b) => a.ts - b.ts);
+
+  // deduplicate only exact duplicates (same ts+src+dst+type from same paste)
+  const seen = new Set();
+  allRows = entries.filter(e => {
+    const key = `${e.ts}|${e.src}|${e.dst}|${e.type}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  document.getElementById('stats').textContent = `${allRows.length} events`;
+  applyFilter();
+}
+
+function applyFilter() {
+  const f = document.getElementById('filter').value.trim().toLowerCase();
+  const rows = allRows.filter(e => !f || e.type.includes(f) || e.src?.includes(f) || e.dst?.includes(f));
+
+  if (rows.length === 0) {
+    document.getElementById('out').innerHTML = '<p style="color:#444;padding:8px">no events</p>';
+    return;
+  }
+
+  const html = `<table>
+    <thead><tr>
+      <th>time</th>
+      <th>HOST</th>
+      <th>SERVER</th>
+      <th>CLIENT</th>
+    </tr></thead>
+    <tbody>${rows.map(renderRow).join('')}</tbody>
+  </table>`;
+  document.getElementById('out').innerHTML = html;
+}
+
+function clearAll() {
+  ['ta-host','ta-server','ta-client'].forEach(id => { document.getElementById(id).value = ''; localStorage.removeItem('trace-' + id); });
+  document.getElementById('out').innerHTML = '';
+  document.getElementById('stats').textContent = '';
+  allRows = [];
+}
+
+// persist textarea contents
+const IDS = ['ta-host','ta-server','ta-client'];
+IDS.forEach(id => {
+  const el = document.getElementById(id);
+  const saved = localStorage.getItem('trace-' + id);
+  if (saved) el.value = saved;
+  el.addEventListener('input', () => localStorage.setItem('trace-' + id, el.value));
+});
+if (IDS.some(id => localStorage.getItem('trace-' + id))) render();
+</script>
+</body>
+</html>

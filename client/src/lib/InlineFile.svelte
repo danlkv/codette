@@ -4,6 +4,7 @@
 <script>
   import { onMount } from 'svelte';
   import SourceFileBlock from './SourceFileBlock.svelte';
+  import { fetchFile } from '../utils/api.js';
   import ImagePreview from './ImagePreview.svelte';
 
   let { path, ranges = [], annotations = [], sessionId, token, onOpenFile = null, messageTime = null } = $props();
@@ -33,9 +34,7 @@
 
   async function fetchBinary() {
     try {
-      const url = `/api/sessions/${encodeURIComponent(sessionId)}/file?path=${encodeURIComponent(path)}`;
-      const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-      const data = await resp.json();
+      const data = await fetchFile(sessionId, path, token);
       if (data.error) { error = data.error; return; }
       if (data.base64) imgSrc = `data:${data.mimeType};base64,${data.base64}`;
     } catch (e) {

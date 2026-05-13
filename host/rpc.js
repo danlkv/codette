@@ -14,11 +14,14 @@ export class RpcServer {
   // Returns true if the message was an RPC request and was handled.
   async handle(ws, msg) {
     if (!msg.id || !this.handlers.has(msg.type)) return false;
+    const type = msg.type;
     try {
-      const result = await this.handlers.get(msg.type)(msg);
+      const result = await this.handlers.get(type)(msg);
       ws.send(JSON.stringify({ id: msg.id, result }));
+      this.onSend?.(type);
     } catch (e) {
       ws.send(JSON.stringify({ id: msg.id, error: e.message }));
+      this.onSend?.(type);
     }
     return true;
   }

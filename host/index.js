@@ -3,13 +3,16 @@
 // Copyright 2026 Danylo Lykov
 
 import { spawn, execSync } from 'child_process';
+import { generateKeyPairSync, createPrivateKey, createPublicKey, randomBytes } from 'crypto';
 import { WebSocket } from 'ws';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
+import jwt from 'jsonwebtoken';
 import { ClaudeRenderer, toolSummary } from './renderer.js';
 import { RpcServer } from './rpc.js';
 import { makeInlineFilePrompt } from '../shared/prompts.js';
+import { hmacVerify } from '../shared/crypto.js';
 
 const APP_NAME         = 'claudeweb';
 const SERVER_URL       = process.env.SERVER_URL       || 'ws://localhost:3000';
@@ -37,6 +40,32 @@ function saveName(id, name) {
   mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
   writeFileSync(NAMES_FILE, JSON.stringify(names, null, 2));
 }
+
+// ── Host keypair ──────────────────────────────────────────────────────────────
+const KEY_FILE = join(DATA_DIR, 'host-key.pem');
+
+function loadOrGenerateKeypair() {
+  mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+  try {
+    const privateKey = readFileSync(KEY_FILE, 'utf8');
+    const publicKey = createPublicKey(createPrivateKey(privateKey))
+      .export({ type: 'spki', format: 'pem' });
+    return { privateKey, publicKey };
+  } catch {
+    const kp = generateKeyPairSync('ec', {
+      namedCurve: 'P-256',
+      publicKeyEncoding:  { type: 'spki',  format: 'pem' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    });
+    writeFileSync(KEY_FILE, kp.privateKey, { mode: 0o600 });
+    return kp;
+  }
+}
+
+const { privateKey: HOST_PRIV_KEY, publicKey: HOST_PUB_KEY } = loadOrGenerateKeypair();
+
+// ── Pending auth challenges ───────────────────────────────────────────────────
+const pendingChallenges = new Map(); // nonce → { username, ts }
 
 // --no-dir-privacy: disable cwd-restriction check on get_fs / get_file
 const NO_DIR_PRIVACY = process.argv.includes('--no-dir-privacy');
@@ -151,7 +180,9 @@ function listSessions() {
               sessionMetaCache.set(filePath, { mtime: ts, title, msgCount, cwd });
             }
           } catch {}
-          sessions.push({ id, title, ts, agentActive: activeIds.has(id), msgCount, cwd, ...(names[id] && { name: names[id] }) });
+          const agentEntry = agents.get(id);
+          const agentState = agentEntry ? (agentEntry.streaming ? 'running' : 'idle') : null;
+          sessions.push({ id, title, ts, agentState, msgCount, cwd, ...(names[id] && { name: names[id] }) });
         }
       } catch {}
     }
@@ -159,9 +190,31 @@ function listSessions() {
   return sessions.sort((a, b) => b.ts - a.ts);
 }
 
-function sendSessionList() {
+// ── Strip thinking blocks before sending to server ────────────────────────────
+function stripThinking(lines) {
+  if (!lines?.length) return lines || [];
+  return lines.map(line => {
+    let ev;
+    try { ev = JSON.parse(line); } catch { return line; }
+    if (ev.type !== 'assistant' || !Array.isArray(ev.message?.content)) return line;
+    const filtered = ev.message.content.filter(b => b.type !== 'thinking');
+    if (filtered.length === ev.message.content.length) return line;
+    return JSON.stringify({ ...ev, message: { ...ev.message, content: filtered } });
+  });
+}
+
+// ── Outbound WS wrapper ───────────────────────────────────────────────────────
+// Placeholder: currently sends plaintext. Will encrypt in e2e phase.
+function hostSend(obj) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({ type: 'session_list', sessions: listSessions(), hostCwd: process.cwd() }));
+  if (obj.type !== 'log') {
+    process.stdout.write('TRACE ' + JSON.stringify({ ts: Date.now(), src: 'host', dst: 'server', type: obj.type, sessionId: obj.sessionId?.slice(0, 8) ?? null }) + '\n');
+  }
+  ws.send(JSON.stringify(obj));
+}
+
+function sendSessionList() {
+  hostSend({ type: 'session_list', sessions: listSessions(), hostCwd: process.cwd() });
 }
 
 // ── Agent registry ────────────────────────────────────────────────────────────
@@ -169,8 +222,9 @@ function sendSessionList() {
 const agents = new Map();
 
 function sendAgentEvent(sessionId, event) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({ type: 'agent_event', sessionId, event }));
+  hostSend({ type: 'agent_event', sessionId, event });
+  // Keep session list fresh so clients see agentState changes without a separate fetch
+  if (event === 'streaming' || event === 'idle' || event === 'stopped') sendSessionList();
 }
 
 // ── Streaming / terminal rendering ───────────────────────────────────────────
@@ -250,12 +304,12 @@ function spawnClaude(extraArgs = [], sessionIdHint = null, overrideCwd = null) {
 
           // Broadcast session list immediately — file may not exist yet so inject
           // a synthetic entry for the new session so it appears in the sidebar now.
-          if (newId && ws?.readyState === WebSocket.OPEN) {
+          if (newId) {
             const list = listSessions();
             if (!list.find(s => s.id === newId)) {
-              list.unshift({ id: newId, title: '', ts: Date.now(), agentActive: true, msgCount: 0, cwd: ev.cwd || null });
+              list.unshift({ id: newId, title: '', ts: Date.now(), agentState: 'idle', msgCount: 0, cwd: ev.cwd || null });
             }
-            ws.send(JSON.stringify({ type: 'session_list', sessions: list, hostCwd: process.cwd() }));
+            hostSend({ type: 'session_list', sessions: list, hostCwd: process.cwd() });
           }
         }
 
@@ -274,10 +328,11 @@ function spawnClaude(extraArgs = [], sessionIdHint = null, overrideCwd = null) {
 
       renderLine(line, agentEntry);
 
-      // Forward tagged line to server
+      // Forward stripped line to server
       const sessionId = agentEntry.sessionId;
+      const strippedLine = stripThinking([line])[0];
       if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'claude_line', sessionId, line }));
+        hostSend({ type: 'claude_line', sessionId, line: strippedLine });
       } else {
         log('warn', 'ws not open, dropping claude line');
       }
@@ -307,6 +362,7 @@ function spawnClaude(extraArgs = [], sessionIdHint = null, overrideCwd = null) {
 
 // ── RPC handlers (request/response over WS) ───────────────────────────────────
 const rpc = new RpcServer();
+rpc.onSend = (type) => process.stdout.write('TRACE ' + JSON.stringify({ ts: Date.now(), src: 'host', dst: 'server', type, sessionId: null }) + '\n');
 
 const ALLOWED_PREFIXES = ['/tmp'];
 function resolveFsPath(p, sessionCwd) {
@@ -420,11 +476,36 @@ rpc.register('set_session_name', (msg) => {
   return { ok: true };
 });
 
+// ── Auth RPC handlers ─────────────────────────────────────────────────────────
+
+rpc.register('auth_challenge', (msg) => {
+  const nonce = randomBytes(32).toString('base64');
+  pendingChallenges.set(nonce, { username: msg.username, ts: Date.now() });
+  // Expire after 60 s
+  setTimeout(() => pendingChallenges.delete(nonce), 60_000);
+  log('info', 'auth_challenge issued', { username: msg.username });
+  return { nonce };
+});
+
+rpc.register('auth_verify', async (msg) => {
+  const { username, nonce, response } = msg;
+  const pending = pendingChallenges.get(nonce);
+  if (!pending || pending.username !== username || Date.now() - pending.ts > 60_000) {
+    throw new Error('invalid or expired challenge');
+  }
+  pendingChallenges.delete(nonce);
+  const ok = await hmacVerify(CLIENT_PASSWORD, nonce, response);
+  if (!ok) throw new Error('authentication failed');
+  const token = jwt.sign({ username }, HOST_PRIV_KEY, { algorithm: 'ES256', expiresIn: '7d' });
+  log('info', 'auth_verify ok, token issued', { username });
+  return { token };
+});
+
 // ── Server connection ─────────────────────────────────────────────────────────
 let ws;
 
 function connect() {
-  ws = new WebSocket(`${SERVER_URL}/host?token=${encodeURIComponent(HOST_TOKEN)}&clientUsername=${encodeURIComponent(CLIENT_USERNAME)}&clientPassword=${encodeURIComponent(CLIENT_PASSWORD)}`);
+  ws = new WebSocket(`${SERVER_URL}/host?token=${encodeURIComponent(HOST_TOKEN)}&clientUsername=${encodeURIComponent(CLIENT_USERNAME)}`);
 
   ws.on('open', () => {
     // Flush buffered logs now that we're connected
@@ -435,19 +516,25 @@ function connect() {
     if (NO_DIR_PRIVACY) w(`${A.yellow}[warn] --no-dir-privacy: file access unrestricted${A.reset}\n`);
     hr();
     log('info', 'host connected to server', { url: SERVER_URL });
+    // Register public key so server can verify client JWTs
+    ws.send(JSON.stringify({ type: 'host_pubkey', pubkey: HOST_PUB_KEY }));
     sendSessionList();
     // Re-announce agent states in one batch so server map is correct after reconnect/restart
     const states = {};
     for (const [sessionId, entry] of agents) {
       if (sessionId) states[sessionId] = entry.streaming ? 'streaming' : 'idle';
     }
-    if (Object.keys(states).length > 0) ws.send(JSON.stringify({ type: 'agent_event', states }));
+    if (Object.keys(states).length > 0) hostSend({ type: 'agent_event', states });
   });
 
   ws.on('message', async (data) => {
     const raw = data.toString();
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
+
+    if (msg?.type && msg.type !== 'log') {
+      process.stdout.write('TRACE ' + JSON.stringify({ ts: Date.now(), src: 'server', dst: 'host', type: msg.type, sessionId: msg.sessionId?.slice(0, 8) ?? null }) + '\n');
+    }
 
     try {
       if (await rpc.handle(ws, msg)) return;
@@ -543,9 +630,7 @@ function connect() {
       } else {
         log('warn', `session file not found`, { sessionId: String(sessionId).slice(0, 8) });
       }
-      if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'history', sessionId, lines, totalLines, reqOffset: msg.offset ?? null, reqLimit: msg.limit ?? null }));
-      }
+      hostSend({ type: 'history', sessionId, lines: stripThinking(lines), totalLines, reqOffset: msg.offset ?? null, reqLimit: msg.limit ?? null });
       return;
     }
 
@@ -560,7 +645,7 @@ function connect() {
       log('info', 'user message → stdin', { preview: String(message.content).slice(0, 60), session: String(sessionId).slice(0, 8) });
 
       const echoLine = JSON.stringify({ type: 'user', message });
-      const echoMsg = JSON.stringify({ type: 'claude_line', sessionId, line: echoLine });
+      const sendEcho = () => hostSend({ type: 'claude_line', sessionId, line: echoLine });
 
       let agentEntry = agents.get(sessionId);
       if (!agentEntry) {
@@ -571,12 +656,12 @@ function connect() {
         setImmediate(() => {
           const ok = agentEntry.proc.stdin.write(JSON.stringify(msg) + '\n');
           if (!ok) log('warn', 'stdin write buffered (backpressure)');
-          if (ws?.readyState === WebSocket.OPEN) ws.send(echoMsg);
+          sendEcho();
         });
       } else {
         const ok = agentEntry.proc.stdin.write(JSON.stringify(msg) + '\n');
         if (!ok) log('warn', 'stdin write buffered (backpressure)');
-        if (ws?.readyState === WebSocket.OPEN) ws.send(echoMsg);
+        sendEcho();
       }
       return;
     }
