@@ -4,13 +4,14 @@
 <script>
   import { relativeTime } from '../utils/time.js';
   import { fetchGitStatus, fetchGitLog } from '../utils/api.js';
+  import { getSettings, saveSettings } from '../utils/storage.js';
 
   let { sessionId = null, sessionCwd = null, token = null, onDiffOpen } = $props();
 
-  let changesOpen = $state(localStorage.getItem('claudeweb_gitChanges') === 'true');
-  let logOpen     = $state(localStorage.getItem('claudeweb_gitLog') === 'true');
-  $effect(() => { localStorage.setItem('claudeweb_gitChanges', changesOpen ? 'true' : 'false'); });
-  $effect(() => { localStorage.setItem('claudeweb_gitLog', logOpen ? 'true' : 'false'); });
+  let changesOpen = $state(getSettings('gitChanges'));
+  let logOpen     = $state(getSettings('gitLog'));
+  $effect(() => { saveSettings('gitChanges', changesOpen); });
+  $effect(() => { saveSettings('gitLog', logOpen); });
 
   let changesLoading = $state(false);
   let changesError   = $state(null);

@@ -9,8 +9,8 @@
   import { messages, lastCost, lastUsage, lastContextUsage, hostStatus, wsOk, colorScheme, highContrast, vibrateOnDone, fontStyle, syntaxTheme, accentColor,
            sessions, currentSessionId, sessionData, showFileChips } from '../store.js';
   import { createParser } from './parser.js';
-  import { summarizeOldLines, KEEP as SUMMARIZE_KEEP } from './summarize.js';
   import { fetchHistory, fetchSessions, createSession, deleteSession } from '../utils/api.js';
+  import { getHistory, saveHistory, removeHistory, hasHistory, getSettings, saveSettings } from '../utils/storage.js';
   import { wtrace } from '../utils/trace.js';
   import MessageList from './MessageList.svelte';
   import ChatInput from './ChatInput.svelte';
@@ -20,7 +20,7 @@
 
   let { token, accounts = [], activeIdx = 0, onLogout, onSwitch, onAddAccount } = $props();
 
-  $effect(() => { localStorage.setItem('claudeweb_showFileChips', $showFileChips ? 'true' : 'false'); });
+  $effect(() => { saveSettings('showFileChips', $showFileChips); });
 
   function resolvePath(p, cwd) {
     if (!p || p.startsWith('/')) return p;
@@ -82,7 +82,7 @@
     try { return JSON.parse(atob(token.split('.')[1])).username; } catch { return ''; }
   });
   let userMenuOpen = $state(false);
-  $effect(() => { localStorage.setItem('vibrate', $vibrateOnDone ? '1' : '0'); });
+  $effect(() => { saveSettings('vibrate', $vibrateOnDone); });
   $effect(() => {
     if (!userMenuOpen) return;
     function onDocClick(e) {
@@ -101,7 +101,7 @@
   let sysCounter = 0;
 
   let sidebarOpen = $state(true);
-  $effect(() => { if (window.innerWidth > 640) localStorage.setItem('claudeweb_sidebarOpen', sidebarOpen ? 'true' : 'false'); });
+  $effect(() => { if (window.innerWidth > 640) saveSettings('sidebarOpen', sidebarOpen); });
   let hostCwd = $state(null);
   let fileViewPath = $state(null);
   let diffViewCommit = $state(null);
@@ -161,7 +161,7 @@
 
   onMount(async () => {
     sidebarOpen = window.innerWidth > 640
-      ? (localStorage.getItem('claudeweb_sidebarOpen') !== 'false')
+      ? getSettings('sidebarOpen')
       : false;
     window.addEventListener('beforeunload', saveCurrentCache);
     window.addEventListener('popstate', onPopState);
@@ -195,13 +195,8 @@
     // Pre-populate files from localStorage caches (no extra API calls)
     const filesMap = {};
     for (const s of sessionList) {
-      try {
-        const raw = localStorage.getItem('history_' + s.id);
-        if (raw) {
-          const { lines } = JSON.parse(raw);
-          if (lines) filesMap[s.id] = extractFilesFromLines(lines, s.cwd ?? null);
-        }
-      } catch {}
+      const cached = getHistory(s.id);
+      if (cached?.lines) filesMap[s.id] = extractFilesFromLines(cached.lines, s.cwd ?? null);
     }
     if (Object.keys(filesMap).length) {
       sessions.update(list => list.map(s => filesMap[s.id] ? { ...s, files: filesMap[s.id] } : s));
@@ -219,87 +214,31 @@
     await loadSessionHistory(target);
   }
 
-  // Evict the N oldest history_* entries (by ts field), skipping currentKey.
-  function evictOldestSessions(currentKey, n = 2) {
-    const entries = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (!k?.startsWith('history_') || k === currentKey) continue;
-      try {
-        const ts = JSON.parse(localStorage.getItem(k))?.ts ?? 0;
-        entries.push({ k, ts });
-      } catch { entries.push({ k, ts: 0 }); }
-    }
-    entries.sort((a, b) => a.ts - b.ts);
-    const toEvict = entries.slice(0, n);
-    for (const { k } of toEvict) {
-      localStorage.removeItem(k);
-      console.log('[history] evicted', k);
-    }
-    return toEvict.length;
-  }
-
-  // Try to store history; on QuotaExceededError:
-  //   1. summarize old lines and retry
-  //   2. evict 2 oldest sessions and retry
-  // lineCount is always the real count so server offsets stay correct.
-  function tryStoreHistory(cacheKey, lines, lineCount, title = '', contextWindow = null) {
-    const byteEst = s => new Blob([s]).size;
-    const ts = Date.now();
-    const raw = JSON.stringify({ lines, lineCount, ts, title, ...(contextWindow && { contextWindow }) });
-    console.log('[history] tryStoreHistory:', cacheKey, lines.length, 'lines, lineCount=', lineCount, '~', (byteEst(raw)/1024).toFixed(1), 'KB');
-    try { localStorage.setItem(cacheKey, raw); console.log('[history] tryStoreHistory: saved ok'); return; }
-    catch (e) { if (e.name !== 'QuotaExceededError') { console.error('[history] tryStoreHistory:', e); return; } }
-
-    const summarized = lines.length > SUMMARIZE_KEEP
-      ? [...summarizeOldLines(lines.slice(0, -SUMMARIZE_KEEP)), ...lines.slice(-SUMMARIZE_KEEP)]
-      : summarizeOldLines(lines);
-    const sumRaw = JSON.stringify({ lines: summarized, lineCount, ts });
-    console.log('[history] tryStoreHistory: quota exceeded, summarized', lines.length, '→', summarized.length, 'lines,', (byteEst(sumRaw)/1024).toFixed(1), 'KB');
-
-    try { localStorage.setItem(cacheKey, sumRaw); console.log('[history] tryStoreHistory: saved ok (summarized)'); return; }
-    catch (e) { if (e.name !== 'QuotaExceededError') { console.error('[history] tryStoreHistory after summarize:', e); return; } }
-
-    const evicted = evictOldestSessions(cacheKey, 2);
-    if (evicted === 0) { console.warn('[history] tryStoreHistory: nothing to evict, giving up'); return; }
-    try { localStorage.setItem(cacheKey, sumRaw); console.log('[history] tryStoreHistory: saved ok (after eviction)'); return; }
-    catch (e) { console.warn('[history] tryStoreHistory: quota exceeded even after eviction, skipping cache for', cacheKey); }
-  }
 
   function saveCurrentCache() {
     const id = get(currentSessionId);
     if (!id || currentLines.length === 0) return;
-    console.log('[history] saveCurrentCache:', id, currentLines.length, 'lines, lineCount=', lineCount);
-    tryStoreHistory('history_' + id, currentLines, lineCount, sessionTitle, storedContextWindow);
+    const r = saveHistory(id, { lines: currentLines, lineCount, title: sessionTitle, contextWindow: storedContextWindow });
+    console.log('[history] saveCurrentCache:', id, r.lines, 'lines,', (r.bytes/1024).toFixed(1), 'KB', r.summarized ? '(summarized)' : '', r.evicted ? `evicted:${r.evicted}` : '', r.stored ? 'ok' : 'FAILED');
   }
 
   async function loadSessionHistory(id) {
     if (!id || id === '__new__') return;
-    const cacheKey = 'history_' + id;
-    let cached = null;
-    try {
-      const raw = localStorage.getItem(cacheKey);
-      if (raw) {
-        cached = JSON.parse(raw);
-        if (!('lineCount' in cached)) { console.warn('[history] loadSessionHistory: invalid cache (no lineCount), ignoring'); cached = null; }
-      }
-    } catch (e) { console.error('[history] loadSessionHistory: localStorage read error', e); }
-
-    console.log('[history] loadSessionHistory', id, '— localStorage cache:', cached ? cached.lines.length + ' lines (lineCount=' + cached.lineCount + ')' : 'none');
+    const cached = getHistory(id);
+    console.log('[history] loadSessionHistory', id, '— cache:', cached ? cached.lines.length + ' lines (lineCount=' + cached.lineCount + ')' : 'none');
     if (cached) {
       if (cached.title) sessionTitle = cached.title;
       if (cached.contextWindow) storedContextWindow = cached.contextWindow;
       lineCount = cached.lineCount;
       applyHistoryLines(cached.lines);
-      console.log('[history] loadSessionHistory: applied localStorage cache, messages.length=', cached.lines.length, 'lineCount=', lineCount);
     }
-    await fetchAndApplyHistory(id, cached, cacheKey);
+    await fetchAndApplyHistory(id, cached);
   }
 
   const LOAD_LIMIT = 200;
   const BATCH_SIZE = 400;
 
-  async function fetchAndApplyHistory(id, cached, cacheKey) {
+  async function fetchAndApplyHistory(id, cached) {
     try {
       const offset = cached ? cached.lineCount : null;
       const fetchParams = offset != null ? { offset } : { limit: LOAD_LIMIT };
@@ -312,23 +251,20 @@
         if (lines.length === 0) {
           if (data.totalLines !== undefined && cached.lineCount > data.totalLines) {
             console.warn('[history] fetchAndApplyHistory: cache lineCount', cached.lineCount, '> server totalLines', data.totalLines, '— re-fetching full');
-            await fetchAndApplyHistory(id, null, cacheKey);
+            await fetchAndApplyHistory(id, null);
           } else {
-            console.log('[history] fetchAndApplyHistory: no new lines, cache is up to date');
             lineCount = data.totalLines ?? cached.lineCount;
           }
           return;
         }
         const merged = [...cached.lines, ...lines];
-        console.log('[history] fetchAndApplyHistory: merged', cached.lines.length, '+', lines.length, '=', merged.length, 'lines');
         lineCount = data.totalLines;
         applyHistoryLines(merged);
-        tryStoreHistory(cacheKey, merged, data.totalLines, sessionTitle, storedContextWindow);
+        saveHistory(id, { lines: merged, lineCount: data.totalLines, title: sessionTitle, contextWindow: storedContextWindow });
       } else {
-        console.log('[history] fetchAndApplyHistory: applying', lines.length, 'lines (full)');
         lineCount = data.totalLines;
         applyHistoryLines(lines);
-        tryStoreHistory(cacheKey, lines, data.totalLines, sessionTitle, storedContextWindow);
+        saveHistory(id, { lines, lineCount: data.totalLines, title: sessionTitle, contextWindow: storedContextWindow });
       }
     } catch (e) { console.error('fetchAndApplyHistory:', e); }
   }
@@ -461,11 +397,7 @@
     const sd = sessionData.get(id);
     if (sd?.length > 0) {
       // Restore from sessionData — no HTTP fetch needed
-      let lsCached = null;
-      try {
-        const raw = localStorage.getItem('history_' + id);
-        if (raw) lsCached = JSON.parse(raw);
-      } catch {}
+      const lsCached = getHistory(id);
       if (lsCached?.title) sessionTitle = lsCached.title;
       if (lsCached?.contextWindow) storedContextWindow = lsCached.contextWindow;
       currentLines = [...sd];
@@ -475,10 +407,7 @@
       console.log('[history] switchSession: restoring from sessionData', sd.length, 'lines, lineCount=', lineCount);
       applyHistoryLines(currentLines);
     } else {
-      // Show in-memory cache only if there's no localStorage cache that will
-      // immediately replace it — avoids a double-render flash.
-      const hasLocalCache = !!localStorage.getItem('history_' + id);
-      if (!hasLocalCache) messages.set([]);
+      if (!hasHistory(id)) messages.set([]);
       await loadSessionHistory(id);
     }
   }
@@ -520,7 +449,7 @@
       case '/reload': {
         const id = get(currentSessionId);
         if (id && id !== '__new__') {
-          localStorage.removeItem('history_' + id);
+          removeHistory(id);
           currentLines = [];
           messages.set([]);
           parser.resetTurnState();

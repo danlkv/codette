@@ -6,6 +6,7 @@
   import ChatLayout   from './lib/ChatLayout.svelte';
   import { colorScheme, highContrast, fontStyle, syntaxTheme, effectiveSyntaxTheme, accentColor, resetStores } from './store.js';
   import { THEME_PAIRS } from './utils/highlight.js';
+  import { getAccounts, saveAccounts, saveSettings } from './utils/storage.js';
 
   function lightenHex(hex, amount = 0.08) {
     const r = parseInt(hex.slice(1,3),16)/255, g = parseInt(hex.slice(3,5),16)/255, b = parseInt(hex.slice(5,7),16)/255;
@@ -25,53 +26,32 @@
     return `#${h2(hue(h+1/3))}${h2(hue(h))}${h2(hue(h-1/3))}`;
   }
 
-  function loadAccounts() {
-    try {
-      let accs = JSON.parse(localStorage.getItem('chat_accounts') || '[]');
-      if (!accs.length) {
-        // migrate legacy single token
-        const old = localStorage.getItem('chat_token');
-        if (old) {
-          const { username } = JSON.parse(atob(old.split('.')[1]));
-          accs = [{ username, token: old }];
-        }
-      }
-      if (!accs.length) return [];
-      // ensure every account has a settings object; migrate bare localStorage to first account
-      const legacyTheme = localStorage.getItem('syntaxTheme') || null;
-      const legacyAccent = localStorage.getItem('accentColor') || null;
-      return accs.map((acc, i) => acc.settings ? acc : {
-        ...acc,
-        settings: i === 0 ? { syntaxTheme: legacyTheme, accentColor: legacyAccent } : {},
-      });
-    } catch {}
-    return [];
-  }
-
-  let accounts = $state(loadAccounts());
-
-  function getInitialActiveIdx(accs) {
+  function initAccounts() {
+    const { accounts: accs, active } = getAccounts();
+    // resolve active username to index
     const h = location.hash.slice(1);
-    if (h) {
-      const slash = h.indexOf('/');
-      const urlUser = slash >= 0 ? h.slice(0, slash) : null;
-      if (urlUser) {
-        const idx = accs.findIndex(a => a.username === urlUser);
-        if (idx >= 0) return idx;
-        return accs.length; // force login: out-of-bounds → token = ''
-      }
+    const slash = h.indexOf('/');
+    const urlUser = slash >= 0 ? h.slice(0, slash) : null;
+    if (urlUser) {
+      const idx = accs.findIndex(a => a.username === urlUser);
+      return { accs, idx: idx >= 0 ? idx : accs.length };
     }
-    return Math.min(Number(localStorage.getItem('chat_active') || 0), Math.max(accs.length - 1, 0));
+    if (active) {
+      const idx = accs.findIndex(a => a.username === active);
+      if (idx >= 0) return { accs, idx };
+    }
+    return { accs, idx: Math.min(0, Math.max(accs.length - 1, 0)) };
   }
 
-  let activeIdx = $state(getInitialActiveIdx(accounts));
+  const { accs: _initAccs, idx: _initIdx } = initAccounts();
+  let accounts = $state(_initAccs);
+  let activeIdx = $state(_initIdx);
   let addingAccount = $state(false);
 
   const token = $derived(accounts[activeIdx]?.token || '');
 
   function persist() {
-    localStorage.setItem('chat_accounts', JSON.stringify(accounts));
-    localStorage.setItem('chat_active', String(activeIdx));
+    saveAccounts(accounts, accounts[activeIdx]?.username ?? null);
   }
 
   function handleLogin(t) {
@@ -143,7 +123,7 @@
       effectiveSyntaxTheme.set(pair ? pair[effective] : themeKey);
     };
     apply();
-    localStorage.setItem('colorScheme', scheme);
+    saveSettings('colorScheme', scheme);
     if (scheme === 'system') {
       _mq.addEventListener('change', apply);
       return () => _mq.removeEventListener('change', apply);
@@ -154,7 +134,7 @@
   $effect(() => {
     if (typeof document !== 'undefined') {
       document.documentElement.classList.toggle('high-contrast', $highContrast);
-      localStorage.setItem('hc', $highContrast ? '1' : '0');
+      saveSettings('highContrast', $highContrast);
     }
   });
 
@@ -166,7 +146,7 @@
 
   $effect(() => {
     document.documentElement.style.setProperty('--chat-font', FONT_FAMILIES[$fontStyle] ?? FONT_FAMILIES.mono);
-    localStorage.setItem('font', $fontStyle);
+    saveSettings('font', $fontStyle);
   });
 
 </script>

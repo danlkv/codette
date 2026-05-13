@@ -4,11 +4,12 @@
 <script>
   import TreeLevel from './TreeLevel.svelte';
   import { listDir } from '../utils/api.js';
+  import { getSettings, saveSettings } from '../utils/storage.js';
 
   let { sessionId = null, sessionCwd = null, token = null, onFileOpen } = $props();
 
-  let sectionOpen = $state(localStorage.getItem('claudeweb_fileExplorer') !== 'false');
-  $effect(() => { localStorage.setItem('claudeweb_fileExplorer', sectionOpen ? 'true' : 'false'); });
+  let sectionOpen = $state(getSettings('fileExplorer'));
+  $effect(() => { saveSettings('fileExplorer', sectionOpen); });
   let treeNodes = $state({});
 
   let cwdBasename = $derived(sessionCwd ? (sessionCwd.split('/').filter(Boolean).pop() || sessionCwd) : '');
