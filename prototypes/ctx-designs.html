@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ctx 4e variants — info options</title>
+<style>
+  :root {
+    --bg-primary:   #0d1117;
+    --bg-secondary: #161b22;
+    --bg-elevated:  #21262d;
+    --border:       #30363d;
+    --text:         #c9d1d9;
+    --text-muted:   #8b949e;
+    --text-dim:     #6e7681;
+    --accent:       #58a6ff;
+    --accent-light: #79c0ff;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg-primary); color: var(--text);
+    font: 13px/1.5 'SF Mono', 'Fira Code', monospace;
+    padding: 32px 24px; display: flex; flex-direction: column; gap: 40px;
+    max-width: 620px;
+  }
+  .label { font-size: .62rem; color: var(--text-dim); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 6px; }
+
+  /* ── shared shell ── */
+  .shell { position: relative; }
+
+  /* slide-in line above the wrap */
+  .above {
+    overflow: hidden; max-height: 0;
+    transition: max-height .18s ease;
+  }
+  .shell.open .above { max-height: 32px; }
+  .above-inner {
+    display: flex; align-items: baseline; justify-content: flex-end;
+    gap: 10px; padding: 4px 0 3px;
+    border-bottom: 1px solid var(--border);
+    font: .62rem/1 monospace; color: var(--text-dim);
+  }
+  .above-inner em { color: var(--accent-light); font-style: normal; }
+  .above-inner strong { color: var(--text-muted); font-weight: 400; }
+  .sep { color: var(--border); }
+
+  /* wrap */
+  .wrap {
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border);
+    padding: 10px 16px 12px 20px; /* left room for strip button */
+    position: relative;
+  }
+
+  /* left strip — full-height touch target */
+  .strip-btn {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 16px;
+    background: none; border: none; cursor: pointer; padding: 0;
+    display: flex; align-items: stretch; justify-content: flex-start;
+  }
+  .strip-btn::before {
+    content: ''; width: 6px;
+    background: linear-gradient(
+      to top,
+      var(--accent) 45%,
+      var(--bg-elevated) 45%
+    );
+    transition: opacity .15s;
+    opacity: .7;
+  }
+  .strip-btn:hover::before { opacity: 1; }
+  .shell.open .strip-btn::before { opacity: 1; }
+
+  /* bar row */
+  .bar { display: flex; align-items: flex-end; gap: 8px; }
+  textarea {
+    flex: 1; background: var(--bg-elevated);
+    border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); font: inherit; font-size: .9rem;
+    padding: 7px 10px; line-height: 1.5; resize: none; min-height: 36px;
+  }
+  textarea::placeholder { color: var(--text-dim); }
+  .send {
+    background: none; border: 1px solid var(--border);
+    color: var(--accent); font: inherit; font-size: .8rem;
+    padding: 7px 12px; border-radius: 6px; cursor: pointer;
+    white-space: nowrap; align-self: flex-end;
+  }
+</style>
+</head>
+<body>
+
+<!-- e1: ctx % only -->
+<div>
+  <div class="label">e1 · ctx % only — minimal</div>
+  <div class="shell" id="e1">
+    <div class="above"><div class="above-inner">
+      context: <em>45%</em>
+    </div></div>
+    <div class="wrap">
+      <button class="strip-btn" onclick="toggle('e1')" title="Token usage"></button>
+      <div class="bar">
+        <textarea placeholder="Message Claude…" rows="1"></textarea>
+        <button class="send">send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- e2: ctx + output tokens -->
+<div>
+  <div class="label">e2 · ctx % + output tokens</div>
+  <div class="shell" id="e2">
+    <div class="above"><div class="above-inner">
+      ctx <em>45%</em> <span class="sep">·</span>
+      out <strong>1.2k</strong>
+    </div></div>
+    <div class="wrap">
+      <button class="strip-btn" onclick="toggle('e2')" title="Token usage"></button>
+      <div class="bar">
+        <textarea placeholder="Message Claude…" rows="1"></textarea>
+        <button class="send">send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- e3: ctx + cache hit -->
+<div>
+  <div class="label">e3 · ctx % + cache hit rate</div>
+  <div class="shell" id="e3">
+    <div class="above"><div class="above-inner">
+      ctx <em>45%</em> <span class="sep">·</span>
+      cache <em>78%</em>
+    </div></div>
+    <div class="wrap">
+      <button class="strip-btn" onclick="toggle('e3')" title="Token usage"></button>
+      <div class="bar">
+        <textarea placeholder="Message Claude…" rows="1"></textarea>
+        <button class="send">send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- e4: full stats -->
+<div>
+  <div class="label">e4 · ctx + cache + output + cost</div>
+  <div class="shell" id="e4">
+    <div class="above"><div class="above-inner">
+      ctx <em>45%</em> <span class="sep">·</span>
+      cache <em>78%</em> <span class="sep">·</span>
+      out <strong>1.2k</strong> <span class="sep">·</span>
+      <strong>$0.0023</strong>
+    </div></div>
+    <div class="wrap">
+      <button class="strip-btn" onclick="toggle('e4')" title="Token usage"></button>
+      <div class="bar">
+        <textarea placeholder="Message Claude…" rows="1"></textarea>
+        <button class="send">send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- e5: raw token counts -->
+<div>
+  <div class="label">e5 · raw token counts</div>
+  <div class="shell" id="e5">
+    <div class="above"><div class="above-inner">
+      <strong>45k</strong> / 100k <span class="sep">·</span>
+      cached <em>35k</em> <span class="sep">·</span>
+      out <strong>1.2k</strong>
+    </div></div>
+    <div class="wrap">
+      <button class="strip-btn" onclick="toggle('e5')" title="Token usage"></button>
+      <div class="bar">
+        <textarea placeholder="Message Claude…" rows="1"></textarea>
+        <button class="send">send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function toggle(id) { document.getElementById(id).classList.toggle('open'); }
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     F series — pill content merged into expanded area
+     Strip = plain narrow click affordance (no fill indicator).
+     The ctx bar visualization lives inside the slide-in panel.
+     ══════════════════════════════════════════════════════════════════════ -->
+
+<style>
+  /* F-series strip — neutral click affordance, no fill */
+  .strip-plain {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 16px;
+    background: none; border: none; cursor: pointer; padding: 0;
+    display: flex; align-items: stretch; justify-content: flex-start;
+  }
+  .strip-plain::before {
+    content: ''; width: 4px;
+    background: var(--border);
+    opacity: .5; transition: opacity .15s, background .15s;
+  }
+  .strip-plain:hover::before { opacity: 1; background: var(--accent); }
+  .shell.open .strip-plain::before { opacity: 1; background: var(--accent); }
+
+  /* f1 — inline mini-bar in info line */
+  .f1-above-inner {
+    display: flex; align-items: center; gap: 10px;
+    padding: 5px 0 4px;
+    border-bottom: 1px solid var(--border);
+    font: .62rem/1 monospace; color: var(--text-dim);
+  }
+  .f1-above-inner em { color: var(--accent-light); font-style: normal; }
+  .f1-above-inner strong { color: var(--text-muted); font-weight: 400; }
+  .mini-bar {
+    width: 54px; height: 6px; border-radius: 3px;
+    background: var(--bg-elevated);
+    overflow: hidden; flex-shrink: 0;
+  }
+  .mini-bar-fill {
+    height: 100%; border-radius: 3px;
+    background: var(--accent); width: 45%;
+    opacity: .8;
+  }
+
+  /* f2 — stats line + full-width bar row below */
+  .f2-above {
+    overflow: hidden; max-height: 0;
+    transition: max-height .18s ease;
+  }
+  .shell.open .f2-above { max-height: 52px; }
+  .f2-stats {
+    display: flex; align-items: baseline; justify-content: flex-end;
+    gap: 10px; padding: 5px 0 4px;
+    font: .62rem/1 monospace; color: var(--text-dim);
+  }
+  .f2-stats em { color: var(--accent-light); font-style: normal; }
+  .f2-stats strong { color: var(--text-muted); font-weight: 400; }
+  .f2-bar-row {
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .full-bar {
+    height: 3px; background: var(--bg-elevated); border-radius: 2px; overflow: hidden;
+  }
+  .full-bar-fill {
+    height: 100%; background: var(--accent); width: 45%; opacity: .75;
+    border-radius: 2px;
+  }
+
+  /* f3 — progress bar AS background of info line, stats overlaid */
+  .f3-above {
+    overflow: hidden; max-height: 0;
+    transition: max-height .18s ease;
+  }
+  .shell.open .f3-above { max-height: 36px; }
+  .f3-above-inner {
+    position: relative; overflow: hidden;
+    border-bottom: 1px solid var(--border);
+  }
+  .f3-bg-bar {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    width: 45%; background: color-mix(in srgb, var(--accent) 14%, transparent);
+    border-right: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    pointer-events: none;
+  }
+  .f3-stats {
+    position: relative;
+    display: flex; align-items: baseline; justify-content: flex-end;
+    gap: 10px; padding: 5px 0 4px;
+    font: .62rem/1 monospace; color: var(--text-dim);
+  }
+  .f3-stats em { color: var(--accent-light); font-style: normal; }
+  .f3-stats strong { color: var(--text-muted); font-weight: 400; }
+</style>
+
+<!-- f1: inline mini-bar before stats -->
+<div>
+  <div class="label">f1 · strip = click only · mini-bar inline in info line</div>
+  <div class="shell" id="f1">
+    <div class="above"><div class="f1-above-inner">
+      <div class="mini-bar"><div class="mini-bar-fill"></div></div>
+      <em>45%</em>
+      <span class="sep">·</span>
+      cache <em>78%</em>
+      <span class="sep">·</span>
+      out <strong>1.2k</strong>
+    </div></div>
+    <div class="wrap">
+      <button class="strip-plain" onclick="toggle('f1')" title="Token usage"></button>
+      <div class="bar">
+        <textarea placeholder="Message Claude…" rows="1"></textarea>
+        <button class="send">send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- f2: stats line + thin full-width bar underneath -->
+<div>
+  <div class="label">f2 · strip = click only · stats + full-width bar row</div>
+  <div class="shell" id="f2">
+    <div class="f2-above">
+      <div class="f2-stats">
+        ctx <em>45%</em>
+        <span class="sep">·</span>
+        cache <em>78%</em>
+        <span class="sep">·</span>
+        out <strong>1.2k</strong>
+      </div>
+      <div class="f2-bar-row">
+        <div class="full-bar"><div class="full-bar-fill"></div></div>
+      </div>
+    </div>
+    <div class="wrap">
+      <button class="strip-plain" onclick="toggle('f2')" title="Token usage"></button>
+      <div class="bar">
+        <textarea placeholder="Message Claude…" rows="1"></textarea>
+        <button class="send">send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- f3: progress bar as tinted background behind stats text -->
+<div>
+  <div class="label">f3 · strip = click only · bar tint behind stats text</div>
+  <div class="shell" id="f3">
+    <div class="f3-above">
+      <div class="f3-above-inner">
+        <div class="f3-bg-bar"></div>
+        <div class="f3-stats">
+          ctx <em>45%</em>
+          <span class="sep">·</span>
+          cache <em>78%</em>
+          <span class="sep">·</span>
+          out <strong>1.2k</strong>
+        </div>
+      </div>
+    </div>
+    <div class="wrap">
+      <button class="strip-plain" onclick="toggle('f3')" title="Token usage"></button>
+      <div class="bar">
+        <textarea placeholder="Message Claude…" rows="1"></textarea>
+        <button class="send">send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

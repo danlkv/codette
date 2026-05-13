@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sessions + files view — design exploration</title>
+<style>
+  :root {
+    --bg-primary:   #0d0d0d;
+    --bg-secondary: #111111;
+    --bg-elevated:  #1c1c1c;
+    --border:       #2a2a2a;
+    --text:         #e0e0e0;
+    --text-muted:   #888;
+    --text-dim:     #444;
+    --accent:       #cc5500;
+    --accent-light: #e06a20;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg-primary); color: var(--text);
+    font: 13px/1.5 'SF Mono', 'Fira Code', monospace;
+    padding: 32px 24px;
+  }
+
+  /* ── sidebar shell ── */
+  .sidebar {
+    width: 299px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .sidebar-header {
+    padding: 8px 12px 6px;
+    font-size: .7rem; font-weight: 600;
+    letter-spacing: .06em; text-transform: uppercase;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .sidebar-header .new-btn {
+    color: var(--text-dim); font-size: 1.1rem; line-height: 1; cursor: pointer;
+  }
+  .list { padding: 4px 0; }
+
+  /* ── session row ── */
+  .session-row {
+    display: flex; align-items: stretch;
+    border-left: 2px solid transparent;
+  }
+  .session-row.active {
+    border-left-color: var(--accent-light);
+    background: var(--bg-elevated);
+  }
+  .row-wrap {
+    display: flex; flex-direction: column;
+    flex: 1; min-width: 0;
+  }
+  .row-top { display: flex; align-items: stretch; }
+
+  .session {
+    flex: 1; min-width: 0;
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 8px 8px 6px 12px;
+    background: none; border: none; cursor: pointer;
+    text-align: left; color: var(--text-muted);
+    font: inherit; font-size: .78rem;
+  }
+  .session-row.active .session { color: var(--text); }
+
+  .meta { display: flex; align-items: center; gap: 5px; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .dot.standby { background: #5a5; }
+  .dot.running { background: var(--accent-light); animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse {
+    0%,100% { opacity:1; transform:scale(1); }
+    50% { opacity:.45; transform:scale(1.35); }
+  }
+  .time { font-size: .7rem; color: var(--text-dim); }
+  .count {
+    font-size: .65rem; color: var(--text-dim);
+    background: var(--bg-elevated); border: 1px solid var(--border);
+    border-radius: 8px; padding: 0 5px;
+  }
+  .title {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: .78rem;
+  }
+  .del {
+    flex-shrink: 0; width: 36px;
+    background: none; border: none; cursor: pointer;
+    color: var(--text-dim); font-size: 1rem;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* ── file chips: always 2 rows, expand on active ── */
+  .file-chips {
+    display: flex; flex-wrap: wrap; gap: 3px;
+    padding: 2px 12px 8px 14px;
+    max-height: 42px;
+    overflow: hidden;
+    transition: max-height .15s ease;
+  }
+  .session-row.active .file-chips { max-height: 120px; }
+
+  .chip {
+    font-size: .65rem; color: var(--text-dim);
+    background: var(--bg-elevated); border: 1px solid var(--border);
+    border-radius: 3px; padding: 1px 5px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 130px;
+    cursor: pointer;
+    transition: color .12s, border-color .12s;
+  }
+  .chip:hover { color: var(--text-muted); border-color: var(--text-dim); }
+  .session-row.active .chip { border-color: #333; }
+
+  .divider { border: none; border-top: 1px solid var(--border); margin: 2px 0; }
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="sidebar-header">Sessions <span class="new-btn">+</span></div>
+  <div class="list">
+
+    <div class="session-row">
+      <div class="row-wrap">
+        <div class="row-top">
+          <button class="session">
+            <span class="meta"><span class="dot standby"></span><span class="time">2h</span><span class="count">14</span></span>
+            <span class="title">fix mojo parser edge cases</span>
+          </button>
+          <button class="del">×</button>
+        </div>
+        <div class="file-chips">
+          <span class="chip">parser.js</span>
+          <span class="chip">MojoBlock.svelte</span>
+          <span class="chip">highlight.js</span>
+          <span class="chip">ToolBlock.svelte</span>
+          <span class="chip">App.svelte</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="session-row active">
+      <div class="row-wrap">
+        <div class="row-top">
+          <button class="session">
+            <span class="meta"><span class="dot running"></span><span class="time">4m</span><span class="count">3</span></span>
+            <span class="title">ctx bar redesign exploration</span>
+          </button>
+          <button class="del">×</button>
+        </div>
+        <div class="file-chips">
+          <span class="chip">ctx-designs.html</span>
+          <span class="chip">ChatLayout.svelte</span>
+          <span class="chip">SessionSidebar.svelte</span>
+          <span class="chip">App.svelte</span>
+          <span class="chip">store.js</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="session-row">
+      <div class="row-wrap">
+        <div class="row-top">
+          <button class="session">
+            <span class="meta"><span class="dot standby"></span><span class="time">1d</span><span class="count">41</span></span>
+            <span class="title">pdf viewer zoom + invert</span>
+          </button>
+          <button class="del">×</button>
+        </div>
+        <div class="file-chips">
+          <span class="chip">FileView.svelte</span>
+          <span class="chip">pdfjs-dist</span>
+          <span class="chip">App.svelte</span>
+          <span class="chip">+2 more</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="session-row">
+      <div class="row-wrap">
+        <div class="row-top">
+          <button class="session">
+            <span class="meta"><span class="time">3d</span><span class="count">8</span></span>
+            <span class="title">add git log view</span>
+          </button>
+          <button class="del">×</button>
+        </div>
+        <div class="file-chips">
+          <span class="chip" style="color:var(--text-dim);font-style:italic;border-style:dashed">no files</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

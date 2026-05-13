@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chat Layout Experiments</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font: 14px/1.6 system-ui, sans-serif;
+  background: #1a1a2e; color: #e0e0e0;
+  padding: 24px 16px; max-width: 680px; margin: 0 auto;
+}
+h1 { font-size: 1.1rem; color: #e94560; margin-bottom: 4px; }
+.subtitle { font-size: .8rem; color: #888; margin-bottom: 24px; }
+.card {
+  background: #16213e; border: 1px solid #2a2a4a;
+  border-radius: 8px; padding: 14px 16px; margin-bottom: 12px;
+  text-decoration: none; color: inherit; display: block;
+  transition: border-color .15s;
+}
+.card:hover { border-color: #5a5a8a; }
+.card-title { font-weight: 600; font-size: .9rem; margin-bottom: 4px; }
+.card-tech { font-size: .75rem; color: #5cb8ff; font-family: monospace; margin-bottom: 6px; }
+.card-desc { font-size: .78rem; color: #aaa; line-height: 1.5; }
+.tag {
+  display: inline-block; font-size: .65rem; padding: 1px 6px;
+  border-radius: 3px; margin-top: 6px; margin-right: 4px;
+}
+.tag-good { background: #1a3a1a; color: #6fcf97; border: 1px solid #2a5a2a; }
+.tag-warn { background: #3a2a1a; color: #f2994a; border: 1px solid #5a3a1a; }
+</style>
+</head>
+<body>
+<h1>Chat Layout Experiments</h1>
+<p class="subtitle">Testing mobile viewport stability — open each on phone and try: scroll, keyboard, pinch-zoom</p>
+
+<a class="card" href="chat1-grid-dvh.html">
+  <div class="card-title">1. CSS Grid + 100dvh</div>
+  <div class="card-tech">body { display:grid; grid-template-rows: auto 1fr auto; height:100dvh }</div>
+  <div class="card-desc">Grid natively handles the 3-row layout. dvh shrinks with keyboard.</div>
+  <span class="tag tag-good">scroll ✓</span>
+  <span class="tag tag-warn">zoom reflows</span>
+</a>
+
+<a class="card" href="chat2-grid-svh.html">
+  <div class="card-title">2. CSS Grid + 100svh</div>
+  <div class="card-tech">body { display:grid; grid-template-rows: auto 1fr auto; height:100svh }</div>
+  <div class="card-desc">Same grid, but svh = smallest possible viewport height. Layout never changes size — keyboard overlaps content instead of resizing it. Most stable on zoom.</div>
+  <span class="tag tag-good">scroll ✓</span>
+  <span class="tag tag-good">zoom stable ✓</span>
+  <span class="tag tag-warn">keyboard overlaps</span>
+</a>
+
+<a class="card" href="chat3-fixed.html">
+  <div class="card-title">3. position:fixed header + footer</div>
+  <div class="card-tech">header/footer { position:fixed } + body scrolls</div>
+  <div class="card-desc">Most reliable cross-browser. Fixed elements ignore viewport changes entirely. Uses ResizeObserver to track footer height for bottom padding. Body is the scroll container.</div>
+  <span class="tag tag-good">scroll ✓</span>
+  <span class="tag tag-good">zoom stable ✓</span>
+  <span class="tag tag-good">keyboard ✓</span>
+</a>
+
+<a class="card" href="chat4-flex-svh.html">
+  <div class="card-title">4. Flex column + 100svh</div>
+  <div class="card-tech">body { display:flex; flex-direction:column; height:100svh } + min-height:0</div>
+  <div class="card-desc">Flex equivalent of layout 2. Requires min-height:0 on the message area (the critical flex scroll trick). svh keeps it stable. Closest to current webclaude structure.</div>
+  <span class="tag tag-good">scroll ✓</span>
+  <span class="tag tag-good">zoom stable ✓</span>
+</a>
+
+<a class="card" href="chat5-flex-dvh-js.html">
+  <div class="card-title">5. Flex + dvh + JS visualViewport (current approach)</div>
+  <div class="card-tech">--app-h = visualViewport.height → body { height: var(--app-h) }</div>
+  <div class="card-desc">JS tracks the visual viewport and updates a CSS variable. Precise keyboard handling. Shows a debug overlay with current vp height and scale. Reflows on zoom because scale changes trigger resize events.</div>
+  <span class="tag tag-good">scroll ✓</span>
+  <span class="tag tag-good">keyboard precise ✓</span>
+  <span class="tag tag-warn">zoom reflows</span>
+</a>
+</body>
+</html>

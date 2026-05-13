@@ -1,0 +1,14 @@
+{
+  "name": "claudew",
+  "version": "1.0.0",
+  "type": "module",
+  "bin": {
+    "claudew": "./index.js"
+  },
+  "scripts": {
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "ws": "^8.17.0"
+  }
+}

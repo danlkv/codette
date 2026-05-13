@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>chat layout experiments</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root { color-scheme: dark; }
+  body { background: #1a1a1a; color: #e0e0e0; font-family: system-ui, sans-serif; font-size: 15px; padding: 24px 20px; max-width: 600px; margin: 0 auto; }
+  h1 { font-size: 1.1rem; font-weight: 600; margin-bottom: 6px; color: #fff; }
+  .subtitle { font-size: .8rem; color: #888; margin-bottom: 28px; }
+  .problem { background: #2a1a1a; border: 1px solid #5a2a2a; border-radius: 8px; padding: 12px 16px; margin-bottom: 28px; font-size: .82rem; color: #c8a0a0; line-height: 1.6; }
+  .problem strong { color: #e08080; }
+  .group { margin-bottom: 28px; }
+  .group-title { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: #666; margin-bottom: 10px; }
+  .exp { display: block; text-decoration: none; background: #252525; border: 1px solid #333; border-radius: 8px; padding: 14px 16px; margin-bottom: 8px; transition: border-color .15s, background .15s; }
+  .exp:hover { border-color: #4a90d9; background: #2a2a35; }
+  .exp-title { font-size: .92rem; font-weight: 500; color: #e0e0e0; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .badge { font-size: .62rem; padding: 2px 6px; border-radius: 10px; font-weight: 400; }
+  .bug    { background: #c0392b; color: #fff; }
+  .fix    { background: #27ae60; color: #fff; }
+  .nojs   { background: #8e44ad; color: #fff; }
+  .alt    { background: #16a085; color: #fff; }
+  .exp-desc { font-size: .78rem; color: #888; line-height: 1.5; }
+</style>
+</head>
+<body>
+  <h1>chat layout experiments</h1>
+  <p class="subtitle">Testing fix for zoom-shrink bug on Chrome mobile</p>
+
+  <div class="problem">
+    <strong>The problem:</strong> On Chrome mobile, pinch-zoom fires <code>visualViewport.resize</code> with a smaller <code>height</code> value. If the app uses <code>--app-height = visualViewport.height</code> unconditionally, the layout shrinks every time the user zooms in.
+  </div>
+
+  <div class="group">
+    <div class="group-title">Approach 1 — JS height with scale guard</div>
+    <a class="exp" href="exp1a-baseline.html">
+      <div class="exp-title">exp1a · baseline <span class="badge bug">SHOWS BUG</span></div>
+      <div class="exp-desc">Updates <code>--app-height</code> on all <code>visualViewport.resize</code> events including zoom. Zoom-in → layout shrinks.</div>
+    </a>
+    <a class="exp" href="exp1b-scale-guard.html">
+      <div class="exp-title">exp1b · scale guard <span class="badge fix">FIX</span></div>
+      <div class="exp-desc">Skips <code>--app-height</code> update when <code>visualViewport.scale > 1.05</code>. Keyboard resize still works; zoom does not shrink layout.</div>
+    </a>
+  </div>
+
+  <div class="group">
+    <div class="group-title">Approach 2 — static CSS viewport units (no JS)</div>
+    <a class="exp" href="exp2a-svh.html">
+      <div class="exp-title">exp2a · 100svh <span class="badge nojs">NO JS</span></div>
+      <div class="exp-desc"><code>height: 100svh</code> — "small" viewport height, the most conservative value. Never reacts to zoom or chrome show/hide.</div>
+    </a>
+    <a class="exp" href="exp2b-dvh.html">
+      <div class="exp-title">exp2b · 100dvh <span class="badge nojs">NO JS</span></div>
+      <div class="exp-desc"><code>height: 100dvh</code> — "dynamic" viewport height. Tracks browser chrome show/hide via CSS. Not affected by pinch-zoom.</div>
+    </a>
+  </div>
+
+  <div class="group">
+    <div class="group-title">Approach 3 — document scroll (different paradigm)</div>
+    <a class="exp" href="exp3-doc-scroll.html">
+      <div class="exp-title">exp3 · doc scroll <span class="badge alt">ALT</span></div>
+      <div class="exp-desc">No fixed-height container. Document scrolls natively. Sticky header + sticky input. Zoom works like a normal webpage.</div>
+    </a>
+  </div>
+</body>
+</html>
