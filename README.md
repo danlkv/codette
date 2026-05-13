@@ -2,7 +2,7 @@
 
 > Control your local Claude Code from a mobile-friendly browser UI, anywhere. Self-hosted, end-to-end encrypted, with multi-host multi-device support.
 
-A three-piece system that lets you run Claude Code on your laptop and drive it from a browser on your phone, tablet, or any other machine. Approve tool calls, kick off new prompts, and watch output stream in real time — over the public internet, without exposing your machine.
+A three-piece system that lets you run Claude Code on your laptop and drive it from a browser on your phone, tablet, or any other machine. Kick off new prompts and watch output stream in real time — over the public internet, without exposing your machine.
 
 ## How it works
 
@@ -56,27 +56,6 @@ The host registers a username + password with the server at connect time. Client
 
 Multiple clients can connect to the same host. Multiple hosts (different usernames) can connect to the same server; the server routes messages by JWT.
 
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant S as Server
-    participant H as Host
-
-    Note over H,S: Host registers at startup
-    H->>S: register(username, password, HOST_KEY)
-    S-->>H: connection ack
-
-    Note over C,S: Client logs in
-    C->>S: POST /login {username, password}
-    S-->>C: JWT (7-day)
-
-    Note over C,H: Steady-state messaging
-    C->>S: WebSocket {jwt, prompt}
-    S->>H: route by username
-    H-->>S: stream tokens
-    S-->>C: stream tokens
-```
-
 ## Environment variables
 
 | Variable | Default | Description |
@@ -89,10 +68,6 @@ sequenceDiagram
 | `PORT` | `3000` | Server listen port |
 
 Change every default before exposing the server to the public internet.
-
-## Status
-
-Early. Working end-to-end. Issues and PRs welcome.
 
 ## Related projects
 
