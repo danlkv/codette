@@ -572,6 +572,7 @@ function renderVault() {
   const enrolling = phase === 'enrolling' || phase === 'storing';
   const viewUser = enrolling ? username : selectedUser;
   const cred = viewUser ? loadCred(viewUser) : null;
+  log('renderVault', { phase, selectedUser, username, viewUser, credFound: !!cred, authHex: cred?.authHex ? cred.authHex.slice(0,8)+'…' : null });
   const allCreds = loadAllCreds();
   const active = enrolling;
   const stored = Object.keys(allCreds).length > 0;
@@ -612,6 +613,8 @@ function renderVault() {
     wrap.style.display = '';
     if (cred.authHex) {
       hexEl.innerHTML = buildAuthDataHTML(cred.authHex);
+      hexEl.classList.add('open');
+      document.getElementById('authdata-toggle').textContent = '▼ raw authenticatorData';
     } else {
       hexEl.innerHTML = '<span style="color:var(--dim);font-style:italic">not captured — forget &amp; re-pair to record authenticatorData</span>';
       hexEl.classList.add('open');
@@ -804,9 +807,9 @@ function doStore(credId, aaguid, authHex) {
     ? (knownName ?? platformLabel())
     : (aaguid ? `${platformLabel()} (aaguid: ${aaguid.slice(0,8)}…)` : platformLabel());
   log('doStore', { user: username, credId: credId.slice(0,12)+'…', hw, aaguid });
-  go('storing');
   saveCred({ id: credId, hw, aaguid, authHex, user: username });
   selectedUser = username;
+  go('storing');
   setTimeout(() => go('paired'), 900);
 }
 

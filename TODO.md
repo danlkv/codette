@@ -5,7 +5,7 @@
 1. Question tool not supported in `--json` mode — remove it or figure out how to support.
 2. WebSocket status reported as inactive if host is inactive at start.
 3. First message in a new session is not displayed in the client UI.
-4. Host crashes if the directory for a new session does not exist.
+4. [x] Host crashes if the directory for a new session does not exist.
 
 ## Enablers & Blockers
 Unblock workflows that are not possible today.
@@ -64,7 +64,7 @@ Theme: no landmark for where context was reset.
 Theme: choosing the right session requires opening each one to infer its state.
    - Display files read since the last summarization, shown as chips on each session list entry.
 
-3. Git status & commit summary
+3. [x] Git status & commit summary
 Theme: sidebar shows git log but not unstaged changes or commit-level file summaries.
    - Show unstaged changes (modified/untracked files) alongside the git log.
    - Display a file-level summary in commit view: filename + lines added/removed.
@@ -92,7 +92,7 @@ Theme: highlight theme stays fixed regardless of system light/dark mode.
 Theme: session list grows unbounded with no grouping.
    - Sibling tab "Workspaces" in sidebar. Groups sessions by working directory.
 
-9. Incremental chat loading
+9. [x] Incremental chat loading
 Theme: long sessions parse and render the full history on every load, causing lag.
    - On open, render only from the last summarization boundary (or last N messages).
    - Load earlier history on scroll-to-top.
