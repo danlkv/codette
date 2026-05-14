@@ -13,8 +13,7 @@ import { ClaudeRenderer, toolSummary } from './renderer.js';
 import { RpcServer } from './rpc.js';
 import { makeInlineFilePrompt } from '../shared/prompts.js';
 import { hmacVerify, deriveKey, deriveNonceKey, encrypt, encryptDet, decrypt } from '../shared/crypto.js';
-
-const APP_NAME         = 'claudeweb';
+import { APP_NAME } from '../shared/constants.js';
 const SERVER_URL       = process.env.SERVER_URL       || 'ws://localhost:3000';
 const CLIENT_USERNAME  = process.env.CLIENT_USERNAME  || execSync('whoami').toString().trim();
 const CLIENT_PASSWORD  = process.env.CLIENT_PASSWORD  || 'changeme';
@@ -637,7 +636,7 @@ function connect() {
     if (msg.type === 'new_session') {
       const cwd = msg.cwd || null;
       const firstMessage = msg.firstMessage || null;
-      const settings = msg.claudeweb_settings ?? {};
+      const settings = msg.codette_settings ?? {};
       log('info', 'new session requested', { cwd, hasMsg: !!firstMessage });
       if (cwd) {
         try { statSync(cwd); } catch {

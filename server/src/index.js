@@ -147,7 +147,7 @@ app.post('/api/auth/verify', authRateLimit, (req, res) => {
       wtrace('host', 'server', 'auth_verify');
       if (res.headersSent) return;
       if (err) return res.status(401).json({ error: err.message });
-      res.setHeader('Set-Cookie', `username=${encodeURIComponent(username)}; Path=/; HttpOnly; SameSite=Strict`);
+      res.setHeader('Set-Cookie', `username=${encodeURIComponent(username)}; Path=/; SameSite=Strict`);
       res.json(result);
     },
     10000);
@@ -256,9 +256,9 @@ app.put('/api/sessions/:id/name', requireJwt, requireHost, (req, res) => {
 
 // ── Create session ────────────────────────────────────────────────────────────
 app.post('/api/sessions', requireJwt, requireHost, (req, res) => {
-  const { cwd, firstMessage, claudeweb_settings } = req.body || {};
+  const { cwd, firstMessage, codette_settings } = req.body || {};
   wtrace('server', 'host', 'new_session');
-  req.claudeHost.ws.send(JSON.stringify({ type: 'new_session', cwd, firstMessage, claudeweb_settings }));
+  req.claudeHost.ws.send(JSON.stringify({ type: 'new_session', cwd, firstMessage, codette_settings }));
   res.status(202).json({});
 });
 

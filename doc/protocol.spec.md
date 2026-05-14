@@ -8,7 +8,7 @@ Claude process  ←stdin/stdout→  Host  ←/host WS→  Server  ←REST+WS→ 
 ```
 
 **Convention:** message fields invented by this app (not part of Claude CLI/Code) are prefixed
-`claudeweb_` (e.g. `claudeweb_settings`).
+`codette_` (e.g. `codette_settings`).
 
 ---
 

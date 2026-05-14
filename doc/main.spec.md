@@ -36,7 +36,7 @@ Typed in the input bar; handled client-side before sending to claude.
 | `/status` | Show host/ws connection status |
 | `/model <name>` | Switch model (sends claude `/model` command) |
 | `/btw <question>` | Side question — not added to conversation history |
-| `/claudeweb-inline-files` | Instruct agent to use inline file viewer in current session |
+| `/inline-files` | Instruct agent to use inline file viewer in current session |
 
 
 ### Session management

@@ -14,7 +14,7 @@
     { cmd: '/status',  desc: 'connection status' },
     { cmd: '/btw',     desc: 'side message (not in history)' },
     { cmd: '/reload',  desc: 'clear cache and refetch full history' },
-    { cmd: '/claudeweb-inline-files', desc: 'instruct agent to use inline file viewer' },
+    { cmd: '/inline-files', desc: 'instruct agent to use inline file viewer' },
   ];
 
   let prefix = $derived(value.split(' ')[0]);

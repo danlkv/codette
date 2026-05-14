@@ -2,10 +2,11 @@
 // Copyright 2026 Danylo Lykov
 
 import { summarizeOldLines, KEEP as SUMMARIZE_KEEP } from '../lib/summarize.js';
+import { APP_NAME } from '../../../shared/constants.js';
 
 // ── Schema version ───────────────────────────────────────────────────────────
 const STORAGE_VERSION = 1;
-const VERSION_KEY = 'codette_storage_v';
+const VERSION_KEY = `${APP_NAME}_storage_v`;
 
 (function checkVersion() {
   const v = localStorage.getItem(VERSION_KEY);
@@ -24,12 +25,12 @@ const SETTINGS = {
   highContrast: { key: 'hc',                       fallback: false,  encode: v => v ? '1' : '0',    decode: v => v === '1' },
   vibrate:      { key: 'vibrate',                   fallback: true,   encode: v => v ? '1' : '0',    decode: v => v !== '0' },
   font:         { key: 'font',                      fallback: 'mono' },
-  showFileChips:{ key: 'claudeweb_showFileChips',   fallback: true,   encode: v => v ? 'true':'false', decode: v => v !== 'false' },
-  inlineFiles:  { key: 'claudeweb_inlineFiles',     fallback: true,   encode: v => v ? 'true':'false', decode: v => v !== 'false' },
-  sidebarOpen:  { key: 'claudeweb_sidebarOpen',     fallback: true,   encode: v => v ? 'true':'false', decode: v => v !== 'false' },
-  gitChanges:   { key: 'claudeweb_gitChanges',      fallback: false,  encode: v => v ? 'true':'false', decode: v => v === 'true' },
-  gitLog:       { key: 'claudeweb_gitLog',           fallback: false,  encode: v => v ? 'true':'false', decode: v => v === 'true' },
-  fileExplorer: { key: 'claudeweb_fileExplorer',     fallback: true,   encode: v => v ? 'true':'false', decode: v => v !== 'false' },
+  showFileChips:{ key: `${APP_NAME}_showFileChips`,   fallback: true,   encode: v => v ? 'true':'false', decode: v => v !== 'false' },
+  inlineFiles:  { key: `${APP_NAME}_inlineFiles`,     fallback: true,   encode: v => v ? 'true':'false', decode: v => v !== 'false' },
+  sidebarOpen:  { key: `${APP_NAME}_sidebarOpen`,     fallback: true,   encode: v => v ? 'true':'false', decode: v => v !== 'false' },
+  gitChanges:   { key: `${APP_NAME}_gitChanges`,      fallback: false,  encode: v => v ? 'true':'false', decode: v => v === 'true' },
+  gitLog:       { key: `${APP_NAME}_gitLog`,           fallback: false,  encode: v => v ? 'true':'false', decode: v => v === 'true' },
+  fileExplorer: { key: `${APP_NAME}_fileExplorer`,     fallback: true,   encode: v => v ? 'true':'false', decode: v => v !== 'false' },
 };
 
 export function getSettings(name) {

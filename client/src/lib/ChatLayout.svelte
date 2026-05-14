@@ -319,7 +319,8 @@
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const sock = new WebSocket(`${proto}//${location.host}/ws?token=${encodeURIComponent(token)}`);
+    const username = accounts[activeIdx]?.username;
+    const sock = new WebSocket(`${proto}//${location.host}/ws?token=${encodeURIComponent(token)}&username=${encodeURIComponent(username)}`);
     ws = sock;
     sock.onopen  = () => {
       if (!destroyed && ws === sock) {
@@ -511,7 +512,7 @@
       case '/btw':
         if (arg) wsSend({ type: 'user', sessionId: get(currentSessionId), message: { role: 'user', content: arg } });
         return true;
-      case '/claudeweb-inline-files': {
+      case '/inline-files': {
         const sid = get(currentSessionId);
         const cwd = get(sessions).find(s => s.id === sid)?.cwd ?? null;
         const prompt = makeInlineFilePrompt(cwd);
@@ -530,7 +531,7 @@
     if (get(currentSessionId) === '__new__') {
       awaitingNewSession = true;
       try {
-        await createSession(token, { cwd: pendingCwd, firstMessage: text, claudeweb_settings: pendingSettings ?? undefined });
+        await createSession(token, { cwd: pendingCwd, firstMessage: text, codette_settings: pendingSettings ?? undefined });
         clearFn?.();
       } catch { awaitingNewSession = false; }
       return;

@@ -121,9 +121,9 @@ Checkbox in the `showNew` form in the sessions sidebar, alongside the cwd input:
 
 Stored in `localStorage` as the default for future sessions.
 
-### Enabling for an existing session — `/claudeweb-inline-files`
+### Enabling for an existing session — `/inline-files`
 
-Slash command available in the input bar of any active session. Sends `CLAUDEWEB_INLINE_FILE_PROMPT`
+Slash command available in the input bar of any active session. Sends `INLINE_FILE_PROMPT`
 as a user message to Claude's stdin, then shows a dim system notice in the UI:
 `inline file viewer enabled`.
 
@@ -191,7 +191,7 @@ IntersectionObserver for lazy loading + in-flight deduplication. The `hlSet` ite
 | `client/src/utils/markdown.js` | `sourcefile` fence renderer, `data-ranges` attr |
 | `client/src/lib/MessageBubble.svelte` | `sessionId`+`token`+`onOpenFile` props, `use:sourceFileRender` |
 | `client/src/lib/SessionSidebar.svelte` | inline-files checkbox |
-| `client/src/lib/ChatLayout.svelte` | `handleNewSession` settings; `/claudeweb-inline-files` handler |
-| `client/src/lib/ChatInput.svelte` | `/claudeweb-inline-files` in autocomplete |
+| `client/src/lib/ChatLayout.svelte` | `handleNewSession` settings; `/inline-files` handler |
+| `client/src/lib/ChatInput.svelte` | `/inline-files` in autocomplete |
 | `client/src/utils/sourcefile-action.js` | DOM hydration action, `parseRanges` |
 | `client/src/lib/SourceFileBlock.svelte` | file panel component |

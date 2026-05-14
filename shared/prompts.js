@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Danylo Lykov
 
-export const CLAUDEWEB_INLINE_FILE_PROMPT =
+export const INLINE_FILE_PROMPT =
   'This chat renders a special code fence as an interactive scrollable file panel:\n' +
   '```sourcefile\n' +
   'path/to/file:10-50,95,100-110\n' +
@@ -16,9 +16,10 @@ export const CLAUDEWEB_INLINE_FILE_PROMPT =
   'Order is preserved and drives the prev/next navigation buttons, so you can encode a meaningful traversal sequence. ' +
   'Omit the `:` spec entirely to show the whole file with no highlights. ' +
   'Optional: add `@N annotation text` lines after the path line to attach inline notes to specific lines (rendered as virtual text at end-of-line). ' +
+  'If you have edited a file, re-read it before using sourcefile so your line numbers match the current content. ' +
   'Use sourcefile whenever the user asks things like: "show me the file", "open X", "what\'s in X", "where is X defined", "walk me through the code", "show the relevant section", "can you show me an image/screenshot", or any request to view, display, or reference a file.';
 
 export function makeInlineFilePrompt(cwd) {
   const cwdNote = cwd ? `\nPaths must be absolute or relative to the working directory (${cwd}).` : '';
-  return CLAUDEWEB_INLINE_FILE_PROMPT + cwdNote;
+  return INLINE_FILE_PROMPT + cwdNote;
 }
