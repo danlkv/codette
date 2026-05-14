@@ -346,6 +346,7 @@
     padding: .1em .35em;
   }
   .fv-md :global(pre) {
+    position: relative;
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: 4px;
@@ -353,6 +354,15 @@
     overflow-x: auto;
     margin: .6em 0;
   }
+  .fv-md :global(.copy-btn) {
+    position: absolute; top: 6px; right: 6px;
+    padding: 2px 7px; font-size: 11px; font-family: var(--font-ui, sans-serif);
+    background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text-muted); cursor: pointer;
+    opacity: 0; transition: opacity .15s;
+  }
+  .fv-md :global(pre:hover .copy-btn) { opacity: 1; }
+  .fv-md :global(.copy-btn:hover) { color: var(--text); }
   .fv-md :global(pre code) {
     background: none;
     border: none;
