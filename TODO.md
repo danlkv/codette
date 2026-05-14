@@ -6,6 +6,7 @@
 2. WebSocket status reported as inactive if host is inactive at start.
 3. First message in a new session is not displayed in the client UI.
 4. [x] Host crashes if the directory for a new session does not exist.
+5. ExitPlanMode is silently rejecting in `--json` mode.
 
 ## Enablers & Blockers
 Unblock workflows that are not possible today.

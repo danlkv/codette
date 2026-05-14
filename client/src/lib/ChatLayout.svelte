@@ -9,16 +9,22 @@
   import { messages, lastCost, lastUsage, lastContextUsage, hostStatus, wsOk, colorScheme, highContrast, vibrateOnDone, fontStyle, syntaxTheme, accentColor,
            sessions, currentSessionId, sessionData, showFileChips } from '../store.js';
   import { createParser } from './parser.js';
-  import { fetchHistory, fetchSessions, createSession, deleteSession } from '../utils/api.js';
+  import { fetchHistory, createSession, deleteSession } from '../utils/api.js';
   import { getHistory, saveHistory, removeHistory, hasHistory, getSettings, saveSettings } from '../utils/storage.js';
   import { wtrace } from '../utils/trace.js';
+  import { encrypt, decrypt } from '../utils/crypto.js';
   import MessageList from './MessageList.svelte';
   import ChatInput from './ChatInput.svelte';
   import SessionSidebar from './SessionSidebar.svelte';
   import FileView from './FileView.svelte';
   import DiffView from './DiffView.svelte';
 
-  let { token, accounts = [], activeIdx = 0, onLogout, onSwitch, onAddAccount } = $props();
+  let { token, accounts = [], activeIdx = 0, encKey = null, keysLoaded = false, onLogout, onSwitch, onAddAccount } = $props();
+
+  // Connect WS once keys are loaded from IndexedDB (or confirmed absent).
+  $effect(() => {
+    if (keysLoaded && !ws && !destroyed) connect();
+  });
 
   $effect(() => { saveSettings('showFileChips', $showFileChips); });
 
@@ -165,11 +171,11 @@
       : false;
     window.addEventListener('beforeunload', saveCurrentCache);
     window.addEventListener('popstate', onPopState);
-    console.log('[history] onMount: calling initSessions');
+    console.debug('[history] onMount: calling initSessions');
     await initSessions();
-    console.log('[history] onMount: initSessions done, historyLoading=false, calling connect');
+    console.debug('[history] onMount: initSessions done, historyLoading=false');
     historyLoading = false;
-    connect();
+    // Connect once keysLoaded is true (via $effect above). If already loaded at mount, $effect fires immediately.
   });
   onDestroy(() => {
     destroyed = true;
@@ -182,17 +188,9 @@
   const dedupById = arr => [...new Map(arr.map(s => [s.id, s])).values()];
 
   async function initSessions() {
-    let sessionList = [];
-    console.log('[history] initSessions: fetching sessions');
-    try {
-      const data = await fetchSessions(token);
-      sessionList = data.sessions ?? data;
-      if (data.hostCwd) hostCwd = data.hostCwd;
-      sessions.set(dedupById(sessionList));
-      console.log('[history] initSessions: got', sessionList.length, 'sessions');
-    } catch (e) { console.error('[history] initSessions: fetch error', e); }
-
+    // Sessions arrive via WS (triggered by list_sessions on connect).
     // Pre-populate files from localStorage caches (no extra API calls)
+    const sessionList = [];
     const filesMap = {};
     for (const s of sessionList) {
       const cached = getHistory(s.id);
@@ -202,12 +200,12 @@
       sessions.update(list => list.map(s => filesMap[s.id] ? { ...s, files: filesMap[s.id] } : s));
     }
 
-    if (sessionList.length === 0) { console.log('[history] initSessions: no sessions, returning'); return; }
+    if (sessionList.length === 0) { console.debug('[history] initSessions: no sessions, returning'); return; }
     const { sessionId: hashId, file: hashFile } = parseHash();
     const target = (hashId && hashId !== 'new' && sessionList.find(s => s.id === hashId))
       ? hashId
       : sessionList[0].id;
-    console.log('[history] initSessions: target session', target, '(hash was:', hashId + ')');
+    console.debug('[history] initSessions: target session', target, '(hash was:', hashId + ')');
     history.replaceState(null, '', makeHash(target, hashFile));
     currentSessionId.set(target);
     if (hashFile) fileViewPath = hashFile;
@@ -219,13 +217,13 @@
     const id = get(currentSessionId);
     if (!id || currentLines.length === 0) return;
     const r = saveHistory(id, { lines: currentLines, lineCount, title: sessionTitle, contextWindow: storedContextWindow });
-    console.log('[history] saveCurrentCache:', id, r.lines, 'lines,', (r.bytes/1024).toFixed(1), 'KB', r.summarized ? '(summarized)' : '', r.evicted ? `evicted:${r.evicted}` : '', r.stored ? 'ok' : 'FAILED');
+    console.debug('[history] saveCurrentCache:', id, r.lines, 'lines,', (r.bytes/1024).toFixed(1), 'KB', r.summarized ? '(summarized)' : '', r.evicted ? `evicted:${r.evicted}` : '', r.stored ? 'ok' : 'FAILED');
   }
 
   async function loadSessionHistory(id) {
     if (!id || id === '__new__') return;
     const cached = getHistory(id);
-    console.log('[history] loadSessionHistory', id, '— cache:', cached ? cached.lines.length + ' lines (lineCount=' + cached.lineCount + ')' : 'none');
+    console.debug('[history] loadSessionHistory', id, '— cache:', cached ? cached.lines.length + ' lines (lineCount=' + cached.lineCount + ')' : 'none');
     if (cached) {
       if (cached.title) sessionTitle = cached.title;
       if (cached.contextWindow) storedContextWindow = cached.contextWindow;
@@ -242,10 +240,10 @@
     try {
       const offset = cached ? cached.lineCount : null;
       const fetchParams = offset != null ? { offset } : { limit: LOAD_LIMIT };
-      console.log('[history] fetchAndApplyHistory', id, '—', fetchParams);
+      console.debug('[history] fetchAndApplyHistory', id, '—', fetchParams);
       const data = await fetchHistory(id, fetchParams, token);
       const lines = data.lines ?? [];
-      console.log('[history] fetchAndApplyHistory: got', lines.length, 'lines, incremental=', data.incremental, 'totalLines=', data.totalLines);
+      console.debug('[history] fetchAndApplyHistory: got', lines.length, 'lines, incremental=', data.incremental, 'totalLines=', data.totalLines);
 
       if (data.incremental && cached) {
         if (lines.length === 0) {
@@ -278,11 +276,11 @@
     try {
       const offset = Math.max(0, startLine - BATCH_SIZE);
       const limit = startLine - offset;
-      console.log('[history] loadEarlierHistory: fetching offset=', offset, 'limit=', limit);
+      console.debug('[history] loadEarlierHistory: fetching offset=', offset, 'limit=', limit);
       const data = await fetchHistory(id, { offset, limit }, token);
       const batch = data.lines ?? [];
       if (batch.length === 0) return;
-      console.log('[history] loadEarlierHistory: prepending', batch.length, 'lines');
+      console.debug('[history] loadEarlierHistory: prepending', batch.length, 'lines');
       applyHistoryLines([...batch, ...currentLines]);
       // lineCount unchanged — prepend doesn't change server file size
     } catch (e) { console.error('loadEarlierHistory:', e); }
@@ -302,23 +300,63 @@
     if (id && id !== '__new__') updateSessionFiles(id, filtered);
   }
 
-  function wsSend(msg) {
+  async function wsSend(msg) {
     if (ws?.readyState !== 1) return;
-    if (msg.type !== 'log') wtrace('client', 'server', msg.type, msg.sessionId);
+    wtrace('client', 'server', msg.type, msg.sessionId, { e2e: !!encKey });
+    if (encKey) {
+      try {
+        const { type, ...rest } = msg;
+        const { nonce, ciphertext } = await encrypt(encKey, JSON.stringify(rest));
+        ws.send(JSON.stringify({ type, nonce, ciphertext }));
+        return;
+      } catch (e) {
+        console.error('[e2e] encrypt failed:', e);
+        return;
+      }
+    }
     ws.send(JSON.stringify(msg));
   }
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(`${proto}//${location.host}/ws?token=${encodeURIComponent(token)}`);
-    ws.onopen  = () => { if (!destroyed) wsOk.set(true); };
-    ws.onclose = () => { wsOk.set(false); if (!destroyed) setTimeout(connect, 3000); };
+    const sock = new WebSocket(`${proto}//${location.host}/ws?token=${encodeURIComponent(token)}`);
+    ws = sock;
+    sock.onopen  = () => {
+      if (!destroyed && ws === sock) {
+        wsOk.set(true);
+        wsSend({ type: 'list_sessions' });
+      }
+    };
+    sock.onclose = () => { wsOk.set(false); if (!destroyed && ws === sock) setTimeout(connect, 3000); };
     ws.onerror = () => {};
-    ws.onmessage = ({ data }) => {
+    ws.onmessage = async ({ data }) => {
       if (destroyed) return;
       let msg;
       try { msg = JSON.parse(data); } catch { return; }
-      if (msg.type !== 'log') wtrace('server', 'client', msg.type, msg.sessionId);
+
+      // Decrypt per-field encrypted messages (type stays plaintext, rest in ciphertext).
+      if (msg.nonce && msg.ciphertext && encKey) {
+        try {
+          const inner = JSON.parse(await decrypt(encKey, msg.nonce, msg.ciphertext));
+          msg = { type: msg.type, ...inner };
+          wtrace('server', 'client', msg.type, msg.sessionId, { e2e: 'decrypted' });
+        } catch (e) {
+          console.error('[e2e] decrypt failed, key mismatch — forcing re-login:', e);
+          onLogout();
+          return;
+        }
+      } else if (msg.nonce && msg.ciphertext && !encKey) {
+        // Encrypted message but no key — need to re-login
+        console.warn('[e2e] encrypted message received but no key, forcing re-login');
+        onLogout();
+        return;
+      } else if (encKey && msg.type !== 'host_status' && msg.type !== 'agent_event') {
+        // Reject plaintext when keys exist (downgrade protection)
+        console.warn('[e2e] dropping plaintext message while keys exist:', msg.type);
+        return;
+      } else {
+        wtrace('server', 'client', msg.type, msg.sessionId);
+      }
 
       if (msg.type === 'session_list') {
         const incoming = dedupById(msg.sessions ?? []);
@@ -327,6 +365,18 @@
           return incoming.map(s => filesMap.has(s.id) ? { ...s, files: filesMap.get(s.id) } : s);
         });
         if (msg.hostCwd) hostCwd = msg.hostCwd;
+        // Under e2e, sessions arrive via WS only — do initial navigation if not yet done
+        if (incoming.length > 0 && !get(currentSessionId)) {
+          const { sessionId: hashId, file: hashFile } = parseHash();
+          const target = (hashId && hashId !== 'new' && incoming.find(s => s.id === hashId))
+            ? hashId
+            : incoming[0].id;
+          console.debug('[history] WS session_list: initial navigation to', target);
+          history.replaceState(null, '', makeHash(target, hashFile));
+          currentSessionId.set(target);
+          if (hashFile) fileViewPath = hashFile;
+          loadSessionHistory(target);
+        }
       }
       else if (msg.type === 'claude_line') {
         const { sessionId, line } = msg;
@@ -385,7 +435,7 @@
     diffViewCommit = null; diffViewFile = null;
     saveCurrentCache();
 
-    if (get(currentSessionId)) { console.log('[history] switchSession: saving', currentLines.length, 'lines to sessionData for', get(currentSessionId)); sessionData.set(get(currentSessionId), [...currentLines]); }
+    if (get(currentSessionId)) { console.debug('[history] switchSession: saving', currentLines.length, 'lines to sessionData for', get(currentSessionId)); sessionData.set(get(currentSessionId), [...currentLines]); }
 
     currentSessionId.set(id);
     currentLines = [];
@@ -404,7 +454,7 @@
       lineCount = lsCached
         ? lsCached.lineCount + (sd.length - lsCached.lines.length)
         : sd.length;
-      console.log('[history] switchSession: restoring from sessionData', sd.length, 'lines, lineCount=', lineCount);
+      console.debug('[history] switchSession: restoring from sessionData', sd.length, 'lines, lineCount=', lineCount);
       applyHistoryLines(currentLines);
     } else {
       if (!hasHistory(id)) messages.set([]);

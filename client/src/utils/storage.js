@@ -71,6 +71,61 @@ export function saveAccounts(accounts, activeUsername) {
   }
 }
 
+// ── E2E key store (IndexedDB) ─────────────────────────────────────────────────
+// Non-extractable CryptoKeys survive structured clone, so IndexedDB can store
+// them without exposing raw key material to JS.
+
+const IDB_NAME = 'codette_e2e';
+const IDB_STORE = 'keys';
+
+function openKeyDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, 2);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/** Store { encKey, nonceKey } pair for a username. */
+export async function storeEncKeys(username, encKey, nonceKey) {
+  const db = await openKeyDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put({ encKey, nonceKey }, username);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+/** Load { encKey, nonceKey } for a username. Returns null if missing or v1 format. */
+export async function loadEncKeys(username) {
+  const db = await openKeyDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readonly');
+    const req = tx.objectStore(IDB_STORE).get(username);
+    req.onsuccess = () => {
+      const val = req.result;
+      if (val?.encKey && val?.nonceKey) return resolve(val);
+      resolve(null);
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function deleteEncKey(username) {
+  const db = await openKeyDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).delete(username);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 // ── History cache ─────────────────────────────────────────────────────────────
 const HISTORY_PREFIX = 'history_';
 

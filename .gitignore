@@ -2,3 +2,4 @@ node_modules/
 client/dist/
 .env
 _worktrees/
+.dev-data/

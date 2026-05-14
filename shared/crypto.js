@@ -20,7 +20,10 @@ async function cry() {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function b64e(buf) {
-  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+  const bytes = new Uint8Array(buf);
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s);
 }
 
 function b64d(s) {
@@ -29,6 +32,16 @@ function b64d(s) {
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
+
+// ── Base64url helpers ────────────────────────────────────────────────────────
+
+function b64uEncode(buf) {
+  return b64e(buf).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function b64uDecode(s) {
+  return b64d(s.replace(/-/g, '+').replace(/_/g, '/'));
+}
 
 // ── Key derivation ────────────────────────────────────────────────────────────
 
@@ -47,6 +60,24 @@ export async function deriveKey(password, username) {
     { name: 'AES-GCM', length: 256 },
     false,
     ['encrypt', 'decrypt'],
+  );
+}
+
+/**
+ * Derive a non-extractable HMAC-SHA-256 key for deterministic nonce generation.
+ * Same password + username, different salt.
+ */
+export async function deriveNonceKey(password, username) {
+  const c = await cry();
+  const raw = enc.encode(password);
+  const salt = enc.encode('codette-e2e-nonce-v1:' + username);
+  const base = await c.subtle.importKey('raw', raw, 'PBKDF2', false, ['deriveKey']);
+  return c.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations: 200_000, hash: 'SHA-256' },
+    base,
+    { name: 'HMAC', hash: 'SHA-256', length: 256 },
+    false,
+    ['sign'],
   );
 }
 
@@ -75,6 +106,42 @@ export async function decrypt(key, nonce, ciphertext) {
     b64d(ciphertext),
   );
   return dec.decode(pt);
+}
+
+// ── Deterministic encrypt (stable URL / ETag caching) ────────────────────────
+
+/**
+ * Encrypt with a deterministic nonce: HMAC-SHA-256(nonceKey, label)[:12].
+ * Same (key, nonceKey, label, plaintext) → same ciphertext → cacheable.
+ * ONLY safe when `label` uniquely determines `plaintext` (otherwise nonce reuse).
+ */
+export async function encryptDet(key, nonceKey, label, plaintext) {
+  const c = await cry();
+  const sig = new Uint8Array(await c.subtle.sign('HMAC', nonceKey, enc.encode(label)));
+  const iv = sig.slice(0, 12);
+  const ct = await c.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(plaintext));
+  return { nonce: b64e(iv), ciphertext: b64e(ct) };
+}
+
+/**
+ * Pack nonce + ciphertext into a single base64url string for use in URL query params.
+ * Format: base64url(nonce_12_bytes ‖ ciphertext_bytes)
+ */
+export function packParam(nonce, ciphertext) {
+  const nb = b64d(nonce);        // 12 bytes
+  const cb = b64d(ciphertext);
+  const buf = new Uint8Array(nb.length + cb.length);
+  buf.set(nb, 0);
+  buf.set(cb, nb.length);
+  return b64uEncode(buf);
+}
+
+/**
+ * Unpack a base64url query param into { nonce, ciphertext } (both standard base64).
+ */
+export function unpackParam(param) {
+  const buf = b64uDecode(param);
+  return { nonce: b64e(buf.slice(0, 12)), ciphertext: b64e(buf.slice(12)) };
 }
 
 // ── HMAC ──────────────────────────────────────────────────────────────────────

@@ -85,8 +85,8 @@ JWT in `Authorization: Bearer <token>` header (obtained via challenge/verify flo
 | method | path | body / query | response | notes |
 |--------|------|------|----------|-------|
 | `POST` | `/api/auth/challenge` | `{username}` | `{nonce}` | no auth; server forwards to host RPC |
-| `POST` | `/api/auth/verify` | `{username, nonce, response}` | `{token}` | HMAC-SHA256 response; sets `username` cookie |
-| `GET` | `/api/sessions` | — | `{sessions: Session[], hostCwd: string}` | list all sessions; `hostCwd` is host's `process.cwd()` |
+| `POST` | `/api/auth/verify` | `{username, nonce, response}` | `{token}` | HMAC-SHA256 response; sets `username` cookie; no capabilities — e2e is implicit from password |
+| `GET` | `/api/sessions` | — | `{sessions: Session[], hostCwd: string}` | cached session list from host; clients should prefer WS `list_sessions` for fresh data |
 | `GET` | `/api/sessions/:id/history` | `?offset=N` / `?limit=N` / `?offset=N&limit=M` | `{lines: string[], totalLines: number, incremental: bool}` | raw JSONL lines; `?limit=N` → last N lines; `?offset=N&limit=M` → lines [N, N+M); `?offset=N` → lines [N, end). Server dedup key: `sessionId:offset:limit` |
 | `POST` | `/api/sessions` | `{cwd?: string, firstMessage?: string}` | 202 | create session; `firstMessage` bootstraps `system.init`; client auto-switches on `agent_event: started` |
 | `DELETE` | `/api/sessions/:id` | — | 204 | broadcasts new `session_list` from host  over WS |
@@ -95,7 +95,7 @@ JWT in `Authorization: Bearer <token>` header (obtained via challenge/verify flo
 
 ### WebSocket `/ws?token=JWT`
 
-Push events and stateful commands only.
+Push events and stateful commands only. No capability negotiation on connect — the client sends `list_sessions` as the first message (encrypted if keys exist).
 
 **Server → Client (all broadcast)**
 
@@ -110,6 +110,7 @@ Push events and stateful commands only.
 
 | type | key fields | notes |
 |------|-----------|-------|
+| `list_sessions` | — | client requests session list; first message after WS open |
 | `agent_ctl` | `sessionId`, `event: 'stop'\|'interrupt'` | forwarded to host |
 | `user` | `sessionId`, `message: {role, content}` | server forwards to host stdin; **host** echoes back as `claude_line({type:'user'})` to all clients |
 
@@ -168,8 +169,8 @@ Key variables: `CL` = `currentLines` count, `LC` = `lineCount`, `SD[A]` = `sessi
 
 | Step | Event | CL | LC | LS | Action |
 |---|---|---|---|---|---|
-| 1 | App open | 0 | 0 | miss | Fetch `/api/sessions` |
-| 2 | Sessions received | 0 | 0 | miss | Fetch `?limit=200` |
+| 1 | App open, WS connect | 0 | 0 | miss | Send `list_sessions` via WS |
+| 2 | `session_list` received via WS | 0 | 0 | miss | Fetch `?limit=200` |
 | 3 | `{lines:200, totalLines:1000}` | 200 | 1000 | — | `applyLines(lines.slice(boundary))` |
 | 4 | Store cache | 200 | 1000 | `{lines:200, LC:1000}` | done; `startLine = 1000−200 = 800` |
 
@@ -252,13 +253,15 @@ sequenceDiagram
     participant S as Server
     participant H as Host
     participant Cl as Claude
-    C->>+S: GET /api/sessions
-    S-->>-C: Session[]
+    C->>S: WS open
+    C->>S: list_sessions (WS)
+    S->>H: list_sessions
+    H-->>S: session_list
+    S-->>C: session_list
     Note over C: pick most recent session
     C->>+S: GET /api/sessions/:id/history?offset=0
     S-->>-C: {lines, incremental:false}
     Note over C: display + cache in localStorage
-    C->>S: WS open
     C->>+S: user (WS)
     Note over C: send button - pending indicator
     S->>+H: user
@@ -284,13 +287,16 @@ sequenceDiagram
 sequenceDiagram
     participant C as Client
     participant S as Server
-    C->>+S: GET /api/sessions
-    S-->>-C: {sessions, hostCwd}
+    participant H as Host
     Note over C: show localStorage cache immediately
+    C->>S: WS open
+    C->>S: list_sessions (WS)
+    S->>H: list_sessions
+    H-->>S: session_list
+    S-->>C: session_list
     C->>+S: GET /sessions/:id/history?offset=N
     S-->>-C: {lines: newLines, incremental:true}
     Note over C: merge new lines into cache
-    C->>S: WS open
     S-->>C: claude_line (already in flight)
 ```
 
@@ -312,11 +318,13 @@ sequenceDiagram
     participant S as Server
     participant H as Host
     Note over A,S: ClientA connected, viewing session A, agent running
-    B->>+S: GET /api/sessions
-    S-->>-B: Session[] (A:agentActive)
+    B->>S: WS open
+    B->>S: list_sessions (WS)
+    S->>H: list_sessions
+    H-->>S: session_list
+    S-->>B: session_list
     B->>+S: GET /sessions/A/history
     S-->>-B: {lines}
-    B->>S: WS open
     A->>+S: user (WS)
     Note over A: send button - pending indicator
     S->>+H: user

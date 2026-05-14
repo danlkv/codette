@@ -8,6 +8,7 @@ import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import { RpcClient } from './rpc.js';
+import { unpackParam } from '../../shared/crypto.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -15,14 +16,6 @@ const HOST_KEY   = process.env.HOST_KEY   || 'host-key-change-me';
 
 const PORT       = parseInt(process.env.PORT || '3000', 10);
 
-// ── Log buffer ────────────────────────────────────────────────────────────────
-const LOG_MAX   = 500;
-const logBuffer = [];
-
-function appendLog(entry) {
-  logBuffer.push({ ...entry, serverTs: Date.now() });
-  if (logBuffer.length > LOG_MAX) logBuffer.shift();
-}
 
 // ── Per-host state ────────────────────────────────────────────────────────────
 class HostContext {
@@ -32,13 +25,13 @@ class HostContext {
     this.pubkey = null;               // set when host sends host_pubkey
     this.sessionCache = [];
     this.hostCwd = null;
-    this.pendingHistory = new Map();  // key → entry[]  (coalescing + retry)
+    this.sessionListResponse = null;  // cached REST response (plaintext or encrypted)
     this.pendingDelete  = new Map();  // sessionId → res
     this.rpc = new RpcClient();
   }
 
   broadcast(msg) {
-    if (msg.type !== 'log') wtrace('server', 'client', msg.type, { sessionId: msg.sessionId?.slice(0, 8) ?? null });
+    wtrace('server', 'client', msg.type, { sessionId: msg.sessionId?.slice(0, 8) ?? null });
     const data = JSON.stringify(msg);
     for (const ws of clients.get(this.clientUsername) ?? []) {
       if (ws.readyState === WebSocket.OPEN) ws.send(data);
@@ -57,13 +50,10 @@ app.use(express.json());
 app.use((req, res, next) => {
   res.on('finish', () => {
     if (req.path.startsWith('/api/')) {
-      const data = { method: req.method, path: req.path, status: res.statusCode };
       const sessionMatch = req.path.match(/\/sessions\/([^/]+)/);
-      if (sessionMatch) data.sessionId = sessionMatch[1].slice(0, 8);
-      if (Object.keys(req.query).length) data.query = req.query;
-      appendLog({ level: 'info', msg: 'rest', data });
+      const sessionId = sessionMatch ? sessionMatch[1].slice(0, 8) : '';
       const qs = Object.keys(req.query).length ? '?' + new URLSearchParams(req.query).toString() : '';
-      console.log('[rest]', data.method, data.path + qs, data.status, data.sessionId ?? '');
+      console.log('[rest]', req.method, req.path + qs, res.statusCode, sessionId);
     }
   });
   next();
@@ -73,8 +63,10 @@ const clientDist = path.resolve(__dirname, '../../client/dist');
 app.use(express.static(clientDist));
 
 // ── Trace helper ──────────────────────────────────────────────────────────────
-const wtrace = (src, dst, type, meta = {}) =>
-  process.stdout.write('TRACE ' + JSON.stringify({ ts: Date.now(), src, dst, type, ...meta }) + '\n');
+const TRACE = process.env.CODETTE_TRACE === '1';
+const wtrace = (src, dst, type, meta = {}) => {
+  if (TRACE) process.stdout.write('TRACE ' + JSON.stringify({ ts: Date.now(), src, dst, type, ...meta }) + '\n');
+};
 
 // ── Cookie helper ─────────────────────────────────────────────────────────────
 function getCookie(req, name) {
@@ -101,8 +93,38 @@ function requireHost(req, res, next) {
   next();
 }
 
+// ── Auth rate limiting ────────────────────────────────────────────────────────
+const AUTH_WINDOW_MS  = 60_000;   // 1 minute window
+const AUTH_MAX_TRIES  = 10;       // max attempts per IP per window
+const authAttempts    = new Map(); // ip → { count, resetAt }
+
+function authRateLimit(req, res, next) {
+  const ip = req.ip;
+  const now = Date.now();
+  let entry = authAttempts.get(ip);
+  if (!entry || now > entry.resetAt) {
+    entry = { count: 0, resetAt: now + AUTH_WINDOW_MS };
+    authAttempts.set(ip, entry);
+  }
+  entry.count++;
+  if (entry.count > AUTH_MAX_TRIES) {
+    const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
+    res.set('Retry-After', String(retryAfter));
+    return res.status(429).json({ error: 'Too many auth attempts, try again later' });
+  }
+  next();
+}
+
+// Periodically clean up stale entries
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of authAttempts) {
+    if (now > entry.resetAt) authAttempts.delete(ip);
+  }
+}, AUTH_WINDOW_MS).unref();
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
-app.post('/api/auth/challenge', (req, res) => {
+app.post('/api/auth/challenge', authRateLimit, (req, res) => {
   const { username } = req.body || {};
   wtrace('client', 'server', 'auth_challenge');
   const host = hosts.get(username);
@@ -114,7 +136,7 @@ app.post('/api/auth/challenge', (req, res) => {
   res.on('close', () => host.rpc.cancel(rid));
 });
 
-app.post('/api/auth/verify', (req, res) => {
+app.post('/api/auth/verify', authRateLimit, (req, res) => {
   const { username, nonce, response } = req.body || {};
   wtrace('client', 'server', 'auth_verify');
   const host = hosts.get(username);
@@ -135,7 +157,7 @@ app.post('/api/auth/verify', (req, res) => {
 // ── Sessions list ─────────────────────────────────────────────────────────────
 app.get('/api/sessions', requireJwt, (req, res) => {
   const host = hosts.get(req.user.username);
-  res.json({ sessions: host?.sessionCache ?? [], hostCwd: host?.hostCwd ?? null });
+  res.json(host?.sessionListResponse ?? { sessions: [], hostCwd: null });
 });
 
 // ── Session history ───────────────────────────────────────────────────────────
@@ -144,42 +166,24 @@ app.get('/api/sessions/:id/history', requireJwt, requireHost, (req, res) => {
   const id = req.params.id;
   const offset = req.query.offset !== undefined ? Number(req.query.offset) : null;
   const limit  = req.query.limit  !== undefined ? Number(req.query.limit)  : null;
-  const key = `${id}:${offset ?? ''}:${limit ?? ''}`;
-
-  const timer = setTimeout(() => {
-    const pending = host.pendingHistory.get(key);
-    if (pending) {
-      const idx = pending.findIndex(e => e.res === res);
-      if (idx !== -1) pending.splice(idx, 1);
-      if (pending.length === 0) host.pendingHistory.delete(key);
-    }
-    if (!res.headersSent) res.status(504).json({ error: 'History request timed out' });
-  }, 30000);
-
-  res.on('close', () => clearTimeout(timer));
-
-  const entry = { res, incremental: offset !== null && offset > 0, offset, limit };
-
-  if (host.pendingHistory.has(key)) {
-    host.pendingHistory.get(key).push(entry);
-  } else {
-    host.pendingHistory.set(key, [entry]);
-    if (host.ws.readyState === WebSocket.OPEN) {
-      wtrace('server', 'host', 'get_session_history', { sessionId: id.slice(0, 8) });
-      host.ws.send(JSON.stringify({
-        type: 'get_session_history',
-        sessionId: id,
-        offset: offset != null ? offset : undefined,
-        limit: limit ?? undefined,
-      }));
-    }
-  }
+  const incremental = offset !== null && offset > 0;
+  const rid = host.rpc.call(host.ws, 'get_session_history',
+    { sessionId: id, offset: offset != null ? offset : undefined, limit: limit ?? undefined },
+    (err, result) => {
+      if (res.headersSent) return;
+      if (err) return res.status(504).json({ error: err.message });
+      res.json({ ...result, incremental });
+    }, 30000);
+  res.on('close', () => host.rpc.cancel(rid));
 });
 
 // ── File system listing ───────────────────────────────────────────────────────
 app.get('/api/sessions/:id/fs', requireJwt, requireHost, (req, res) => {
-  const rid = req.claudeHost.rpc.call(req.claudeHost.ws, 'get_fs',
-    { sessionId: req.params.id, path: req.query.path ?? null },
+  const encPath = req.query.enc_path;
+  const payload = encPath
+    ? { sessionId: req.params.id, ...unpackParam(encPath) }
+    : { sessionId: req.params.id, path: req.query.path ?? null };
+  const rid = req.claudeHost.rpc.call(req.claudeHost.ws, 'get_fs', payload,
     (err, result) => { if (!res.headersSent) err ? res.status(504).json({ error: err.message }) : res.json(result); },
     10000);
   res.on('close', () => req.claudeHost.rpc.cancel(rid));
@@ -187,8 +191,11 @@ app.get('/api/sessions/:id/fs', requireJwt, requireHost, (req, res) => {
 
 // ── File content ──────────────────────────────────────────────────────────────
 app.get('/api/sessions/:id/file', requireJwt, requireHost, (req, res) => {
-  const rid = req.claudeHost.rpc.call(req.claudeHost.ws, 'get_file',
-    { sessionId: req.params.id, path: req.query.path },
+  const encPath = req.query.enc_path;
+  const payload = encPath
+    ? { sessionId: req.params.id, ...unpackParam(encPath) }
+    : { sessionId: req.params.id, path: req.query.path };
+  const rid = req.claudeHost.rpc.call(req.claudeHost.ws, 'get_file', payload,
     (err, result) => { if (!res.headersSent) err ? res.status(504).json({ error: err.message }) : res.json(result); },
     10000);
   res.on('close', () => req.claudeHost.rpc.cancel(rid));
@@ -222,6 +229,14 @@ app.get('/api/sessions/:id/git/diff', requireJwt, requireHost, (req, res) => {
 
 // ── Git file diff ─────────────────────────────────────────────────────────────
 app.get('/api/sessions/:id/git/file-diff', requireJwt, requireHost, (req, res) => {
+  const encPath = req.query.enc_path;
+  if (encPath) {
+    const rid = req.claudeHost.rpc.call(req.claudeHost.ws, 'get_git_file_diff',
+      { sessionId: req.params.id, ...unpackParam(encPath) },
+      (err, result) => { if (!res.headersSent) err ? res.status(504).json({ error: err.message }) : res.json(result); });
+    res.on('close', () => req.claudeHost.rpc.cancel(rid));
+    return;
+  }
   const filePath = req.query.path;
   if (!filePath) return res.status(400).json({ error: 'path required' });
   const rid = req.claudeHost.rpc.call(req.claudeHost.ws, 'get_git_file_diff',
@@ -264,22 +279,6 @@ app.delete('/api/sessions/:id', requireJwt, requireHost, (req, res) => {
   res.on('close', () => clearTimeout(timer));
 });
 
-// ── Logs ──────────────────────────────────────────────────────────────────────
-app.get('/api/logs', (req, res) => {
-  const key = req.query.key || req.headers['x-host-key'];
-  const validKey = process.env.HOST_KEY || 'host-key-change-me';
-  if (key !== validKey) return res.status(401).json({ error: 'Unauthorized' });
-  if (req.query.fmt === 'text') {
-    const text = logBuffer.map(e => {
-      const d = new Date(e.serverTs ?? e.ts ?? 0).toISOString();
-      const data = e.data ? ' ' + JSON.stringify(e.data) : '';
-      return `${d} [${e.level}] ${e.msg}${data}`;
-    }).join('\n');
-    return res.type('text/plain').send(text);
-  }
-  res.json(logBuffer);
-});
-
 // ── SPA fallback ──────────────────────────────────────────────────────────────
 app.get('*', (_req, res) => res.sendFile(path.join(clientDist, 'index.html')));
 
@@ -302,22 +301,9 @@ wss.on('connection', (ws, req) => {
     console.log(`[server] host connected: ${clientUsername} (${hosts.size} total)`);
     wtrace('host', 'server', 'connect', { username: clientUsername });
 
-    wtrace('server', 'host', 'list_sessions', { username: clientUsername });
-    ws.send(JSON.stringify({ type: 'list_sessions' }));
+    // Don't request sessions here — wait for a client to connect and send
+    // capabilities first, so the host can latch e2e before responding.
     host.broadcast({ type: 'host_status', connected: true });
-
-    // Re-send pending history requests that arrived while host was down
-    for (const [key, entries] of host.pendingHistory) {
-      if (entries.length === 0) continue;
-      const { offset, limit } = entries[0];
-      const sessionId = key.split(':')[0];
-      ws.send(JSON.stringify({
-        type: 'get_session_history',
-        sessionId,
-        offset: offset != null ? offset : undefined,
-        limit: limit ?? undefined,
-      }));
-    }
 
     ws.on('message', (data) => {
       let ev;
@@ -332,17 +318,11 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
-      if (ev?.type === 'log') {
-        appendLog(ev);
-        const extra = ev.data ? ' ' + JSON.stringify(ev.data) : '';
-        console.log(`[${clientUsername}][${ev.level}] ${ev.msg}${extra}`);
-        return;
-      }
-
       if (ev?.type === 'claude_line') {
-        wtrace('host', 'server', 'claude_line', { sessionId: ev.sessionId?.slice(0, 8) ?? null });
-        host.broadcast({ type: 'claude_line', sessionId: ev.sessionId, line: ev.line });
-
+        wtrace('host', 'server', 'claude_line');
+        // Pass through opaquely — may contain {sessionId, line} or {nonce, ciphertext}
+        host.broadcast(ev);
+        wtrace('server', 'client', 'claude_line', { sessionId: ev.sessionId?.slice(0, 8) ?? null });
         return;
       }
 
@@ -352,37 +332,33 @@ wss.on('connection', (ws, req) => {
           host.broadcast({ type: 'agent_event', states: ev.states });
         } else {
           const { sessionId, event } = ev;
-          appendLog({ level: 'info', msg: 'agent_event', data: { sessionId: String(sessionId).slice(0, 8), event } });
           host.broadcast({ type: 'agent_event', sessionId, event });
         }
+        wtrace('server', 'client', 'agent_event', { sessionId: ev.sessionId?.slice(0, 8) ?? null });
         return;
       }
 
       if (ev?.type === 'session_list') {
         wtrace('host', 'server', 'session_list');
-        host.sessionCache = ev.sessions || [];
-        if (ev.hostCwd) host.hostCwd = ev.hostCwd;
-        host.broadcast({ type: 'session_list', sessions: host.sessionCache, hostCwd: host.hostCwd });
-        const remainingIds = new Set(host.sessionCache.map(s => s.id));
-        for (const [sessionId, res] of host.pendingDelete) {
-          if (!remainingIds.has(sessionId)) {
-            if (!res.headersSent) res.status(204).send();
-            host.pendingDelete.delete(sessionId);
-          }
+        if (ev.ciphertext) {
+          // E2e: cache encrypted blob for REST endpoint
+          host.sessionListResponse = { nonce: ev.nonce, ciphertext: ev.ciphertext };
+        } else {
+          host.sessionCache = ev.sessions || [];
+          if (ev.hostCwd) host.hostCwd = ev.hostCwd;
+          host.sessionListResponse = { sessions: host.sessionCache, hostCwd: host.hostCwd };
         }
-        return;
-      }
-
-      if (ev?.type === 'history') {
-        wtrace('host', 'server', 'history', { sessionId: ev.sessionId?.slice(0, 8) ?? null });
-        const { sessionId, lines, totalLines, reqOffset, reqLimit } = ev;
-        const key = `${sessionId}:${reqOffset ?? ''}:${reqLimit ?? ''}`;
-        const pending = host.pendingHistory.get(key);
-        if (pending) {
-          for (const { res, incremental } of pending) {
-            if (!res.headersSent) res.json({ lines, incremental, totalLines });
+        host.broadcast(ev);
+        wtrace('server', 'client', 'session_list', { sessionId: null });
+        // Resolve pending deletes from cache (plaintext only; under e2e, delete waits for next plaintext session_list)
+        if (!ev.ciphertext) {
+          const remainingIds = new Set(host.sessionCache.map(s => s.id));
+          for (const [sessionId, res] of host.pendingDelete) {
+            if (!remainingIds.has(sessionId)) {
+              if (!res.headersSent) res.status(204).send();
+              host.pendingDelete.delete(sessionId);
+            }
           }
-          host.pendingHistory.delete(key);
         }
         return;
       }
@@ -413,9 +389,6 @@ wss.on('connection', (ws, req) => {
     clients.get(verifiedUsername).add(ws);
 
     ws.send(JSON.stringify({ type: 'host_status', connected: !!host }));
-    if (host) {
-      ws.send(JSON.stringify({ type: 'session_list', sessions: host.sessionCache, hostCwd: host.hostCwd }));
-    }
     console.log(`[server] client connected: ${verifiedUsername} (${clients.get(verifiedUsername).size} for user)`);
     wtrace('client', 'server', 'connect', { username: verifiedUsername });
 
@@ -424,12 +397,8 @@ wss.on('connection', (ws, req) => {
       try { msg = JSON.parse(data.toString()); } catch { return; }
 
       wtrace('client', 'server', msg.type, { sessionId: msg.sessionId?.slice(0, 8) ?? null });
-      const logData = { type: msg.type, username: verifiedUsername };
-      if (msg.sessionId) logData.sessionId = String(msg.sessionId).slice(0, 8);
-      appendLog({ level: 'info', msg: 'client→server', data: logData });
-
       const h = hosts.get(verifiedUsername);
-      if (h?.ws.readyState === WebSocket.OPEN) {
+      if (h?.ws?.readyState === WebSocket.OPEN) {
         wtrace('server', 'host', msg.type, { sessionId: msg.sessionId?.slice(0, 8) ?? null });
         h.ws.send(data.toString());
       }

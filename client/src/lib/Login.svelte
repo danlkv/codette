@@ -26,8 +26,11 @@
 
       wtrace('client', 'server', 'auth_verify');
       const verRes = await post('/api/auth/verify', { username, nonce, response });
-      if (verRes.ok) onLogin?.((await verRes.json()).token);
-      else error = 'Invalid credentials';
+      if (verRes.ok) {
+        const { token } = await verRes.json();
+        wtrace('client', 'server', 'auth_verify_ok');
+        onLogin?.(token, { password, username });
+      } else error = 'Invalid credentials';
     } catch { error = 'Connection error'; }
     finally { loading = false; }
   }

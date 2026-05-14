@@ -12,16 +12,21 @@ import jwt from 'jsonwebtoken';
 import { ClaudeRenderer, toolSummary } from './renderer.js';
 import { RpcServer } from './rpc.js';
 import { makeInlineFilePrompt } from '../shared/prompts.js';
-import { hmacVerify } from '../shared/crypto.js';
+import { hmacVerify, deriveKey, deriveNonceKey, encrypt, encryptDet, decrypt } from '../shared/crypto.js';
 
 const APP_NAME         = 'claudeweb';
 const SERVER_URL       = process.env.SERVER_URL       || 'ws://localhost:3000';
 const CLIENT_USERNAME  = process.env.CLIENT_USERNAME  || execSync('whoami').toString().trim();
 const CLIENT_PASSWORD  = process.env.CLIENT_PASSWORD  || 'changeme';
 const HOST_TOKEN       = process.env.HOST_KEY         || 'host-key-change-me';
+const CLAUDE_DIR       = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+const E2E_ENABLED      = process.env.E2E !== '0';
+const TRACE            = process.env.CODETTE_TRACE === '1';
+function trace(obj) { if (TRACE) process.stdout.write('TRACE ' + JSON.stringify(obj) + '\n'); }
 
 // ── App data directory ────────────────────────────────────────────────────────
 function getDataDir() {
+  if (process.env.CODETTE_DATA_HOME) return process.env.CODETTE_DATA_HOME;
   if (process.env.XDG_DATA_HOME) return join(process.env.XDG_DATA_HOME, APP_NAME);
   if (process.platform === 'win32') return join(process.env.APPDATA || homedir(), APP_NAME);
   if (process.platform === 'darwin') return join(homedir(), 'Library', 'Application Support', APP_NAME);
@@ -64,6 +69,22 @@ function loadOrGenerateKeypair() {
 
 const { privateKey: HOST_PRIV_KEY, publicKey: HOST_PUB_KEY } = loadOrGenerateKeypair();
 
+// ── E2E encryption keys ───────────────────────────────────────────────────────
+// Derived from CLIENT_PASSWORD + CLIENT_USERNAME (matches client derivation).
+// If password exists and E2E !== '0', keys are always derived.
+// E2E=0 is a debug flag that skips key derivation (equivalent to no password).
+let encKey = null;
+let nonceKey = null;
+const encKeyReady = E2E_ENABLED
+  ? Promise.all([
+      deriveKey(CLIENT_PASSWORD, CLIENT_USERNAME),
+      deriveNonceKey(CLIENT_PASSWORD, CLIENT_USERNAME),
+    ]).then(([k, nk]) => {
+      encKey = k; nonceKey = nk;
+      trace({ ts: Date.now(), src: 'host', e2e: 'keys_ready' });
+    }).catch(e => { process.stderr.write('e2e key derivation failed: ' + e.message + '\n'); })
+  : Promise.resolve(null);
+
 // ── Pending auth challenges ───────────────────────────────────────────────────
 const pendingChallenges = new Map(); // nonce → { username, ts }
 
@@ -99,18 +120,9 @@ const w  = (s) => process.stdout.write(s);
 const hr = () => w(`${A.dim}${'─'.repeat(60)}${A.reset}\n`);
 
 // ── Centralized logging ────────────────────────────────────────────────────────
-const logQueue = [];  // buffer while ws not yet connected
-
 function log(level, msg, data = null) {
   const color = level === 'error' ? A.red : level === 'warn' ? A.yellow : A.gray;
   w(`${color}[${level}] ${msg}${data ? ' ' + JSON.stringify(data) : ''}${A.reset}\n`);
-  const entry = { type: 'log', ts: Date.now(), level, msg, ...(data && { data }) };
-  if (ws?.readyState === WebSocket.OPEN) {
-    while (logQueue.length) ws.send(JSON.stringify(logQueue.shift()));
-    ws.send(JSON.stringify(entry));
-  } else {
-    logQueue.push(entry);
-  }
 }
 
 
@@ -119,7 +131,7 @@ const sessionMetaCache = new Map(); // filePath → { mtime, title, msgCount }
 
 function findSessionFile(sessionId) {
   if (!sessionId) return null;
-  const claudeDir = join(homedir(), '.claude', 'projects');
+  const claudeDir = join(CLAUDE_DIR, 'projects');
   try {
     for (const project of readdirSync(claudeDir)) {
       const file = join(claudeDir, project, `${sessionId}.jsonl`);
@@ -145,7 +157,7 @@ function getSessionCwd(sessionId) {
 }
 
 function listSessions() {
-  const claudeDir = join(homedir(), '.claude', 'projects');
+  const claudeDir = join(CLAUDE_DIR, 'projects');
   const sessions = [];
   const activeIds = new Set(agents.keys());
   const names = loadNames();
@@ -204,11 +216,23 @@ function stripThinking(lines) {
 }
 
 // ── Outbound WS wrapper ───────────────────────────────────────────────────────
-// Placeholder: currently sends plaintext. Will encrypt in e2e phase.
-function hostSend(obj) {
+// Per-field encryption: `type` stays plaintext for server routing; all other
+// fields are encrypted into {nonce, ciphertext}. `log` is always plaintext.
+async function hostSend(obj) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   if (obj.type !== 'log') {
-    process.stdout.write('TRACE ' + JSON.stringify({ ts: Date.now(), src: 'host', dst: 'server', type: obj.type, sessionId: obj.sessionId?.slice(0, 8) ?? null }) + '\n');
+    trace({ ts: Date.now(), src: 'host', dst: 'server', type: obj.type, e2e: !!encKey });
+  }
+  if (encKey && obj.type !== 'log') {
+    try {
+      const { type, ...rest } = obj;
+      const { nonce, ciphertext } = await encrypt(encKey, JSON.stringify(rest));
+      ws.send(JSON.stringify({ type, nonce, ciphertext }));
+      return;
+    } catch (e) {
+      process.stderr.write('e2e encrypt failed: ' + e.message + '\n');
+      return;
+    }
   }
   ws.send(JSON.stringify(obj));
 }
@@ -253,7 +277,10 @@ function spawnClaude(extraArgs = [], sessionIdHint = null, overrideCwd = null) {
     '--include-partial-messages',
     '--verbose',
     ...extraArgs,
-  ], { stdio: ['pipe', 'pipe', 'pipe'], ...(spawnCwd && { cwd: spawnCwd }) });
+  ], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    ...(spawnCwd && { cwd: spawnCwd }),
+  });
 
   // Use hint as temporary key; replaced once system.init arrives
   const agentEntry = {
@@ -362,7 +389,17 @@ function spawnClaude(extraArgs = [], sessionIdHint = null, overrideCwd = null) {
 
 // ── RPC handlers (request/response over WS) ───────────────────────────────────
 const rpc = new RpcServer();
-rpc.onSend = (type) => process.stdout.write('TRACE ' + JSON.stringify({ ts: Date.now(), src: 'host', dst: 'server', type, sessionId: null }) + '\n');
+rpc.onSend = (type) => trace({ ts: Date.now(), src: 'host', dst: 'server', type });
+// Encrypt RPC results when e2e is active — result becomes {nonce, ciphertext}.
+// File/dir responses use deterministic nonce (cacheable); others use random nonce.
+rpc.encryptResult = async (result, type) => {
+  if (!encKey) return result;
+  const content = JSON.stringify(result);
+  if ((type === 'get_file' || type === 'get_fs') && nonceKey) {
+    return encryptDet(encKey, nonceKey, content, content);
+  }
+  return encrypt(encKey, content);
+};
 
 const ALLOWED_PREFIXES = ['/tmp'];
 function resolveFsPath(p, sessionCwd) {
@@ -468,6 +505,32 @@ rpc.register('get_git_diff', (msg) => {
   return { diff: diff.slice(0, MAX), stat };
 });
 
+rpc.register('get_session_history', (msg) => {
+  const { sessionId, offset, limit } = msg;
+  const file = findSessionFile(sessionId);
+  let lines = [];
+  let totalLines = 0;
+  if (file) {
+    try {
+      const raw = readFileSync(file, 'utf8').trim().split('\n').filter(Boolean);
+      totalLines = raw.length;
+      if (limit != null && offset == null) {
+        lines = raw.slice(-limit);
+      } else if (offset != null && limit != null) {
+        lines = raw.slice(offset, offset + limit);
+      } else if (offset != null && offset > 0) {
+        lines = raw.slice(offset);
+      } else {
+        lines = raw;
+      }
+      log('info', `history sent (${lines.length} lines, offset ${offset ?? 0}, limit ${limit ?? 'none'}, total ${totalLines})`, { sessionId: String(sessionId).slice(0, 8) });
+    } catch (e) { log('error', `history read error: ${e.message}`); }
+  } else {
+    log('warn', `session file not found`, { sessionId: String(sessionId).slice(0, 8) });
+  }
+  return { lines: stripThinking(lines), totalLines };
+});
+
 rpc.register('set_session_name', (msg) => {
   if (!msg.sessionId) throw new Error('sessionId required');
   saveName(msg.sessionId, msg.name || null);
@@ -497,6 +560,7 @@ rpc.register('auth_verify', async (msg) => {
   const ok = await hmacVerify(CLIENT_PASSWORD, nonce, response);
   if (!ok) throw new Error('authentication failed');
   const token = jwt.sign({ username }, HOST_PRIV_KEY, { algorithm: 'ES256', expiresIn: '7d' });
+  await encKeyReady;
   log('info', 'auth_verify ok, token issued', { username });
   return { token };
 });
@@ -508,8 +572,6 @@ function connect() {
   ws = new WebSocket(`${SERVER_URL}/host?token=${encodeURIComponent(HOST_TOKEN)}&clientUsername=${encodeURIComponent(CLIENT_USERNAME)}`);
 
   ws.on('open', () => {
-    // Flush buffered logs now that we're connected
-    while (logQueue.length) ws.send(JSON.stringify(logQueue.shift()));
     hr();
     w(`${A.bold}${A.cyan}Claude Web Host${A.reset}  ${A.gray}${SERVER_URL}${A.reset}\n`);
     w(`${A.dim}Serving clients as: ${A.reset}${A.bold}${CLIENT_USERNAME}${A.reset}  ${A.dim}password: ${A.reset}${A.bold}${CLIENT_PASSWORD}${A.reset}\n`);
@@ -518,7 +580,6 @@ function connect() {
     log('info', 'host connected to server', { url: SERVER_URL });
     // Register public key so server can verify client JWTs
     ws.send(JSON.stringify({ type: 'host_pubkey', pubkey: HOST_PUB_KEY }));
-    sendSessionList();
     // Re-announce agent states in one batch so server map is correct after reconnect/restart
     const states = {};
     for (const [sessionId, entry] of agents) {
@@ -532,8 +593,20 @@ function connect() {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
 
-    if (msg?.type && msg.type !== 'log') {
-      process.stdout.write('TRACE ' + JSON.stringify({ ts: Date.now(), src: 'server', dst: 'host', type: msg.type, sessionId: msg.sessionId?.slice(0, 8) ?? null }) + '\n');
+    // Per-field decrypt: if message has nonce+ciphertext, decrypt content and merge,
+    // preserving outer routing fields (type, id, sessionId).
+    if (msg?.nonce && msg?.ciphertext && encKey) {
+      try {
+        const inner = JSON.parse(await decrypt(encKey, msg.nonce, msg.ciphertext));
+        const { nonce: _, ciphertext: __, ...outer } = msg;
+        msg = { ...outer, ...inner };
+        trace({ ts: Date.now(), src: 'server', dst: 'host', e2e: 'decrypted', type: msg.type });
+      } catch (e) {
+        process.stderr.write('e2e decrypt failed: ' + e.message + '\n');
+        return;
+      }
+    } else if (msg?.type && msg.type !== 'log') {
+      trace({ ts: Date.now(), src: 'server', dst: 'host', type: msg.type });
     }
 
     try {
@@ -544,7 +617,7 @@ function connect() {
     }
 
     if (msg.type === 'list_sessions') {
-      log('info', 'list_sessions requested');
+      log('info', 'list_sessions requested', { e2e: !!encKey });
       sendSessionList();
       return;
     }
@@ -607,32 +680,7 @@ function connect() {
       return;
     }
 
-    if (msg.type === 'get_session_history') {
-      const { sessionId, offset, limit } = msg;
-      const file = findSessionFile(sessionId);
-      let lines = [];
-      let totalLines = 0;
-      if (file) {
-        try {
-          const raw = readFileSync(file, 'utf8').trim().split('\n').filter(Boolean);
-          totalLines = raw.length;
-          if (limit != null && offset == null) {
-            lines = raw.slice(-limit);                      // tail: last N lines
-          } else if (offset != null && limit != null) {
-            lines = raw.slice(offset, offset + limit);      // window [N, N+M)
-          } else if (offset != null && offset > 0) {
-            lines = raw.slice(offset);                      // [N, end) — incremental sync
-          } else {
-            lines = raw;
-          }
-          log('info', `history sent (${lines.length} lines, offset ${offset ?? 0}, limit ${limit ?? 'none'}, total ${totalLines})`, { sessionId: String(sessionId).slice(0, 8) });
-        } catch (e) { log('error', `history read error: ${e.message}`); }
-      } else {
-        log('warn', `session file not found`, { sessionId: String(sessionId).slice(0, 8) });
-      }
-      hostSend({ type: 'history', sessionId, lines: stripThinking(lines), totalLines, reqOffset: msg.offset ?? null, reqLimit: msg.limit ?? null });
-      return;
-    }
+    // get_session_history is now an RPC handler (see rpc.register below)
 
     if (msg.type === 'user') {
       const { sessionId, message } = msg;

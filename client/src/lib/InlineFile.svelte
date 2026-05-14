@@ -10,14 +10,14 @@
   let { path, ranges = [], annotations = [], sessionId, token, onOpenFile = null, messageTime = null } = $props();
 
   const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif', 'tiff', 'tif', 'svg']);
-  const ext = path.split('.').pop().toLowerCase();
-  const isImage = IMAGE_EXTS.has(ext);
-  const isPdf = ext === 'pdf';
-  const isBinary = isImage || isPdf;
+  const ext = $derived(path.split('.').pop().toLowerCase());
+  const isImage = $derived(IMAGE_EXTS.has(ext));
+  const isPdf = $derived(ext === 'pdf');
+  const isBinary = $derived(isImage || isPdf);
 
   let imgSrc = $state(null);
   let error = $state(null);
-  let loading = $state(isBinary);
+  let loading = $state(true);
   let containerEl = $state(null);
 
   onMount(() => {

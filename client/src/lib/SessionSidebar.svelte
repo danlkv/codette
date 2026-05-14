@@ -116,6 +116,7 @@
   </div>
   {#if showNew}
     <form class="new-form" onsubmit={(e) => { e.preventDefault(); startNew(); }}>
+      <!-- svelte-ignore a11y_autofocus -->
       <input class="new-input" bind:value={newCwd} placeholder="/path/to/project" autofocus />
       <button class="new-start" type="submit">Start</button>
     </form>
