@@ -54,9 +54,11 @@ CLIENT_USERNAME=you CLIENT_PASSWORD=pass HOST_KEY=secret SERVER_URL=wss://yourse
 cd client && npm install && npm run build
 ```
 
-## Auth
+## Auth & encryption
 
-The host registers a username + password with the server at connect time. Clients log in with those credentials and receive a JWT (7-day expiry). All API routes and the client WebSocket require a valid JWT.
+The host generates an EC P-256 keypair on first run and sends the public key to the server. Clients log in with username + password via HMAC-based challenge-response; the host signs a JWT with its private key, the server verifies with the public key. The password never reaches the server.
+
+When a password is set, the client and host independently derive AES-GCM-256 encryption keys from it. All message content is encrypted end-to-end — the server relays opaque ciphertext and cannot read session data, file contents, or git diffs. See [`doc/auth.spec.md`](doc/auth.spec.md) for the full protocol.
 
 Multiple clients can connect to the same host. Multiple hosts (different usernames) can connect to the same server; the server routes messages by JWT.
 
@@ -68,8 +70,10 @@ Multiple clients can connect to the same host. Multiple hosts (different usernam
 | `CLIENT_USERNAME` | `whoami` | Username for web login |
 | `CLIENT_PASSWORD` | `changeme` | Password for web login |
 | `HOST_KEY` | `host-key-change-me` | Shared secret between host and server |
-| `JWT_SECRET` | `jwt-secret-change-me` | JWT signing secret (server) |
 | `PORT` | `3000` | Server listen port |
+| `CODETTE_DATA_HOME` | platform default | Override data directory (host keys, session names) |
+| `CODETTE_TRACE` | off | Set to `1` for protocol-level trace logging |
+| `E2E` | on | Set to `0` to disable e2e encryption (debug only) |
 
 Change every default before exposing the server to the public internet.
 
