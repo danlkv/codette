@@ -2,6 +2,7 @@
 // Copyright 2026 Danylo Lykov
 
 import { writable, derived } from 'svelte/store';
+import { getSettings } from './utils/storage.js';
 
 export const messages       = writable([]);
 export const lastCost       = writable(null);
@@ -9,14 +10,14 @@ export const lastUsage          = writable(null); // { input_tokens, output_toke
 export const lastContextUsage   = writable(null); // { used: number, total: number } from modelUsage
 export const hostStatus     = writable('disconnected');
 export const wsOk           = writable(false);
-export const colorScheme    = writable(localStorage.getItem('colorScheme') || 'system');
-export const highContrast   = writable(localStorage.getItem('hc') === '1');
-export const vibrateOnDone  = writable(localStorage.getItem('vibrate') !== '0');
-export const fontStyle      = writable(localStorage.getItem('font') || 'mono');
+export const colorScheme    = writable(getSettings('colorScheme'));
+export const highContrast   = writable(getSettings('highContrast'));
+export const vibrateOnDone  = writable(getSettings('vibrate'));
+export const fontStyle      = writable(getSettings('font'));
 export const syntaxTheme          = writable(null);  // per-account; set by App.svelte
 export const effectiveSyntaxTheme = writable(null);  // resolved shiki theme id (family → dark/light variant)
 export const accentColor          = writable(null);  // per-account; set by App.svelte
-export const showFileChips  = writable(localStorage.getItem('claudeweb_showFileChips') !== 'false');
+export const showFileChips  = writable(getSettings('showFileChips'));
 
 // Multi-session support
 export const sessions         = writable([]);    // Session[] list from server

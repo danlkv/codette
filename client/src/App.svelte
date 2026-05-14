@@ -6,6 +6,15 @@
   import ChatLayout   from './lib/ChatLayout.svelte';
   import { colorScheme, highContrast, fontStyle, syntaxTheme, effectiveSyntaxTheme, accentColor, resetStores } from './store.js';
   import { THEME_PAIRS } from './utils/highlight.js';
+  import { getAccounts, saveAccounts, saveSettings, storeEncKeys, loadEncKeys, deleteEncKey } from './utils/storage.js';
+  import { deriveKey, deriveNonceKey } from './utils/crypto.js';
+  import { setE2EKeys, clearE2EKeys } from './utils/api.js';
+  import { wtrace } from './utils/trace.js';
+
+  // username → { encKey, nonceKey }. Restored from IndexedDB on page load.
+  const encKeys = new Map();
+  let encKeyVersion = $state(0); // bump to trigger reactivity when map mutates
+  let keysLoaded = $state(false); // true once IndexedDB restore is done
 
   function lightenHex(hex, amount = 0.08) {
     const r = parseInt(hex.slice(1,3),16)/255, g = parseInt(hex.slice(3,5),16)/255, b = parseInt(hex.slice(5,7),16)/255;
@@ -25,62 +34,84 @@
     return `#${h2(hue(h+1/3))}${h2(hue(h))}${h2(hue(h-1/3))}`;
   }
 
-  function loadAccounts() {
-    try {
-      let accs = JSON.parse(localStorage.getItem('chat_accounts') || '[]');
-      if (!accs.length) {
-        // migrate legacy single token
-        const old = localStorage.getItem('chat_token');
-        if (old) {
-          const { username } = JSON.parse(atob(old.split('.')[1]));
-          accs = [{ username, token: old }];
-        }
-      }
-      if (!accs.length) return [];
-      // ensure every account has a settings object; migrate bare localStorage to first account
-      const legacyTheme = localStorage.getItem('syntaxTheme') || null;
-      const legacyAccent = localStorage.getItem('accentColor') || null;
-      return accs.map((acc, i) => acc.settings ? acc : {
-        ...acc,
-        settings: i === 0 ? { syntaxTheme: legacyTheme, accentColor: legacyAccent } : {},
-      });
-    } catch {}
-    return [];
-  }
-
-  let accounts = $state(loadAccounts());
-
-  function getInitialActiveIdx(accs) {
+  function initAccounts() {
+    const { accounts: accs, active } = getAccounts();
+    // resolve active username to index
     const h = location.hash.slice(1);
-    if (h) {
-      const slash = h.indexOf('/');
-      const urlUser = slash >= 0 ? h.slice(0, slash) : null;
-      if (urlUser) {
-        const idx = accs.findIndex(a => a.username === urlUser);
-        if (idx >= 0) return idx;
-        return accs.length; // force login: out-of-bounds → token = ''
-      }
+    const slash = h.indexOf('/');
+    const urlUser = slash >= 0 ? h.slice(0, slash) : null;
+    if (urlUser) {
+      const idx = accs.findIndex(a => a.username === urlUser);
+      return { accs, idx: idx >= 0 ? idx : accs.length };
     }
-    return Math.min(Number(localStorage.getItem('chat_active') || 0), Math.max(accs.length - 1, 0));
+    if (active) {
+      const idx = accs.findIndex(a => a.username === active);
+      if (idx >= 0) return { accs, idx };
+    }
+    return { accs, idx: Math.min(0, Math.max(accs.length - 1, 0)) };
   }
 
-  let activeIdx = $state(getInitialActiveIdx(accounts));
+  const { accs: _initAccs, idx: _initIdx } = initAccounts();
+  let accounts = $state(_initAccs);
+  let activeIdx = $state(_initIdx);
   let addingAccount = $state(false);
 
   const token = $derived(accounts[activeIdx]?.token || '');
+  // Derive active encKey reactively — encKeyVersion forces re-eval when Map mutates.
+  const activeEncKey = $derived.by(() => {
+    void encKeyVersion;
+    return encKeys.get(accounts[activeIdx]?.username)?.encKey ?? null;
+  });
+  // True once keys are loaded and active account had keys but they're missing now.
+  const needsReauth = $derived.by(() => {
+    void encKeyVersion;
+    if (!keysLoaded) return false; // don't flash login while loading
+    return false; // keys are always derived from password at login; no separate reauth needed
+  });
+
+  // Restore key pairs from IndexedDB on startup.
+  (async () => {
+    for (const acct of _initAccs) {
+      try {
+        const keys = await loadEncKeys(acct.username);
+        if (keys) { encKeys.set(acct.username, keys); encKeyVersion++; }
+      } catch (e) { console.warn('[e2e] failed to restore keys for', acct.username, e); }
+    }
+    keysLoaded = true;
+  })();
 
   function persist() {
-    localStorage.setItem('chat_accounts', JSON.stringify(accounts));
-    localStorage.setItem('chat_active', String(activeIdx));
+    saveAccounts(accounts, accounts[activeIdx]?.username ?? null);
   }
 
-  function handleLogin(t) {
+  async function handleLogin(t, opts = {}) {
+    let resolvedUsername = null;
     try {
-      const { username } = JSON.parse(atob(t.split('.')[1]));
-      const i = accounts.findIndex(a => a.username === username);
+      resolvedUsername = JSON.parse(atob(t.split('.')[1])).username;
+    } catch {}
+
+    // Derive e2e keys BEFORE mounting ChatLayout so encKey prop is available on first render.
+    if (opts.password && resolvedUsername) {
+      try {
+        wtrace('client', 'self', 'derive_e2e_key', null, { username: resolvedUsername });
+        const [key, nKey] = await Promise.all([
+          deriveKey(opts.password, resolvedUsername),
+          deriveNonceKey(opts.password, resolvedUsername),
+        ]);
+        encKeys.set(resolvedUsername, { encKey: key, nonceKey: nKey });
+        encKeyVersion++;
+        await storeEncKeys(resolvedUsername, key, nKey);
+        wtrace('client', 'self', 'e2e_key_ready', null, { username: resolvedUsername });
+      } catch (e) {
+        console.error('[e2e] key derivation failed:', e);
+      }
+    }
+
+    if (resolvedUsername) {
+      const i = accounts.findIndex(a => a.username === resolvedUsername);
       if (i >= 0) { accounts[i] = { ...accounts[i], token: t }; activeIdx = i; }
-      else { accounts = [...accounts, { username, token: t, settings: {} }]; activeIdx = accounts.length - 1; }
-    } catch {
+      else { accounts = [...accounts, { username: resolvedUsername, token: t, settings: {} }]; activeIdx = accounts.length - 1; }
+    } else {
       accounts = [...accounts, { username: '?', token: t, settings: {} }];
       activeIdx = accounts.length - 1;
     }
@@ -88,13 +119,23 @@
     persist();
   }
 
-  function handleLogout() {
+  async function handleLogout() {
+    const username = accounts[activeIdx]?.username;
+    if (username) { encKeys.delete(username); encKeyVersion++; await deleteEncKey(username).catch(() => {}); }
     accounts = accounts.filter((_, i) => i !== activeIdx);
     activeIdx = Math.min(activeIdx, Math.max(accounts.length - 1, 0));
     persist();
   }
 
   function handleSwitch(idx) { resetStores(); activeIdx = idx; persist(); }
+
+  // Sync e2e keys to api.js module whenever active account or keys change.
+  $effect(() => {
+    void encKeyVersion;
+    const keys = encKeys.get(accounts[activeIdx]?.username);
+    if (keys) setE2EKeys(keys.encKey, keys.nonceKey);
+    else clearE2EKeys();
+  });
 
   // Apply per-account settings when active account changes
   $effect(() => {
@@ -143,7 +184,7 @@
       effectiveSyntaxTheme.set(pair ? pair[effective] : themeKey);
     };
     apply();
-    localStorage.setItem('colorScheme', scheme);
+    saveSettings('colorScheme', scheme);
     if (scheme === 'system') {
       _mq.addEventListener('change', apply);
       return () => _mq.removeEventListener('change', apply);
@@ -154,7 +195,7 @@
   $effect(() => {
     if (typeof document !== 'undefined') {
       document.documentElement.classList.toggle('high-contrast', $highContrast);
-      localStorage.setItem('hc', $highContrast ? '1' : '0');
+      saveSettings('highContrast', $highContrast);
     }
   });
 
@@ -166,19 +207,21 @@
 
   $effect(() => {
     document.documentElement.style.setProperty('--chat-font', FONT_FAMILIES[$fontStyle] ?? FONT_FAMILIES.mono);
-    localStorage.setItem('font', $fontStyle);
+    saveSettings('font', $fontStyle);
   });
 
 </script>
 
-{#if token}
+{#if token && !needsReauth}
   {#key activeIdx}
     <ChatLayout {token} {accounts} {activeIdx}
+      encKey={activeEncKey} {keysLoaded}
       onLogout={handleLogout} onSwitch={handleSwitch}
       onAddAccount={() => addingAccount = true} />
   {/key}
   {#if addingAccount}
-    <div class="account-overlay" onclick={(e) => { if (e.target === e.currentTarget) addingAccount = false; }}>
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+    <div class="account-overlay" role="presentation" onclick={(e) => { if (e.target === e.currentTarget) addingAccount = false; }}>
       <Login onLogin={handleLogin} onCancel={() => addingAccount = false} />
     </div>
   {/if}

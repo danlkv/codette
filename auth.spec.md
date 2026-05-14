@@ -9,6 +9,84 @@ Three credentials work in concert.
 
 Pairing flow: client sends `{username, password, "pair"}` to the server, which routes to the host. Host verifies the password, generates a 4-digit code and an ephemeral X25519 keypair, displays the code in terminal, returns `{ephemeral_pubkey}` to the client. User reads the code and types it into the client. Client runs WebAuthn enrollment (biometric prompt), constructs `{device_pubkey, code}`, encrypts to the host's ephemeral key, and sends opaque ciphertext through the server. Host decrypts, verifies the code (constant-time, single-use, 60s expiry, rate-limited), stores the device's public key in its local authorized-devices list, and acknowledges. Subsequent requests are signed by the device and verified by the host directly; the host issues short-lived session tokens to avoid biometric on every call. Each host independently maintains its authorized-devices list. The server is a dumb relay — no device identities, no auth state, no key material. All users share a single WebAuthn RP ID (your stable domain); credentials are scoped per-user via explicit `allowCredentials` lists at authentication time. The WebAuthn `user.id` handle is stored by the authenticator and returned as `userHandle` in `get()` assertions. Set it to the username bytes (`TextEncoder(username)`) so that discoverable-credential flows (`allowCredentials: []`) can recover the username from `userHandle` without relying on localStorage. Use a random per-user ID instead if the username is sensitive.
 
+## E2E-encrypted sessions (no WebAuthn)
+
+The host holds a persistent EC P-256 keypair stored at `$DATA_DIR/host-key.pem` (mode 0600), generated on first run. `$DATA_DIR` defaults to the platform data directory (e.g. `~/.local/share/claudeweb`) and can be overridden via `CODETTE_DATA_HOME`. On connect the host sends its public key to the server; the server keeps it in memory and uses it to verify all client JWTs. The password never reaches the server.
+
+**Auth flow:** client sends `{username}` to `POST /api/auth/challenge`; the server forwards it to the host as an RPC call. The host generates a random nonce, stores `{nonce, username, ts}` in a short-lived pending map (60 s TTL), and returns `{nonce}` to the client. The client computes `HMAC-SHA256(key=password, data=nonce)` in-browser and posts `{username, nonce, response}` to `POST /api/auth/verify`; the server forwards to the host. The host constant-time-compares the expected HMAC, invalidates the nonce, signs a JWT with its EC private key (`ES256`, 7-day expiry), and returns `{token}`. The server passes the response to the client unchanged. Subsequent REST calls and WS connections carry this JWT; the server verifies it with the stored host public key. The client then independently derives encryption keys from the password — no server involvement.
+
+**Encryption is implicit, not negotiated.** Both client and host independently derive encryption keys from the password. If the client has a password, it always encrypts. If the host has a password, it always encrypts. There is no capability negotiation — the server never learns whether e2e is active and cannot influence the decision. This prevents a compromised server from downgrading encryption by stripping capabilities from auth responses or injecting plaintext messages.
+
+The `auth_verify` response contains only `{ token }` — no capabilities field. The client derives keys immediately after login, before any further communication. The host derives keys at startup. Both sides encrypt unconditionally when keys exist.
+
+All clients for the same username share the same password and thus derive the same `encKey`; the host encrypts once and the server broadcasts to all. Plaintext-only clients (no password) cannot connect to a host that encrypts — they would receive encrypted messages they cannot decrypt.
+
+`E2E=0` env var on the host skips key derivation entirely, equivalent to not having a password. For debugging only.
+
+**Encryption keys:** the client derives two keys from the password:
+- `encKey`: `PBKDF2(password, "codette-e2e-v1:" + username, 200 000 iters, SHA-256) → AES-GCM-256` — encryption/decryption.
+- `nonceKey`: `PBKDF2(password, "codette-e2e-nonce-v1:" + username, 200 000 iters, SHA-256) → HMAC-SHA-256` — deterministic nonce derivation.
+
+The host derives the same pair at startup. The server never sees the password and cannot derive either key.
+
+**Message encryption:** every encrypted message keeps `type` in plaintext; all content fields are encrypted into a single ciphertext blob. When neither side has a password, messages flow as plaintext. When keys exist, both sides encrypt unconditionally and reject plaintext messages (except `host_status` and `agent_event` which are metadata-only).
+
+**Nonce strategy:**
+- WS broadcasts: random 96-bit nonce per message (unchanged).
+- RPC request paths: `?enc_path=base64url(nonce ‖ ciphertext)` where `nonce = HMAC-SHA-256(nonceKey, "path:" + path)[:12]`. Deterministic → stable URL → HTTP-cacheable.
+- File and directory responses: `nonce = HMAC-SHA-256(nonceKey, content_json)[:12]` — deterministic, HTTP-cacheable via `ETag`. Same content produces same ciphertext; browser `If-None-Match` works.
+- Session history, git diffs, set_session_name: random nonce (content volatile or params vary per request).
+
+AES-GCM-SIV is the theoretically correct nonce-misuse-resistant scheme but is blocked by the Web Crypto API (not supported).
+
+Messages fall into two categories:
+
+**Broadcasts** (host→server→all clients; server relays the entire message blindly):
+```
+claude_line    { type, nonce, ciphertext }        // decrypts to {sessionId, line}
+session_list   { type, nonce, ciphertext }        // decrypts to {sessions, hostCwd}
+user           { type, nonce, ciphertext }        // decrypts to {sessionId, message}
+create_session { type, nonce, ciphertext }        // decrypts to {cwd}
+delete_session { type, nonce, ciphertext }        // decrypts to {sessionId}
+agent_event    { type, sessionId, event }         // plaintext — metadata only
+agent_event    { type, states }                   // plaintext — batch variant
+host_status    { type, connected }                // plaintext — server-generated
+```
+
+**RPC** (request→response matched by `id`; server routes on `id`, never reads content):
+```
+get_session_history  req: { id, type, nonce, ciphertext }        // {sessionId, offset, limit}
+                     res: { id, result: { nonce, ciphertext } }  // {lines, totalLines}
+get_file             req: { id, type, nonce, ciphertext }        // {path}
+                     res: { id, result: { nonce, ciphertext } }  // {content}
+get_fs               req: { id, type, nonce, ciphertext }        // {path}
+                     res: { id, result: { nonce, ciphertext } }  // {entries}
+get_git_status       req: { id, type, nonce, ciphertext }        // {cwd}
+                     res: { id, result: { nonce, ciphertext } }  // {status}
+get_git_log          req: { id, type, nonce, ciphertext }        // {cwd}
+                     res: { id, result: { nonce, ciphertext } }  // {log, branch}
+get_git_diff         req: { id, type, nonce, ciphertext }        // {cwd, commit}
+                     res: { id, result: { nonce, ciphertext } }  // {diff, stat}
+get_git_file_diff    req: { id, type, nonce, ciphertext }        // {cwd, path}
+                     res: { id, result: { nonce, ciphertext } }  // {diff}
+set_session_name     req: { id, type, nonce, ciphertext }        // {sessionId, name}
+                     res: { id, result: { ok } }
+```
+
+**Never encrypted:** `host_pubkey` (server stores for JWT verify), `auth_challenge`/`auth_verify` (pre-auth, no key yet), `agent_event`/`host_status` (metadata-only).
+
+File/fs/git RPCs take `path` or `cwd` directly — no `sessionId` indirection. The host resolves paths against known session cwds for access control.
+
+### What the server can observe
+
+- Message `type` and `id` (routing)
+- `agent_event` state transitions, `host_status`
+- Auth fields: `username`, challenge nonce, HMAC response, JWT (no capabilities — e2e is invisible to server)
+- Traffic analysis: message count, timing, ciphertext sizes
+- It **cannot** observe: session content, file paths, file content, git diffs, session names, cwds, session IDs (encrypted inside ciphertext)
+
+**Limitations:** the key is tied to the password — a password change requires re-deriving the key. Session history is unaffected: the host holds plaintext and re-encrypts on the next client request. However, file responses cached by the browser (via the deterministic-nonce `ETag` scheme) are encrypted under the old key and become unreadable after rotation; the client detects this via AES-GCM auth-tag failure and retries with `Cache-Control: no-cache`, fetching a fresh response encrypted under the new key — self-healing with one extra round-trip. There are no per-device keys and no device revocation. Forward secrecy and biometric gating require the WebAuthn pairing flow.
+
 ## Sharing conversations end-to-end encrypted
 
 Three roles: host runs Claude, server is a relay and opaque blob store, client is the web app. Shares survive host downtime. The host generates a fresh symmetric key K, encrypts the selected message bundle locally, and uploads only ciphertext to the server. The server stores ciphertext indexed by an opaque share-ID and enforces metadata-level policies — expiry, view limits, revocation — without ever reading plaintext. Share URL: `/share/<id>#k=<key>`; browsers never send the fragment to servers. Recipients fetch ciphertext and decrypt in-browser. Hardenings: strict CSP, `Referrer-Policy: no-referrer`, optional password mixed into K via Argon2, default short expiry, post-load fragment scrubbing via `history.replaceState`.

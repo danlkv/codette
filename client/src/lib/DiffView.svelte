@@ -2,6 +2,8 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
+  import { fetchGitDiff, fetchGitFileDiff } from '../utils/api.js';
+
   let { sessionId = null, commit = null, file = null, token = null, onClose } = $props();
 
   let loading = $state(true);
@@ -49,11 +51,9 @@
     diffText = null;
     stat = [];
     try {
-      const url = file
-        ? `/api/sessions/${encodeURIComponent(sessionId)}/git/file-diff?path=${encodeURIComponent(file)}`
-        : `/api/sessions/${encodeURIComponent(sessionId)}/git/diff?commit=${encodeURIComponent(commit)}`;
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-      const data = await res.json();
+      const data = file
+        ? await fetchGitFileDiff(sessionId, file, token)
+        : await fetchGitDiff(sessionId, commit, token);
       if (data.error) {
         error = data.error;
       } else {

@@ -4,19 +4,20 @@
 <script>
   import { onMount } from 'svelte';
   import SourceFileBlock from './SourceFileBlock.svelte';
+  import { fetchFile } from '../utils/api.js';
   import ImagePreview from './ImagePreview.svelte';
 
   let { path, ranges = [], annotations = [], sessionId, token, onOpenFile = null, messageTime = null } = $props();
 
   const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif', 'tiff', 'tif', 'svg']);
-  const ext = path.split('.').pop().toLowerCase();
-  const isImage = IMAGE_EXTS.has(ext);
-  const isPdf = ext === 'pdf';
-  const isBinary = isImage || isPdf;
+  const ext = $derived(path.split('.').pop().toLowerCase());
+  const isImage = $derived(IMAGE_EXTS.has(ext));
+  const isPdf = $derived(ext === 'pdf');
+  const isBinary = $derived(isImage || isPdf);
 
   let imgSrc = $state(null);
   let error = $state(null);
-  let loading = $state(isBinary);
+  let loading = $state(true);
   let containerEl = $state(null);
 
   onMount(() => {
@@ -33,9 +34,7 @@
 
   async function fetchBinary() {
     try {
-      const url = `/api/sessions/${encodeURIComponent(sessionId)}/file?path=${encodeURIComponent(path)}`;
-      const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-      const data = await resp.json();
+      const data = await fetchFile(sessionId, path, token);
       if (data.error) { error = data.error; return; }
       if (data.base64) imgSrc = `data:${data.mimeType};base64,${data.base64}`;
     } catch (e) {

@@ -151,7 +151,6 @@ export function createParser({ messages, currentSessionId, lastCost, lastUsage, 
           cacheRead: usage.cache_read_input_tokens ?? 0,
           out: usage.output_tokens ?? 0,
         };
-        console.log('[ctx] assistant event:', { stopReason, live, in: usage.input_tokens, cacheRead: usage.cache_read_input_tokens, cacheCreate: usage.cache_creation_input_tokens, out: usage.output_tokens, inputTotal }, '→', val);
         lastContextUsage.set(val);
       }
 
@@ -179,7 +178,6 @@ export function createParser({ messages, currentSessionId, lastCost, lastUsage, 
         if (lastAssistantUsage) {
           const u = lastAssistantUsage;
           const inputTotal = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
-          console.log('[ctx] result: setting from lastAssistantUsage, cw=', cw, 'inputTotal=', inputTotal);
           lastContextUsage.set({
             used: inputTotal,
             total: cw ?? 200000,
@@ -214,7 +212,6 @@ export function createParser({ messages, currentSessionId, lastCost, lastUsage, 
         }
       } catch {}
     }
-    console.log('[ctx] applyLines', lines.length, 'lines — types:', tally, '— asst stop_reasons:', asstReasons);
     for (const line of lines) parseLine(line, false);
     finalizeIncomplete();
     const batch = _batch;

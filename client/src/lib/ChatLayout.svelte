@@ -9,17 +9,24 @@
   import { messages, lastCost, lastUsage, lastContextUsage, hostStatus, wsOk, colorScheme, highContrast, vibrateOnDone, fontStyle, syntaxTheme, accentColor,
            sessions, currentSessionId, sessionData, showFileChips } from '../store.js';
   import { createParser } from './parser.js';
-  import { summarizeOldLines, KEEP as SUMMARIZE_KEEP } from './summarize.js';
-  import { fetchHistory } from '../utils/api.js';
+  import { fetchHistory, createSession, deleteSession } from '../utils/api.js';
+  import { getHistory, saveHistory, removeHistory, hasHistory, getSettings, saveSettings } from '../utils/storage.js';
+  import { wtrace } from '../utils/trace.js';
+  import { encrypt, decrypt } from '../utils/crypto.js';
   import MessageList from './MessageList.svelte';
   import ChatInput from './ChatInput.svelte';
   import SessionSidebar from './SessionSidebar.svelte';
   import FileView from './FileView.svelte';
   import DiffView from './DiffView.svelte';
 
-  let { token, accounts = [], activeIdx = 0, onLogout, onSwitch, onAddAccount } = $props();
+  let { token, accounts = [], activeIdx = 0, encKey = null, keysLoaded = false, onLogout, onSwitch, onAddAccount } = $props();
 
-  $effect(() => { localStorage.setItem('claudeweb_showFileChips', $showFileChips ? 'true' : 'false'); });
+  // Connect WS once keys are loaded from IndexedDB (or confirmed absent).
+  $effect(() => {
+    if (keysLoaded && !ws && !destroyed) connect();
+  });
+
+  $effect(() => { saveSettings('showFileChips', $showFileChips); });
 
   function resolvePath(p, cwd) {
     if (!p || p.startsWith('/')) return p;
@@ -81,7 +88,7 @@
     try { return JSON.parse(atob(token.split('.')[1])).username; } catch { return ''; }
   });
   let userMenuOpen = $state(false);
-  $effect(() => { localStorage.setItem('vibrate', $vibrateOnDone ? '1' : '0'); });
+  $effect(() => { saveSettings('vibrate', $vibrateOnDone); });
   $effect(() => {
     if (!userMenuOpen) return;
     function onDocClick(e) {
@@ -100,7 +107,7 @@
   let sysCounter = 0;
 
   let sidebarOpen = $state(true);
-  $effect(() => { if (window.innerWidth > 640) localStorage.setItem('claudeweb_sidebarOpen', sidebarOpen ? 'true' : 'false'); });
+  $effect(() => { if (window.innerWidth > 640) saveSettings('sidebarOpen', sidebarOpen); });
   let hostCwd = $state(null);
   let fileViewPath = $state(null);
   let diffViewCommit = $state(null);
@@ -160,15 +167,15 @@
 
   onMount(async () => {
     sidebarOpen = window.innerWidth > 640
-      ? (localStorage.getItem('claudeweb_sidebarOpen') !== 'false')
+      ? getSettings('sidebarOpen')
       : false;
     window.addEventListener('beforeunload', saveCurrentCache);
     window.addEventListener('popstate', onPopState);
-    console.log('[history] onMount: calling initSessions');
+    console.debug('[history] onMount: calling initSessions');
     await initSessions();
-    console.log('[history] onMount: initSessions done, historyLoading=false, calling connect');
+    console.debug('[history] onMount: initSessions done, historyLoading=false');
     historyLoading = false;
-    connect();
+    // Connect once keysLoaded is true (via $effect above). If already loaded at mount, $effect fires immediately.
   });
   onDestroy(() => {
     destroyed = true;
@@ -181,160 +188,81 @@
   const dedupById = arr => [...new Map(arr.map(s => [s.id, s])).values()];
 
   async function initSessions() {
-    let sessionList = [];
-    console.log('[history] initSessions: fetching sessions');
-    try {
-      const res = await fetch('/api/sessions', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        sessionList = data.sessions ?? data;
-        if (data.hostCwd) hostCwd = data.hostCwd;
-        sessions.set(dedupById(sessionList));
-        console.log('[history] initSessions: got', sessionList.length, 'sessions');
-      } else {
-        console.warn('[history] initSessions: fetch failed', res.status);
-      }
-    } catch (e) { console.error('[history] initSessions: fetch error', e); }
-
+    // Sessions arrive via WS (triggered by list_sessions on connect).
     // Pre-populate files from localStorage caches (no extra API calls)
+    const sessionList = [];
     const filesMap = {};
     for (const s of sessionList) {
-      try {
-        const raw = localStorage.getItem('history_' + s.id);
-        if (raw) {
-          const { lines } = JSON.parse(raw);
-          if (lines) filesMap[s.id] = extractFilesFromLines(lines, s.cwd ?? null);
-        }
-      } catch {}
+      const cached = getHistory(s.id);
+      if (cached?.lines) filesMap[s.id] = extractFilesFromLines(cached.lines, s.cwd ?? null);
     }
     if (Object.keys(filesMap).length) {
       sessions.update(list => list.map(s => filesMap[s.id] ? { ...s, files: filesMap[s.id] } : s));
     }
 
-    if (sessionList.length === 0) { console.log('[history] initSessions: no sessions, returning'); return; }
+    if (sessionList.length === 0) { console.debug('[history] initSessions: no sessions, returning'); return; }
     const { sessionId: hashId, file: hashFile } = parseHash();
     const target = (hashId && hashId !== 'new' && sessionList.find(s => s.id === hashId))
       ? hashId
       : sessionList[0].id;
-    console.log('[history] initSessions: target session', target, '(hash was:', hashId + ')');
+    console.debug('[history] initSessions: target session', target, '(hash was:', hashId + ')');
     history.replaceState(null, '', makeHash(target, hashFile));
     currentSessionId.set(target);
     if (hashFile) fileViewPath = hashFile;
     await loadSessionHistory(target);
   }
 
-  // Evict the N oldest history_* entries (by ts field), skipping currentKey.
-  function evictOldestSessions(currentKey, n = 2) {
-    const entries = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (!k?.startsWith('history_') || k === currentKey) continue;
-      try {
-        const ts = JSON.parse(localStorage.getItem(k))?.ts ?? 0;
-        entries.push({ k, ts });
-      } catch { entries.push({ k, ts: 0 }); }
-    }
-    entries.sort((a, b) => a.ts - b.ts);
-    const toEvict = entries.slice(0, n);
-    for (const { k } of toEvict) {
-      localStorage.removeItem(k);
-      console.log('[history] evicted', k);
-    }
-    return toEvict.length;
-  }
-
-  // Try to store history; on QuotaExceededError:
-  //   1. summarize old lines and retry
-  //   2. evict 2 oldest sessions and retry
-  // lineCount is always the real count so server offsets stay correct.
-  function tryStoreHistory(cacheKey, lines, lineCount, title = '', contextWindow = null) {
-    const byteEst = s => new Blob([s]).size;
-    const ts = Date.now();
-    const raw = JSON.stringify({ lines, lineCount, ts, title, ...(contextWindow && { contextWindow }) });
-    console.log('[history] tryStoreHistory:', cacheKey, lines.length, 'lines, lineCount=', lineCount, '~', (byteEst(raw)/1024).toFixed(1), 'KB');
-    try { localStorage.setItem(cacheKey, raw); console.log('[history] tryStoreHistory: saved ok'); return; }
-    catch (e) { if (e.name !== 'QuotaExceededError') { console.error('[history] tryStoreHistory:', e); return; } }
-
-    const summarized = lines.length > SUMMARIZE_KEEP
-      ? [...summarizeOldLines(lines.slice(0, -SUMMARIZE_KEEP)), ...lines.slice(-SUMMARIZE_KEEP)]
-      : summarizeOldLines(lines);
-    const sumRaw = JSON.stringify({ lines: summarized, lineCount, ts });
-    console.log('[history] tryStoreHistory: quota exceeded, summarized', lines.length, '→', summarized.length, 'lines,', (byteEst(sumRaw)/1024).toFixed(1), 'KB');
-
-    try { localStorage.setItem(cacheKey, sumRaw); console.log('[history] tryStoreHistory: saved ok (summarized)'); return; }
-    catch (e) { if (e.name !== 'QuotaExceededError') { console.error('[history] tryStoreHistory after summarize:', e); return; } }
-
-    const evicted = evictOldestSessions(cacheKey, 2);
-    if (evicted === 0) { console.warn('[history] tryStoreHistory: nothing to evict, giving up'); return; }
-    try { localStorage.setItem(cacheKey, sumRaw); console.log('[history] tryStoreHistory: saved ok (after eviction)'); return; }
-    catch (e) { console.warn('[history] tryStoreHistory: quota exceeded even after eviction, skipping cache for', cacheKey); }
-  }
 
   function saveCurrentCache() {
     const id = get(currentSessionId);
     if (!id || currentLines.length === 0) return;
-    console.log('[history] saveCurrentCache:', id, currentLines.length, 'lines, lineCount=', lineCount);
-    tryStoreHistory('history_' + id, currentLines, lineCount, sessionTitle, storedContextWindow);
+    const r = saveHistory(id, { lines: currentLines, lineCount, title: sessionTitle, contextWindow: storedContextWindow });
+    console.debug('[history] saveCurrentCache:', id, r.lines, 'lines,', (r.bytes/1024).toFixed(1), 'KB', r.summarized ? '(summarized)' : '', r.evicted ? `evicted:${r.evicted}` : '', r.stored ? 'ok' : 'FAILED');
   }
 
   async function loadSessionHistory(id) {
     if (!id || id === '__new__') return;
-    const cacheKey = 'history_' + id;
-    let cached = null;
-    try {
-      const raw = localStorage.getItem(cacheKey);
-      if (raw) {
-        cached = JSON.parse(raw);
-        if (!('lineCount' in cached)) { console.warn('[history] loadSessionHistory: invalid cache (no lineCount), ignoring'); cached = null; }
-      }
-    } catch (e) { console.error('[history] loadSessionHistory: localStorage read error', e); }
-
-    console.log('[history] loadSessionHistory', id, '— localStorage cache:', cached ? cached.lines.length + ' lines (lineCount=' + cached.lineCount + ')' : 'none');
+    const cached = getHistory(id);
+    console.debug('[history] loadSessionHistory', id, '— cache:', cached ? cached.lines.length + ' lines (lineCount=' + cached.lineCount + ')' : 'none');
     if (cached) {
       if (cached.title) sessionTitle = cached.title;
       if (cached.contextWindow) storedContextWindow = cached.contextWindow;
       lineCount = cached.lineCount;
       applyHistoryLines(cached.lines);
-      console.log('[history] loadSessionHistory: applied localStorage cache, messages.length=', cached.lines.length, 'lineCount=', lineCount);
     }
-    await fetchAndApplyHistory(id, cached, cacheKey);
+    await fetchAndApplyHistory(id, cached);
   }
 
   const LOAD_LIMIT = 200;
   const BATCH_SIZE = 400;
 
-  async function fetchAndApplyHistory(id, cached, cacheKey) {
+  async function fetchAndApplyHistory(id, cached) {
     try {
       const offset = cached ? cached.lineCount : null;
       const fetchParams = offset != null ? { offset } : { limit: LOAD_LIMIT };
-      console.log('[history] fetchAndApplyHistory', id, '—', fetchParams);
+      console.debug('[history] fetchAndApplyHistory', id, '—', fetchParams);
       const data = await fetchHistory(id, fetchParams, token);
       const lines = data.lines ?? [];
-      console.log('[history] fetchAndApplyHistory: got', lines.length, 'lines, incremental=', data.incremental, 'totalLines=', data.totalLines);
+      console.debug('[history] fetchAndApplyHistory: got', lines.length, 'lines, incremental=', data.incremental, 'totalLines=', data.totalLines);
 
       if (data.incremental && cached) {
         if (lines.length === 0) {
           if (data.totalLines !== undefined && cached.lineCount > data.totalLines) {
             console.warn('[history] fetchAndApplyHistory: cache lineCount', cached.lineCount, '> server totalLines', data.totalLines, '— re-fetching full');
-            await fetchAndApplyHistory(id, null, cacheKey);
+            await fetchAndApplyHistory(id, null);
           } else {
-            console.log('[history] fetchAndApplyHistory: no new lines, cache is up to date');
             lineCount = data.totalLines ?? cached.lineCount;
           }
           return;
         }
         const merged = [...cached.lines, ...lines];
-        console.log('[history] fetchAndApplyHistory: merged', cached.lines.length, '+', lines.length, '=', merged.length, 'lines');
         lineCount = data.totalLines;
         applyHistoryLines(merged);
-        tryStoreHistory(cacheKey, merged, data.totalLines, sessionTitle, storedContextWindow);
+        saveHistory(id, { lines: merged, lineCount: data.totalLines, title: sessionTitle, contextWindow: storedContextWindow });
       } else {
-        console.log('[history] fetchAndApplyHistory: applying', lines.length, 'lines (full)');
         lineCount = data.totalLines;
         applyHistoryLines(lines);
-        tryStoreHistory(cacheKey, lines, data.totalLines, sessionTitle, storedContextWindow);
+        saveHistory(id, { lines, lineCount: data.totalLines, title: sessionTitle, contextWindow: storedContextWindow });
       }
     } catch (e) { console.error('fetchAndApplyHistory:', e); }
   }
@@ -348,11 +276,11 @@
     try {
       const offset = Math.max(0, startLine - BATCH_SIZE);
       const limit = startLine - offset;
-      console.log('[history] loadEarlierHistory: fetching offset=', offset, 'limit=', limit);
+      console.debug('[history] loadEarlierHistory: fetching offset=', offset, 'limit=', limit);
       const data = await fetchHistory(id, { offset, limit }, token);
       const batch = data.lines ?? [];
       if (batch.length === 0) return;
-      console.log('[history] loadEarlierHistory: prepending', batch.length, 'lines');
+      console.debug('[history] loadEarlierHistory: prepending', batch.length, 'lines');
       applyHistoryLines([...batch, ...currentLines]);
       // lineCount unchanged — prepend doesn't change server file size
     } catch (e) { console.error('loadEarlierHistory:', e); }
@@ -372,16 +300,63 @@
     if (id && id !== '__new__') updateSessionFiles(id, filtered);
   }
 
+  async function wsSend(msg) {
+    if (ws?.readyState !== 1) return;
+    wtrace('client', 'server', msg.type, msg.sessionId, { e2e: !!encKey });
+    if (encKey) {
+      try {
+        const { type, ...rest } = msg;
+        const { nonce, ciphertext } = await encrypt(encKey, JSON.stringify(rest));
+        ws.send(JSON.stringify({ type, nonce, ciphertext }));
+        return;
+      } catch (e) {
+        console.error('[e2e] encrypt failed:', e);
+        return;
+      }
+    }
+    ws.send(JSON.stringify(msg));
+  }
+
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(`${proto}//${location.host}/ws?token=${encodeURIComponent(token)}`);
-    ws.onopen  = () => { if (!destroyed) wsOk.set(true); };
-    ws.onclose = () => { wsOk.set(false); if (!destroyed) setTimeout(connect, 3000); };
+    const sock = new WebSocket(`${proto}//${location.host}/ws?token=${encodeURIComponent(token)}`);
+    ws = sock;
+    sock.onopen  = () => {
+      if (!destroyed && ws === sock) {
+        wsOk.set(true);
+        wsSend({ type: 'list_sessions' });
+      }
+    };
+    sock.onclose = () => { wsOk.set(false); if (!destroyed && ws === sock) setTimeout(connect, 3000); };
     ws.onerror = () => {};
-    ws.onmessage = ({ data }) => {
+    ws.onmessage = async ({ data }) => {
       if (destroyed) return;
       let msg;
       try { msg = JSON.parse(data); } catch { return; }
+
+      // Decrypt per-field encrypted messages (type stays plaintext, rest in ciphertext).
+      if (msg.nonce && msg.ciphertext && encKey) {
+        try {
+          const inner = JSON.parse(await decrypt(encKey, msg.nonce, msg.ciphertext));
+          msg = { type: msg.type, ...inner };
+          wtrace('server', 'client', msg.type, msg.sessionId, { e2e: 'decrypted' });
+        } catch (e) {
+          console.error('[e2e] decrypt failed, key mismatch — forcing re-login:', e);
+          onLogout();
+          return;
+        }
+      } else if (msg.nonce && msg.ciphertext && !encKey) {
+        // Encrypted message but no key — need to re-login
+        console.warn('[e2e] encrypted message received but no key, forcing re-login');
+        onLogout();
+        return;
+      } else if (encKey && msg.type !== 'host_status' && msg.type !== 'agent_event') {
+        // Reject plaintext when keys exist (downgrade protection)
+        console.warn('[e2e] dropping plaintext message while keys exist:', msg.type);
+        return;
+      } else {
+        wtrace('server', 'client', msg.type, msg.sessionId);
+      }
 
       if (msg.type === 'session_list') {
         const incoming = dedupById(msg.sessions ?? []);
@@ -390,6 +365,18 @@
           return incoming.map(s => filesMap.has(s.id) ? { ...s, files: filesMap.get(s.id) } : s);
         });
         if (msg.hostCwd) hostCwd = msg.hostCwd;
+        // Under e2e, sessions arrive via WS only — do initial navigation if not yet done
+        if (incoming.length > 0 && !get(currentSessionId)) {
+          const { sessionId: hashId, file: hashFile } = parseHash();
+          const target = (hashId && hashId !== 'new' && incoming.find(s => s.id === hashId))
+            ? hashId
+            : incoming[0].id;
+          console.debug('[history] WS session_list: initial navigation to', target);
+          history.replaceState(null, '', makeHash(target, hashFile));
+          currentSessionId.set(target);
+          if (hashFile) fileViewPath = hashFile;
+          loadSessionHistory(target);
+        }
       }
       else if (msg.type === 'claude_line') {
         const { sessionId, line } = msg;
@@ -448,7 +435,7 @@
     diffViewCommit = null; diffViewFile = null;
     saveCurrentCache();
 
-    if (get(currentSessionId)) { console.log('[history] switchSession: saving', currentLines.length, 'lines to sessionData for', get(currentSessionId)); sessionData.set(get(currentSessionId), [...currentLines]); }
+    if (get(currentSessionId)) { console.debug('[history] switchSession: saving', currentLines.length, 'lines to sessionData for', get(currentSessionId)); sessionData.set(get(currentSessionId), [...currentLines]); }
 
     currentSessionId.set(id);
     currentLines = [];
@@ -460,24 +447,17 @@
     const sd = sessionData.get(id);
     if (sd?.length > 0) {
       // Restore from sessionData — no HTTP fetch needed
-      let lsCached = null;
-      try {
-        const raw = localStorage.getItem('history_' + id);
-        if (raw) lsCached = JSON.parse(raw);
-      } catch {}
+      const lsCached = getHistory(id);
       if (lsCached?.title) sessionTitle = lsCached.title;
       if (lsCached?.contextWindow) storedContextWindow = lsCached.contextWindow;
       currentLines = [...sd];
       lineCount = lsCached
         ? lsCached.lineCount + (sd.length - lsCached.lines.length)
         : sd.length;
-      console.log('[history] switchSession: restoring from sessionData', sd.length, 'lines, lineCount=', lineCount);
+      console.debug('[history] switchSession: restoring from sessionData', sd.length, 'lines, lineCount=', lineCount);
       applyHistoryLines(currentLines);
     } else {
-      // Show in-memory cache only if there's no localStorage cache that will
-      // immediately replace it — avoids a double-render flash.
-      const hasLocalCache = !!localStorage.getItem('history_' + id);
-      if (!hasLocalCache) messages.set([]);
+      if (!hasHistory(id)) messages.set([]);
       await loadSessionHistory(id);
     }
   }
@@ -493,7 +473,7 @@
       case '/clear':
         messages.set([]); lastCost.set(null);
         parser.resetTurnState();
-        if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'clear' }));
+        wsSend({ type: 'clear' });
         return true;
       case '/status': {
         const h = get(hostStatus);
@@ -519,7 +499,7 @@
       case '/reload': {
         const id = get(currentSessionId);
         if (id && id !== '__new__') {
-          localStorage.removeItem('history_' + id);
+          removeHistory(id);
           currentLines = [];
           messages.set([]);
           parser.resetTurnState();
@@ -529,23 +509,13 @@
         return true;
       }
       case '/btw':
-        if (arg && ws?.readyState === 1)
-          ws.send(JSON.stringify({
-            type: 'user',
-            sessionId: get(currentSessionId),
-            message: { role: 'user', content: arg },
-          }));
+        if (arg) wsSend({ type: 'user', sessionId: get(currentSessionId), message: { role: 'user', content: arg } });
         return true;
       case '/claudeweb-inline-files': {
         const sid = get(currentSessionId);
         const cwd = get(sessions).find(s => s.id === sid)?.cwd ?? null;
         const prompt = makeInlineFilePrompt(cwd);
-        if (ws?.readyState === 1)
-          ws.send(JSON.stringify({
-            type: 'user',
-            sessionId: sid,
-            message: { role: 'user', content: prompt },
-          }));
+        wsSend({ type: 'user', sessionId: sid, message: { role: 'user', content: prompt } });
         sysMsg('inline file viewer enabled');
         return true;
       }
@@ -560,11 +530,7 @@
     if (get(currentSessionId) === '__new__') {
       awaitingNewSession = true;
       try {
-        await fetch('/api/sessions', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cwd: pendingCwd, firstMessage: text, claudeweb_settings: pendingSettings ?? undefined }),
-        });
+        await createSession(token, { cwd: pendingCwd, firstMessage: text, claudeweb_settings: pendingSettings ?? undefined });
         clearFn?.();
       } catch { awaitingNewSession = false; }
       return;
@@ -578,11 +544,7 @@
       sendPending = false;
       pendingClearFn = null;
     }, 8000);
-    ws.send(JSON.stringify({
-      type: 'user',
-      sessionId: get(currentSessionId),
-      message: { role: 'user', content: text },
-    }));
+    wsSend({ type: 'user', sessionId: get(currentSessionId), message: { role: 'user', content: text } });
   }
 
   function handleSelect(id) {
@@ -608,17 +570,12 @@
 
   async function handleDelete(id) {
     try {
-      await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      await deleteSession(id, token);
     } catch (e) { console.error('handleDelete fetch:', e); }
   }
 
   function handleAgentCtl({ id, event }) {
-    if (ws?.readyState === 1) {
-      ws.send(JSON.stringify({ type: 'agent_ctl', sessionId: id, event }));
-    }
+    wsSend({ type: 'agent_ctl', sessionId: id, event });
   }
 
   function handleFileOpen({ path }) {

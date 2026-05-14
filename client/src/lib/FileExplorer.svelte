@@ -3,11 +3,13 @@
 
 <script>
   import TreeLevel from './TreeLevel.svelte';
+  import { listDir } from '../utils/api.js';
+  import { getSettings, saveSettings } from '../utils/storage.js';
 
   let { sessionId = null, sessionCwd = null, token = null, onFileOpen } = $props();
 
-  let sectionOpen = $state(localStorage.getItem('claudeweb_fileExplorer') !== 'false');
-  $effect(() => { localStorage.setItem('claudeweb_fileExplorer', sectionOpen ? 'true' : 'false'); });
+  let sectionOpen = $state(getSettings('fileExplorer'));
+  $effect(() => { saveSettings('fileExplorer', sectionOpen); });
   let treeNodes = $state({});
 
   let cwdBasename = $derived(sessionCwd ? (sessionCwd.split('/').filter(Boolean).pop() || sessionCwd) : '');
@@ -41,19 +43,7 @@
     };
 
     try {
-      const url = `/api/sessions/${encodeURIComponent(sessionId)}/fs?path=${encodeURIComponent(path)}`;
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        treeNodes = {
-          ...treeNodes,
-          [path]: { ...treeNodes[path], loading: false, error: `Error ${res.status}: ${text}` },
-        };
-        return;
-      }
-      const data = await res.json();
+      const data = await listDir(sessionId, path, token);
       treeNodes = {
         ...treeNodes,
         [path]: { entries: data.entries ?? [], open: true, loading: false, error: null },

@@ -3,6 +3,7 @@
 
 <script>
   import { fmtAge } from '../utils/time.js';
+  import { getSettings, saveSettings } from '../utils/storage.js';
   import FileExplorer from './FileExplorer.svelte';
   import GitLog from './GitLog.svelte';
 
@@ -28,7 +29,7 @@
   let confirmTimer = $state(null);
   let showNew = $state(false);
   let newCwd = $state('');
-  let inlineFiles = $state(localStorage.getItem('claudeweb_inlineFiles') !== 'false');
+  let inlineFiles = $state(getSettings('inlineFiles'));
 
   let menuId = $state(null);
   let menuName = $state('');
@@ -52,7 +53,7 @@
   }
 
   function startNew() {
-    localStorage.setItem('claudeweb_inlineFiles', inlineFiles ? 'true' : 'false');
+    saveSettings('inlineFiles', inlineFiles);
     onNewSession?.(newCwd.trim() || null, { inlineFiles });
     showNew = false;
     newCwd = hostCwd || '';
@@ -115,6 +116,7 @@
   </div>
   {#if showNew}
     <form class="new-form" onsubmit={(e) => { e.preventDefault(); startNew(); }}>
+      <!-- svelte-ignore a11y_autofocus -->
       <input class="new-input" bind:value={newCwd} placeholder="/path/to/project" autofocus />
       <button class="new-start" type="submit">Start</button>
     </form>

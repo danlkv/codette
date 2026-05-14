@@ -9,6 +9,7 @@
 <script>
   import { onMount } from 'svelte';
   import { effectiveSyntaxTheme } from '../store.js';
+  import { fetchFile } from '../utils/api.js';
   import { highlightLines, langFromPath } from '../utils/highlight.js';
 
   let { path, ranges = [], annotations = [], sessionId, token, onOpenFile = null, messageTime = null } = $props();
@@ -52,10 +53,7 @@
 
   async function fetchContent() {
     if (!sessionId || !token) throw new Error('no session');
-    const url = `/api/sessions/${encodeURIComponent(sessionId)}/file?path=${encodeURIComponent(path)}`;
-    const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
+    const data = await fetchFile(sessionId, path, token);
     if (data.error) throw new Error(data.error);
     return data;
   }

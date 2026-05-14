@@ -2,19 +2,35 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
+  import { hmacSign } from '../utils/crypto.js';
+  import { wtrace } from '../utils/trace.js';
+
   let { onLogin, onCancel } = $props();
   let username = $state(''), password = $state(''), error = $state(''), loading = $state(false);
 
   async function submit() {
     loading = true; error = '';
     try {
-      const res = await fetch('/api/login', {
+      const post = (url, body) => fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify(body),
       });
-      if (res.ok) onLogin?.((await res.json()).token);
-      else error = 'Invalid credentials';
+
+      wtrace('client', 'server', 'auth_challenge');
+      const chalRes = await post('/api/auth/challenge', { username });
+      if (!chalRes.ok) { error = 'Host not connected'; return; }
+      const { nonce } = await chalRes.json();
+
+      const response = await hmacSign(password, nonce);
+
+      wtrace('client', 'server', 'auth_verify');
+      const verRes = await post('/api/auth/verify', { username, nonce, response });
+      if (verRes.ok) {
+        const { token } = await verRes.json();
+        wtrace('client', 'server', 'auth_verify_ok');
+        onLogin?.(token, { password, username });
+      } else error = 'Invalid credentials';
     } catch { error = 'Connection error'; }
     finally { loading = false; }
   }
