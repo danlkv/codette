@@ -81,5 +81,5 @@ Change every default before exposing the server to the public internet.
 
 - [Claude Code remote control](https://code.claude.com/docs/en/remote-control) — Anthropic's official remote access feature
 - [siteboon/claudecodeui](https://github.com/siteboon/claudecodeui) — desktop-focused Claude Code web UI
-- [chadbyte/clay](https://github.com/chadbyte/clay) — similar three-piece architecture
+- [chadbyte/clay](https://github.com/chadbyte/clay) — local daemon with multi-vendor support (Claude + Codex)
 - [sugyan/claude-code-webui](https://github.com/sugyan/claude-code-webui) — local-only browser UI
