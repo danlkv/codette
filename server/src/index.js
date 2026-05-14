@@ -256,9 +256,9 @@ app.put('/api/sessions/:id/name', requireJwt, requireHost, (req, res) => {
 
 // ── Create session ────────────────────────────────────────────────────────────
 app.post('/api/sessions', requireJwt, requireHost, (req, res) => {
-  const { cwd, firstMessage, codette_settings } = req.body || {};
+  const { cwd, codette_settings } = req.body || {};
   wtrace('server', 'host', 'new_session');
-  req.claudeHost.ws.send(JSON.stringify({ type: 'new_session', cwd, firstMessage, codette_settings }));
+  req.claudeHost.ws.send(JSON.stringify({ type: 'new_session', cwd, codette_settings }));
   res.status(202).json({});
 });
 
@@ -328,12 +328,7 @@ wss.on('connection', (ws, req) => {
 
       if (ev?.type === 'agent_event') {
         wtrace('host', 'server', 'agent_event', { sessionId: ev.sessionId?.slice(0, 8) ?? null });
-        if (ev.states) {
-          host.broadcast({ type: 'agent_event', states: ev.states });
-        } else {
-          const { sessionId, event } = ev;
-          host.broadcast({ type: 'agent_event', sessionId, event });
-        }
+        host.broadcast(ev);
         wtrace('server', 'client', 'agent_event', { sessionId: ev.sessionId?.slice(0, 8) ?? null });
         return;
       }

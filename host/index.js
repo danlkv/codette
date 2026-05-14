@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Danylo Lykov
 
-import { spawn, execSync } from 'child_process';
+import { spawn, execSync, execFileSync } from 'child_process';
 import { generateKeyPairSync, createPrivateKey, createPublicKey, randomBytes } from 'crypto';
 import { WebSocket } from 'ws';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import jwt from 'jsonwebtoken';
 import { ClaudeRenderer, toolSummary } from './renderer.js';
 import { RpcServer } from './rpc.js';
@@ -328,6 +328,12 @@ function spawnClaude(extraArgs = [], sessionIdHint = null, overrideCwd = null) {
 
           sendAgentEvent(newId, 'started');
 
+          // Echo first message back to client (deferred until sessionId is known)
+          if (agentEntry.pendingEcho) {
+            hostSend({ type: 'claude_line', sessionId: newId, line: agentEntry.pendingEcho });
+            agentEntry.pendingEcho = null;
+          }
+
           // Broadcast session list immediately — file may not exist yet so inject
           // a synthetic entry for the new session so it appears in the sidebar now.
           if (newId) {
@@ -404,13 +410,12 @@ const ALLOWED_PREFIXES = ['/tmp'];
 function resolveFsPath(p, sessionCwd) {
   if (!p) return null;
   if (p === '~' || p.startsWith('~/')) p = homedir() + p.slice(1);
-  if (!p.startsWith('/') && sessionCwd) return join(sessionCwd, p);
-  return p;
+  return resolve(sessionCwd || '/', p);
 }
 function pathAllowed(p, sessionCwd) {
   if (NO_DIR_PRIVACY) return true;
-  if (sessionCwd && p.startsWith(sessionCwd)) return true;
-  return ALLOWED_PREFIXES.some(prefix => p.startsWith(prefix + '/') || p === prefix);
+  if (sessionCwd && (p === sessionCwd || p.startsWith(sessionCwd + '/'))) return true;
+  return ALLOWED_PREFIXES.some(prefix => p === prefix || p.startsWith(prefix + '/'));
 }
 
 rpc.register('get_fs', (msg) => {
@@ -456,13 +461,13 @@ rpc.register('get_file', (msg) => {
 rpc.register('get_git_log', (msg) => {
   const sessionCwd = getSessionCwd(msg.sessionId);
   if (!sessionCwd) throw new Error('no cwd for session');
-  const logOut = execSync('git log --format="%H|%s|%aI|%an" -50', { cwd: sessionCwd }).toString().trim();
+  const logOut = execFileSync('git', ['log', '--format=%H|%s|%aI|%an', '-50'], { cwd: sessionCwd }).toString().trim();
   const commits = logOut ? logOut.split('\n').map(line => {
     const [hash, subject, date, author] = line.split('|');
     return { hash: hash?.slice(0, 7), subject, date, author };
   }) : [];
   let branch = null;
-  try { branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: sessionCwd }).toString().trim(); } catch {}
+  try { branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: sessionCwd }).toString().trim(); } catch {}
   log('info', 'get_git_log', { commits: commits.length, branch });
   return { commits, branch };
 });
@@ -470,7 +475,7 @@ rpc.register('get_git_log', (msg) => {
 rpc.register('get_git_status', (msg) => {
   const sessionCwd = getSessionCwd(msg.sessionId);
   if (!sessionCwd) throw new Error('no cwd for session');
-  const out = execSync('git status --porcelain', { cwd: sessionCwd }).toString();
+  const out = execFileSync('git', ['status', '--porcelain'], { cwd: sessionCwd }).toString();
   const files = out.trim() ? out.trim().split('\n').map(l => ({
     xy: l.slice(0, 2),
     path: l.slice(3),
@@ -484,8 +489,8 @@ rpc.register('get_git_file_diff', (msg) => {
   if (!sessionCwd) throw new Error('no cwd for session');
   if (!msg.path) throw new Error('path required');
   const MAX = 256 * 1024;
-  let diff = execSync(`git diff HEAD -- ${JSON.stringify(msg.path)}`, { cwd: sessionCwd, maxBuffer: MAX + 1 }).toString();
-  if (!diff.trim()) diff = execSync(`git diff --cached -- ${JSON.stringify(msg.path)}`, { cwd: sessionCwd, maxBuffer: MAX + 1 }).toString();
+  let diff = execFileSync('git', ['diff', 'HEAD', '--', msg.path], { cwd: sessionCwd, maxBuffer: MAX + 1 }).toString();
+  if (!diff.trim()) diff = execFileSync('git', ['diff', '--cached', '--', msg.path], { cwd: sessionCwd, maxBuffer: MAX + 1 }).toString();
   log('info', 'get_git_file_diff', { path: msg.path, size: diff.length });
   return { diff: diff.slice(0, MAX) };
 });
@@ -494,8 +499,9 @@ rpc.register('get_git_diff', (msg) => {
   const sessionCwd = getSessionCwd(msg.sessionId);
   if (!sessionCwd) throw new Error('no cwd for session');
   const MAX = 256 * 1024;
-  const diff = execSync(`git show --unified=3 ${msg.commit}`, { cwd: sessionCwd, maxBuffer: MAX + 1 }).toString();
-  const statOut = execSync(`git diff-tree --no-commit-id -r --numstat ${msg.commit}`, { cwd: sessionCwd }).toString().trim();
+  if (!msg.commit || !/^[0-9a-f]{4,40}$/.test(msg.commit)) throw new Error('invalid commit hash');
+  const diff = execFileSync('git', ['show', '--unified=3', msg.commit], { cwd: sessionCwd, maxBuffer: MAX + 1 }).toString();
+  const statOut = execFileSync('git', ['diff-tree', '--no-commit-id', '-r', '--numstat', msg.commit], { cwd: sessionCwd }).toString().trim();
   const stat = statOut ? statOut.split('\n').map(l => {
     const [added, deleted, path] = l.split('\t');
     return { added: +added, deleted: +deleted, path };
@@ -634,29 +640,8 @@ function connect() {
     }
 
     if (msg.type === 'new_session') {
-      const cwd = msg.cwd || null;
-      const firstMessage = msg.firstMessage || null;
-      const settings = msg.codette_settings ?? {};
-      log('info', 'new session requested', { cwd, hasMsg: !!firstMessage });
-      if (cwd) {
-        try { statSync(cwd); } catch {
-          log('error', 'new_session: cwd does not exist', { cwd });
-          ws.send(JSON.stringify({ type: 'error', message: `cwd does not exist: ${cwd}` }));
-          return;
-        }
-      }
-      const extraArgs = (settings.inlineFiles !== false)
-        ? ['--append-system-prompt', makeInlineFilePrompt(cwd)]
-        : [];
-      const agentEntry = spawnClaude(extraArgs, null, cwd);
-      if (firstMessage) {
-        // Write after a tick so the process has started reading stdin
-        setImmediate(() => {
-          agentEntry.proc.stdin.write(
-            JSON.stringify({ type: 'user', message: { role: 'user', content: firstMessage } }) + '\n'
-          );
-        });
-      }
+      // Legacy: bare new_session without a message (no Claude spawn until first message)
+      log('info', 'new_session (no message)', { cwd: msg.cwd });
       return;
     }
 
@@ -692,6 +677,32 @@ function connect() {
       log('info', 'user message → stdin', { preview: String(message.content).slice(0, 60), session: String(sessionId).slice(0, 8) });
 
       const echoLine = JSON.stringify({ type: 'user', message });
+
+      // ── New session: spawn fresh Claude ────────────────────────────────────
+      if (sessionId === '__new__') {
+        const cwd = msg.cwd || null;
+        const settings = msg.codette_settings ?? {};
+        if (cwd) {
+          try { statSync(cwd); } catch {
+            log('error', 'new_session: cwd does not exist', { cwd });
+            return;
+          }
+        }
+        const extraArgs = (settings.inlineFiles !== false)
+          ? ['--append-system-prompt', makeInlineFilePrompt(cwd)]
+          : [];
+        const agentEntry = spawnClaude(extraArgs, null, cwd);
+        // Defer echo until system.init provides the real sessionId
+        agentEntry.pendingEcho = echoLine;
+        setImmediate(() => {
+          agentEntry.proc.stdin.write(
+            JSON.stringify({ type: 'user', message }) + '\n'
+          );
+        });
+        return;
+      }
+
+      // ── Existing session ───────────────────────────────────────────────────
       const sendEcho = () => hostSend({ type: 'claude_line', sessionId, line: echoLine });
 
       let agentEntry = agents.get(sessionId);
@@ -723,3 +734,11 @@ function connect() {
 }
 
 connect();
+
+// ── Graceful shutdown ─────────────────────────────────────────────────────────
+function shutdown() {
+  for (const [, entry] of agents) entry.proc.kill();
+  process.exit(0);
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT',  shutdown);

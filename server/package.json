@@ -1,5 +1,5 @@
 {
-  "name": "webchat-server",
+  "name": "codette-server",
   "version": "1.0.0",
   "type": "module",
   "dependencies": {

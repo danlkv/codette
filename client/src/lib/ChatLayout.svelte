@@ -200,7 +200,7 @@
       sessions.update(list => list.map(s => filesMap[s.id] ? { ...s, files: filesMap[s.id] } : s));
     }
 
-    if (sessionList.length === 0) { console.debug('[history] initSessions: no sessions, returning'); return; }
+    if (sessionList.length === 0) { console.debug('[history] initSessions: no sessions, defaulting to __new__'); currentSessionId.set('__new__'); return; }
     const { sessionId: hashId, file: hashFile } = parseHash();
     const target = (hashId && hashId !== 'new' && sessionList.find(s => s.id === hashId))
       ? hashId
@@ -260,9 +260,14 @@
         applyHistoryLines(merged);
         saveHistory(id, { lines: merged, lineCount: data.totalLines, title: sessionTitle, contextWindow: storedContextWindow });
       } else {
-        lineCount = data.totalLines;
-        applyHistoryLines(lines);
-        saveHistory(id, { lines, lineCount: data.totalLines, title: sessionTitle, contextWindow: storedContextWindow });
+        if (lines.length === 0 && currentLines.length > 0) {
+          // Live lines arrived during fetch — don't overwrite them with empty history
+          lineCount = data.totalLines + currentLines.length;
+        } else {
+          lineCount = data.totalLines;
+          applyHistoryLines(lines);
+        }
+        saveHistory(id, { lines: currentLines, lineCount, title: sessionTitle, contextWindow: storedContextWindow });
       }
     } catch (e) { console.error('fetchAndApplyHistory:', e); }
   }
@@ -351,7 +356,7 @@
         console.warn('[e2e] encrypted message received but no key, forcing re-login');
         onLogout();
         return;
-      } else if (encKey && msg.type !== 'host_status' && msg.type !== 'agent_event') {
+      } else if (encKey && msg.type !== 'host_status') {
         // Reject plaintext when keys exist (downgrade protection)
         console.warn('[e2e] dropping plaintext message while keys exist:', msg.type);
         return;
@@ -381,6 +386,7 @@
       }
       else if (msg.type === 'claude_line') {
         const { sessionId, line } = msg;
+        wtrace('server', 'client', 'claude_line', sessionId, { current: get(currentSessionId)?.slice(0,8), lines: currentLines.length });
         if (sessionId === get(currentSessionId)) {
           try {
             const ev = JSON.parse(line);
@@ -403,6 +409,7 @@
       }
       else if (msg.type === 'agent_event') {
         const toState = ev => ev === 'idle' ? 'idle' : (ev === 'started' || ev === 'streaming') ? 'running' : null;
+        wtrace('server', 'client', 'agent_evt', msg.sessionId, { batch: !!msg.states, event: msg.event, awaiting: awaitingNewSession });
         if (msg.states) {
           sessions.update(list => list.map(s =>
             msg.states[s.id] !== undefined ? { ...s, agentState: toState(msg.states[s.id]) } : s
@@ -416,6 +423,7 @@
             navigator.vibrate?.(40);
           }
           if (awaitingNewSession && event === 'started' && sessionId !== get(currentSessionId)) {
+            wtrace('client', 'self', 'awaiting_switch', sessionId);
             awaitingNewSession = false;
             switchSession(sessionId);
           }
@@ -458,7 +466,7 @@
       console.debug('[history] switchSession: restoring from sessionData', sd.length, 'lines, lineCount=', lineCount);
       applyHistoryLines(currentLines);
     } else {
-      if (!hasHistory(id)) messages.set([]);
+      if (!hasHistory(id)) { wtrace('client', 'self', 'clear_messages', id); messages.set([]); }
       await loadSessionHistory(id);
     }
   }
@@ -528,12 +536,11 @@
   async function handleSend(text, clearFn) {
     if (text.startsWith('/') && handleSlash(text)) { clearFn?.(); return; }
 
-    if (get(currentSessionId) === '__new__') {
+    const sid = get(currentSessionId);
+    if (!sid || sid === '__new__') {
       awaitingNewSession = true;
-      try {
-        await createSession(token, { cwd: pendingCwd, firstMessage: text, codette_settings: pendingSettings ?? undefined });
-        clearFn?.();
-      } catch { awaitingNewSession = false; }
+      clearFn?.();
+      wsSend({ type: 'user', sessionId: '__new__', message: { role: 'user', content: text }, cwd: pendingCwd ?? hostCwd, codette_settings: pendingSettings ?? undefined });
       return;
     }
 
