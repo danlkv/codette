@@ -1,5 +1,9 @@
 # Codette
 
+<p align="center">
+  <img src="doc/Codette-mobile-dark-pendulum.png" width="320" alt="Codette mobile UI" />
+</p>
+
 > Control your local Claude Code from a mobile-friendly browser UI, anywhere. Self-hosted, end-to-end encrypted, with multi-host multi-device support.
 
 A three-piece system that lets you run Claude Code on your laptop and drive it from a browser on your phone, tablet, or any other machine. Kick off new prompts and watch output stream in real time — over the public internet, without exposing your machine.

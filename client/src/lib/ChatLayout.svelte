@@ -596,7 +596,7 @@
   <header>
     <button class="sidebar-toggle" onclick={() => sidebarOpen = !sidebarOpen}
       title="Toggle sessions" aria-pressed={sidebarOpen}>☰</button>
-    <span class="brand">claude</span>
+    <span class="brand">codette</span>
     <span class="session-title">{sessionTitle}</span>
     <div class="indicators">
       <span class="dot" class:on={$hostStatus === 'connected'}>host</span>

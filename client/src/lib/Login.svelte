@@ -38,7 +38,7 @@
 
 <div class="wrap">
   <div class="card">
-    <div class="brand">claude</div>
+    <div class="brand">codette</div>
     <form onsubmit={(e) => { e.preventDefault(); submit(); }}>
       <label>
         <span>Username</span>

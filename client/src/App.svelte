@@ -329,7 +329,7 @@
     overflow: hidden;
   }
   :global(#app) { height: 100svh; display: flex; flex-direction: column; }
-  :global(::-webkit-scrollbar) { width: 6px; }
+  :global(::-webkit-scrollbar) { width: 6px; height: 6px; }
   :global(::-webkit-scrollbar-track) { background: transparent; }
   :global(::-webkit-scrollbar-thumb) { background: var(--bg-elevated); border-radius: 3px; }
 
