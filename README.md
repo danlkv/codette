@@ -83,7 +83,3 @@ Change every default before exposing the server to the public internet.
 - [siteboon/claudecodeui](https://github.com/siteboon/claudecodeui) — desktop-focused Claude Code web UI
 - [chadbyte/clay](https://github.com/chadbyte/clay) — similar three-piece architecture
 - [sugyan/claude-code-webui](https://github.com/sugyan/claude-code-webui) — local-only browser UI
-
-## License
-
-[TBD]
