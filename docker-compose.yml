@@ -4,14 +4,28 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     environment:
-      CHAT_USERNAME: ${CHAT_USERNAME:-admin}
-      CHAT_PASSWORD: ${CHAT_PASSWORD:-changeme}
-      JWT_SECRET:    ${JWT_SECRET:-jwt-secret-change-me}
-      HOST_KEY:      ${HOST_KEY:-host-key-change-me}
-      PORT:          "3000"
+      HOST_KEY: ${HOST_KEY:-host-key-change-me}
+      PORT: "3000"
     volumes:
       - server-data:/data
     restart: unless-stopped
 
+  caddy:
+    image: caddy:2-alpine
+    profiles: [tls]
+    depends_on: [server]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SERVER_HOSTNAME: ${SERVER_HOSTNAME:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
 volumes:
   server-data:
+  caddy-data:
+  caddy-config:
