@@ -51,6 +51,8 @@ fi
 (cd "$INSTALL_DIR/host" && npm install --silent)
 
 # 3. Prompt for username and password
+echo ""
+echo "Configure your client access credentials:"
 DEFAULT_USER="$(whoami)"
 DEFAULT_PASS="$(head -c 32 /dev/urandom | LC_ALL=C tr -dc 'a-zA-Z0-9' | head -c 10)"
 

@@ -50,16 +50,14 @@
         <input bind:value={password} type="password" autocomplete="current-password" required />
       </label>
       {#if error}<p class="err">{error}</p>{/if}
-      {#if hostDown}
-        <div class="host-down">
-          <p>Host not connected</p>
-          <p class="hint">Download and install host:</p>
-          <code class="install-cmd">curl -fsSL {location.origin}/install.sh | sh</code>
-        </div>
-      {/if}
+      {#if hostDown}<p class="err">Host not connected</p>{/if}
       <button type="submit" disabled={loading}>{loading ? 'Signing in…' : 'Sign in'}</button>
       {#if onCancel}<button type="button" class="cancel" onclick={onCancel}>cancel</button>{/if}
     </form>
+    <div class="install-hint">
+      <p class="hint">Install host:</p>
+      <code class="install-cmd">curl -fsSL {location.origin}/install.sh | sh</code>
+    </div>
   </div>
 </div>
 
@@ -92,9 +90,8 @@
   button:hover:not(:disabled) { color: var(--accent-light); border-color: var(--accent-light); }
   button:disabled { opacity: .5; cursor: default; }
   .err { color: #f87171; font-size: .82rem; }
-  .host-down { text-align: center; padding: 8px 0; }
-  .host-down p { font-size: .85rem; color: var(--text-muted); margin-bottom: 6px; }
-  .host-down .hint { font-size: .78rem; }
+  .install-hint { text-align: center; }
+  .install-hint .hint { font-size: .78rem; color: var(--text-muted); margin-bottom: 6px; }
   .install-cmd {
     display: block; background: var(--bg-elevated); border: 1px solid var(--border);
     border-radius: 6px; padding: 10px 12px; font-size: .82rem; color: var(--text);
