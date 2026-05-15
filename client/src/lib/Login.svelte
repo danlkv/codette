@@ -7,9 +7,10 @@
 
   let { onLogin, onCancel } = $props();
   let username = $state(''), password = $state(''), error = $state(''), loading = $state(false);
+  let hostDown = $state(false);
 
   async function submit() {
-    loading = true; error = '';
+    loading = true; error = ''; hostDown = false;
     try {
       const post = (url, body) => fetch(url, {
         method: 'POST',
@@ -19,7 +20,7 @@
 
       wtrace('client', 'server', 'auth_challenge');
       const chalRes = await post('/api/auth/challenge', { username });
-      if (!chalRes.ok) { error = 'Host not connected'; return; }
+      if (!chalRes.ok) { hostDown = true; return; }
       const { nonce } = await chalRes.json();
 
       const response = await hmacSign(password, nonce);
@@ -49,6 +50,13 @@
         <input bind:value={password} type="password" autocomplete="current-password" required />
       </label>
       {#if error}<p class="err">{error}</p>{/if}
+      {#if hostDown}
+        <div class="host-down">
+          <p>Host not connected</p>
+          <p class="hint">Download and install host:</p>
+          <code class="install-cmd">curl -fsSL {location.origin}/install.sh | sh</code>
+        </div>
+      {/if}
       <button type="submit" disabled={loading}>{loading ? 'Signing in…' : 'Sign in'}</button>
       {#if onCancel}<button type="button" class="cancel" onclick={onCancel}>cancel</button>{/if}
     </form>
@@ -84,5 +92,13 @@
   button:hover:not(:disabled) { color: var(--accent-light); border-color: var(--accent-light); }
   button:disabled { opacity: .5; cursor: default; }
   .err { color: #f87171; font-size: .82rem; }
+  .host-down { text-align: center; padding: 8px 0; }
+  .host-down p { font-size: .85rem; color: var(--text-muted); margin-bottom: 6px; }
+  .host-down .hint { font-size: .78rem; }
+  .install-cmd {
+    display: block; background: var(--bg-elevated); border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px 12px; font-size: .82rem; color: var(--text);
+    word-break: break-all; user-select: all; cursor: text;
+  }
   .cancel { border-color: var(--border); color: var(--text-dim); margin-top: 0; }
 </style>

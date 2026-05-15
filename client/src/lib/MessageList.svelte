@@ -108,7 +108,7 @@
         <div class="empty">
           {#if hostStatus !== 'connected'}
             <p>Waiting for host…</p>
-            <code>SERVER_URL=wss://chat.example.com HOST_KEY=… node host/index.js</code>
+            <code>curl -fsSL {location.origin}/install.sh | sh</code>
           {:else}
             <p>Say something</p>
           {/if}

@@ -4,69 +4,90 @@
 
 set -e
 
-# claudew host installer
-# usage: ./install.sh
-# env vars can be pre-set or entered interactively
+# Codette host installer
+# Server-served: curl -fsSL https://your-server/install.sh | sh
+#   (SERVER_URL and HOST_KEY are baked in by the server)
+# Local clone:   ./install.sh
+#   (prompts for SERVER_URL and HOST_KEY interactively)
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_URL="https://github.com/danlkv/codette.git"
+INSTALL_DIR="$HOME/.local/share/codette"
+CONFIG_DIR="$HOME/.config/codette"
+BIN_DIR="$HOME/.local/bin"
 
-# load .env if present
-if [ -f "$SCRIPT_DIR/.env" ]; then
-  # shellcheck disable=SC1091
-  set -a; . "$SCRIPT_DIR/.env"; set +a
-fi
+# ── Server URL and host key ──────────────────────────────────────────────────
+# When served by the server, these are replaced with actual values.
+# When run locally, they fall back to env vars or interactive prompts.
+SERVER_URL="${CODETTE_SERVER_URL:-}"
+HOST_KEY="${CODETTE_HOST_KEY:-}"
 
+# Read from /dev/tty so prompts work even when piped (curl | sh)
 ask() {
-  printf '%s [%s]: ' "$1" "$2"
-  read -r val
-  printf '%s' "${val:-$2}"
+  printf '%s [%s]: ' "$1" "$2" > /dev/tty
+  read -r val < /dev/tty
+  echo "${val:-$2}"
 }
 
-SERVER_URL="${SERVER_URL:-$(ask 'Server URL' 'wss://chat.example.com')}"
-echo
-HOST_KEY="${HOST_KEY:-$(ask 'Host key (shared with server)' 'host-key-change-me')}"
-echo
-CLIENT_USERNAME="${CLIENT_USERNAME:-$(ask 'Username' "$(whoami)")}"
-echo
-CLIENT_PASSWORD="${CLIENT_PASSWORD:-$(ask 'Password' 'changeme')}"
-echo
-
-# write run script
-cat > "$SCRIPT_DIR/run.sh" <<EOF
-#!/bin/sh
-export SERVER_URL='$SERVER_URL'
-export HOST_KEY='$HOST_KEY'
-export CLIENT_USERNAME='<username>'
-export CLIENT_PASSWORD='<password>'
-exec node '$SCRIPT_DIR/host/index.js' "\$@"
-EOF
-chmod +x "$SCRIPT_DIR/run.sh"
-echo "wrote $SCRIPT_DIR/run.sh"
-
-# optional systemd service
-printf 'Install systemd user service? [y/N]: '
-read -r yn
-if [ "$yn" = "y" ] || [ "$yn" = "Y" ]; then
-  SERVICE_DIR="$HOME/.config/systemd/user"
-  mkdir -p "$SERVICE_DIR"
-  cat > "$SERVICE_DIR/claudew-host.service" <<EOF
-[Unit]
-Description=claudew host
-After=network.target
-
-[Service]
-ExecStart=$SCRIPT_DIR/run.sh
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-EOF
-  systemctl --user daemon-reload
-  systemctl --user enable claudew-host
-  systemctl --user start claudew-host
-  echo "service installed and started"
-  echo "  logs: journalctl --user -u claudew-host -f"
-else
-  echo "run with: $SCRIPT_DIR/run.sh"
+if [ -z "$SERVER_URL" ]; then
+  SERVER_URL=$(ask "Server URL" "ws://localhost:3000")
 fi
+if [ -z "$HOST_KEY" ]; then
+  HOST_KEY=$(ask "Host key" "host-key-change-me")
+fi
+
+echo "Installing codette host..."
+
+# 1. Clone or update repo
+if [ -d "$INSTALL_DIR/.git" ]; then
+  echo "Updating existing installation..."
+  git -C "$INSTALL_DIR" fetch --depth 1 origin
+  git -C "$INSTALL_DIR" reset --hard origin/HEAD
+else
+  echo "Cloning repository..."
+  git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
+fi
+
+# 2. Install host dependencies
+(cd "$INSTALL_DIR/host" && npm install --silent)
+
+# 3. Prompt for username and password
+DEFAULT_USER="$(whoami)"
+DEFAULT_PASS="$(head -c 32 /dev/urandom | LC_ALL=C tr -dc 'a-zA-Z0-9' | head -c 10)"
+
+USERNAME=$(ask "Username" "$DEFAULT_USER")
+PASSWORD=$(ask "Password" "$DEFAULT_PASS")
+
+# 4. Write credentials.json
+mkdir -p "$CONFIG_DIR"
+cat > "$CONFIG_DIR/credentials.json" <<CRED
+{
+  "server": "$SERVER_URL",
+  "hostKey": "$HOST_KEY",
+  "username": "$USERNAME",
+  "password": "$PASSWORD"
+}
+CRED
+chmod 600 "$CONFIG_DIR/credentials.json"
+echo "Wrote $CONFIG_DIR/credentials.json"
+
+# 5. Symlink binary
+mkdir -p "$BIN_DIR"
+ln -sf "$INSTALL_DIR/host/index.js" "$BIN_DIR/codette"
+chmod +x "$INSTALL_DIR/host/index.js"
+
+# 6. Check PATH and print summary
+HOST_VER=$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('$INSTALL_DIR/host/package.json','utf8')).version)")
+echo ""
+case ":$PATH:" in
+  *":$BIN_DIR:"*)
+    echo "Codette host v${HOST_VER} installed at $BIN_DIR/codette"
+    echo "Run:  codette"
+    ;;
+  *)
+    echo "Add to your shell profile:"
+    echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+    echo ""
+    echo "Codette host v${HOST_VER} installed at $BIN_DIR/codette"
+    echo "Run:  ~/.local/bin/codette"
+    ;;
+esac

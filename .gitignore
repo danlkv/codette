@@ -3,3 +3,5 @@ client/dist/
 .env
 _worktrees/
 .dev-data/
+test-results/
+.last-run.json

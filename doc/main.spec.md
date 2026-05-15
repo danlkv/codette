@@ -110,7 +110,77 @@ agent the syntax. See `inline-file.spec.md`.
 - Server has no client config
 
 
+## Host Setup
+
+### Install
+
+Server serves a shell script at `GET /install.sh` with `HOST_KEY` and `SERVER_URL` baked in.
+
+```
+curl -fsSL https://your-server:3000/install.sh | sh
+```
+
+The script:
+1. Clones the GitHub repo into `~/.local/share/codette/`
+2. Runs `npm install --prefix ~/.local/share/codette/host`
+3. Prompts for username and password (enter to accept defaults):
+   ```
+   Username [dan]:
+   Password [a3kR4mXq2p]:
+   ```
+   Username defaults to `$(whoami)`. Password defaults to a random 10-char alphanumeric.
+4. Writes `~/.config/codette/credentials.json` (mode 0600):
+   ```json
+   { "server": "wss://your-server:3000", "hostKey": "...", "username": "dan", "password": "a3kR4mXq2p" }
+   ```
+5. Symlinks `~/.local/bin/codette` → `~/.local/share/codette/host/index.js`
+6. If `~/.local/bin` is not in `$PATH`, prints:
+   ```
+   Add to your shell profile:
+     export PATH="$HOME/.local/bin:$PATH"
+   ```
+7. Prints `Run:  codette`
+
+### Startup
+
+On connect the host prints the server URL and credentials so the user can log in:
+```
+Connected to https://your-server:3000
+  Username: dan
+  Password: a3kR4mXq2p
+```
+
+### Config precedence
+
+CLI flags → `~/.config/codette/credentials.json` → env vars → defaults.
+
+| Setting | Config key | Env var | CLI flag | Default |
+|---------|-----------|---------|----------|---------|
+| Server URL | `server` | `CODETTE_SERVER_URL` | `--server`, `-s` | `ws://localhost:3000` |
+| Host key | `hostKey` | `CODETTE_HOST_KEY` | — | `host-key-change-me` |
+| Username | `username` | `CODETTE_USERNAME` | `--username`, `-u` | `$(whoami)` |
+| Password | `password` | `CODETTE_PASSWORD` | `--password`, `-p` | `changeme` |
+
+### CLI
+
+```
+codette [options]          # connect to server
+codette update             # git pull + npm install
+```
+
+### Update
+
+`codette update` pulls latest source and reinstalls host dependencies.
+
+### Login page
+
+When no host is connected, the login page displays:
+```
+Download and install host:
+  curl -fsSL https://your-server:3000/install.sh | sh
+```
+
 ## Deployment
 - Server in Docker, port bound to localhost only.
 - nginx reverse proxy at `chat.example.com` with Let's Encrypt SSL.
-- Host script runs locally, connects via `wss://chat.example.com`.
+- Host connects locally via `wss://chat.example.com`.

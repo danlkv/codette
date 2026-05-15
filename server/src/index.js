@@ -7,6 +7,7 @@ import jwt from 'jsonwebtoken';
 import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import { readFileSync } from 'fs';
 import { RpcClient } from './rpc.js';
 import { unpackParam } from '../../shared/crypto.js';
 
@@ -44,6 +45,7 @@ const hosts   = new Map();  // username → HostContext
 const clients = new Map();  // username → Set<WebSocket>
 
 const app = express();
+app.set('trust proxy', true);
 app.use(express.json());
 
 // ── REST request logging ──────────────────────────────────────────────────────
@@ -277,6 +279,18 @@ app.delete('/api/sessions/:id', requireJwt, requireHost, (req, res) => {
     }
   }, 30000);
   res.on('close', () => clearTimeout(timer));
+});
+
+// ── Install script ───────────────────────────────────────────────────────────
+const installShPath = path.resolve(__dirname, '../../install.sh');
+app.get('/install.sh', (req, res) => {
+  const wsProto = req.protocol === 'https' ? 'wss' : 'ws';
+  const serverUrl = `${wsProto}://${req.get('host')}`;
+  let script = readFileSync(installShPath, 'utf8');
+  // Bake in server URL and host key so the user isn't prompted for them
+  script = script.replace('SERVER_URL="${CODETTE_SERVER_URL:-}"', `SERVER_URL="${serverUrl}"`);
+  script = script.replace('HOST_KEY="${CODETTE_HOST_KEY:-}"', `HOST_KEY="${HOST_KEY}"`);
+  res.type('text/plain').send(script);
 });
 
 // ── SPA fallback ──────────────────────────────────────────────────────────────

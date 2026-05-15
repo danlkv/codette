@@ -1,0 +1,12 @@
+{
+  "name": "codette-e2e-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "npx playwright test --config tests/playwright.config.js",
+    "test:headed": "npx playwright test --config tests/playwright.config.js --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0"
+  }
+}

@@ -5,7 +5,7 @@
 import { spawn, execSync, execFileSync } from 'child_process';
 import { generateKeyPairSync, createPrivateKey, createPublicKey, randomBytes } from 'crypto';
 import { WebSocket } from 'ws';
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync, existsSync } from 'fs';
 import { homedir } from 'os';
 import { join, resolve } from 'path';
 import jwt from 'jsonwebtoken';
@@ -14,10 +14,37 @@ import { RpcServer } from './rpc.js';
 import { makeInlineFilePrompt } from '../shared/prompts.js';
 import { hmacVerify, deriveKey, deriveNonceKey, encrypt, encryptDet, decrypt } from '../shared/crypto.js';
 import { APP_NAME } from '../shared/constants.js';
-const SERVER_URL       = process.env.SERVER_URL       || 'ws://localhost:3000';
-const CLIENT_USERNAME  = process.env.CLIENT_USERNAME  || execSync('whoami').toString().trim();
-const CLIENT_PASSWORD  = process.env.CLIENT_PASSWORD  || 'changeme';
-const HOST_TOKEN       = process.env.HOST_KEY         || 'host-key-change-me';
+// ── Config loading ──────────────────────────────────────────────────────────
+// Precedence: CLI flags > credentials.json > CODETTE_* env > old env vars > defaults
+
+function loadCredentials() {
+  const p = join(homedir(), '.config', 'codette', 'credentials.json');
+  try { if (existsSync(p)) return JSON.parse(readFileSync(p, 'utf8')); } catch {}
+  return {};
+}
+
+function parseCliFlags() {
+  const flags = {};
+  const args = process.argv.slice(2);
+  for (let i = 0; i < args.length; i++) {
+    if ((args[i] === '--server' || args[i] === '-s') && args[i + 1]) flags.server = args[++i];
+    else if ((args[i] === '--username' || args[i] === '-u') && args[i + 1]) flags.username = args[++i];
+    else if ((args[i] === '--password' || args[i] === '-p') && args[i + 1]) flags.password = args[++i];
+  }
+  return flags;
+}
+
+const _cli = parseCliFlags();
+const _creds = loadCredentials();
+
+const SERVER_URL = _cli.server || _creds.server
+  || process.env.CODETTE_SERVER_URL || process.env.SERVER_URL || 'ws://localhost:3000';
+const CLIENT_USERNAME = _cli.username || _creds.username
+  || process.env.CODETTE_USERNAME || process.env.CLIENT_USERNAME || execSync('whoami').toString().trim();
+const CLIENT_PASSWORD = _cli.password || _creds.password
+  || process.env.CODETTE_PASSWORD || process.env.CLIENT_PASSWORD || 'changeme';
+const HOST_TOKEN = _creds.hostKey
+  || process.env.CODETTE_HOST_KEY || process.env.HOST_KEY || 'host-key-change-me';
 const CLAUDE_DIR       = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
 const E2E_ENABLED      = process.env.E2E !== '0';
 const TRACE            = process.env.CODETTE_TRACE === '1';
@@ -87,24 +114,55 @@ const encKeyReady = E2E_ENABLED
 // ── Pending auth challenges ───────────────────────────────────────────────────
 const pendingChallenges = new Map(); // nonce → { username, ts }
 
+// ── Version ──────────────────────────────────────────────────────────────────
+const HOST_VERSION = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
+
+if (process.argv.includes('--version') || process.argv.includes('-v')) {
+  process.stdout.write(`Codette host v${HOST_VERSION}\n`);
+  process.exit(0);
+}
+
+// ── Subcommands ──────────────────────────────────────────────────────────────
+if (process.argv[2] === 'update') {
+  const installDir = join(homedir(), '.local', 'share', 'codette');
+  try {
+    process.stdout.write('Pulling latest source...\n');
+    execSync('git fetch --depth 1 origin', { cwd: installDir, stdio: 'inherit' });
+    execSync('git reset --hard origin/HEAD', { cwd: installDir, stdio: 'inherit' });
+    process.stdout.write('Installing dependencies...\n');
+    execSync('npm install', { cwd: join(installDir, 'host'), stdio: 'inherit' });
+    process.stdout.write('Update complete.\n');
+  } catch (e) {
+    process.stderr.write(`Update failed: ${e.message}\n`);
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
 // --no-dir-privacy: disable cwd-restriction check on get_fs / get_file
 const NO_DIR_PRIVACY = process.argv.includes('--no-dir-privacy');
 
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
-  process.stdout.write(`Usage: node host/index.js [options]
-
-Environment variables:
-  SERVER_URL        WebSocket server URL          (default: ws://localhost:3000)
-  CLIENT_USERNAME   Username shown in chat        (default: whoami)
-  CLIENT_PASSWORD   Password for web login        (default: changeme)
-  HOST_KEY          Shared secret with server     (default: host-key-change-me)
+  process.stdout.write(`Usage: codette [options]
+       codette update          Pull latest source + reinstall dependencies
 
 Options:
-  --no-dir-privacy  Disable cwd-restriction on get_fs/get_file (allows any path)
-  --help, -h        Show this help
+  -s, --server <url>    Server WebSocket URL
+  -u, --username <name> Username shown in chat
+  -p, --password <pass> Password for web login
+  --no-dir-privacy      Disable cwd-restriction on get_fs/get_file
+  -v, --version         Print version
+  -h, --help            Show this help
 
-Example:
-  HOST_KEY=secret CLIENT_USERNAME=dan SERVER_URL=wss://chat.example.com node host/index.js
+Config precedence: CLI flags > ~/.config/codette/credentials.json > env vars > defaults
+
+Environment variables:
+  CODETTE_SERVER_URL    WebSocket server URL          (default: ws://localhost:3000)
+  CODETTE_USERNAME      Username shown in chat        (default: whoami)
+  CODETTE_PASSWORD      Password for web login        (default: changeme)
+  CODETTE_HOST_KEY      Shared secret with server     (default: host-key-change-me)
+
+Legacy env vars also supported: SERVER_URL, CLIENT_USERNAME, CLIENT_PASSWORD, HOST_KEY
 `);
   process.exit(0);
 }

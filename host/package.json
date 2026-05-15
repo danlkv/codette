@@ -1,9 +1,9 @@
 {
-  "name": "claudew",
-  "version": "1.0.0",
+  "name": "codette",
+  "version": "0.1.0",
   "type": "module",
   "bin": {
-    "claudew": "./index.js"
+    "codette": "./index.js"
   },
   "scripts": {
     "dev": "node --watch index.js"
