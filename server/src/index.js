@@ -7,7 +7,8 @@ import jwt from 'jsonwebtoken';
 import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
+import { execFileSync } from 'child_process';
 import { RpcClient } from './rpc.js';
 import { unpackParam } from '../../shared/crypto.js';
 
@@ -292,6 +293,22 @@ app.get('/install.sh', (req, res) => {
   script = script.replace('HOST_KEY="${CODETTE_HOST_KEY:-}"', `HOST_KEY="${HOST_KEY}"`);
   res.type('text/plain').send(script);
 });
+
+// ── Host tarball (fallback when git/GitHub unavailable) ──────────────────────
+const appRoot = path.resolve(__dirname, '../..');
+const hostDir = path.join(appRoot, 'host');
+if (existsSync(hostDir)) {
+  app.get('/host.tar.gz', (_req, res) => {
+    try {
+      const tar = execFileSync('tar', [
+        'czf', '-', '-C', appRoot, 'host', 'shared',
+      ], { maxBuffer: 10 * 1024 * 1024 });
+      res.type('application/gzip').send(tar);
+    } catch (e) {
+      res.status(500).json({ error: 'Failed to create tarball' });
+    }
+  });
+}
 
 // ── SPA fallback ──────────────────────────────────────────────────────────────
 app.get('*', (_req, res) => res.sendFile(path.join(clientDist, 'index.html')));

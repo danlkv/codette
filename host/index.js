@@ -125,10 +125,19 @@ if (process.argv.includes('--version') || process.argv.includes('-v')) {
 // ── Subcommands ──────────────────────────────────────────────────────────────
 if (process.argv[2] === 'update') {
   const installDir = join(homedir(), '.local', 'share', 'codette');
+  const httpUrl = SERVER_URL.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
   try {
     process.stdout.write('Pulling latest source...\n');
-    execSync('git fetch --depth 1 origin', { cwd: installDir, stdio: 'inherit' });
-    execSync('git reset --hard origin/HEAD', { cwd: installDir, stdio: 'inherit' });
+    let gitOk = false;
+    try {
+      execSync('git fetch --depth 1 origin', { cwd: installDir, stdio: 'inherit' });
+      execSync('git reset --hard origin/HEAD', { cwd: installDir, stdio: 'inherit' });
+      gitOk = true;
+    } catch {}
+    if (!gitOk) {
+      process.stdout.write('git failed, downloading tarball from server...\n');
+      execSync(`curl -fsSL "${httpUrl}/host.tar.gz" | tar xz -C "${installDir}" --strip-components=0`, { stdio: 'inherit' });
+    }
     process.stdout.write('Installing dependencies...\n');
     execSync('npm install', { cwd: join(installDir, 'host'), stdio: 'inherit' });
     process.stdout.write('Update complete.\n');
