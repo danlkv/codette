@@ -5,6 +5,7 @@ services:
       - "127.0.0.1:3000:3000"
     environment:
       HOST_KEY: ${HOST_KEY:-host-key-change-me}
+      HOST_TOKEN_TTL: ${HOST_TOKEN_TTL:-0}
       PORT: "3000"
     volumes:
       - server-data:/data

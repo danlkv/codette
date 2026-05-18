@@ -7,16 +7,62 @@ import jwt from 'jsonwebtoken';
 import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { execFileSync } from 'child_process';
+import { randomBytes } from 'crypto';
 import { RpcClient } from './rpc.js';
 import { unpackParam } from '../../shared/crypto.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const HOST_KEY   = process.env.HOST_KEY   || 'host-key-change-me';
+const HOST_TOKEN_TTL = parseInt(process.env.HOST_TOKEN_TTL || '0', 10); // seconds, 0 = never expires
 
 const PORT       = parseInt(process.env.PORT || '3000', 10);
+
+// ── Host token store ─────────────────────────────────────────────────────────
+// Tokens are persisted in /data/host-tokens.json (Docker volume).
+// Each entry is keyed by IP: { token, created, expires, label? }
+const TOKEN_FILE = '/data/host-tokens.json';
+
+function loadTokens() {
+  try { return existsSync(TOKEN_FILE) ? JSON.parse(readFileSync(TOKEN_FILE, 'utf8')) : {}; } catch { return {}; }
+}
+
+function saveTokens(tokens) {
+  mkdirSync('/data', { recursive: true });
+  writeFileSync(TOKEN_FILE, JSON.stringify(tokens, null, 2));
+}
+
+function validateToken(token) {
+  if (token === HOST_KEY) return true; // master key always valid
+  const tokens = loadTokens();
+  const entry = Object.values(tokens).find(e => e.token === token);
+  if (!entry) return false;
+  if (entry.expires > 0 && Date.now() > entry.expires) return false;
+  return true;
+}
+
+function getOrCreateTokenForIp(ip) {
+  const tokens = loadTokens();
+  const existing = tokens[ip];
+  if (existing) {
+    if (existing.expires > 0 && Date.now() > existing.expires) {
+      return { error: 'Token expired for this address' };
+    }
+    return { token: existing.token };
+  }
+  // Issue new token
+  const token = randomBytes(16).toString('hex');
+  const now = Date.now();
+  tokens[ip] = {
+    token,
+    created: now,
+    expires: HOST_TOKEN_TTL > 0 ? now + HOST_TOKEN_TTL * 1000 : 0,
+  };
+  saveTokens(tokens);
+  return { token };
+}
 
 
 // ── Per-host state ────────────────────────────────────────────────────────────
@@ -285,12 +331,14 @@ app.delete('/api/sessions/:id', requireJwt, requireHost, (req, res) => {
 // ── Install script ───────────────────────────────────────────────────────────
 const installShPath = path.resolve(__dirname, '../../install.sh');
 app.get('/install.sh', (req, res) => {
+  const ip = req.ip;
+  const { token, error } = getOrCreateTokenForIp(ip);
+  if (error) return res.status(403).type('text/plain').send(`# Error: ${error}\n`);
   const wsProto = req.protocol === 'https' ? 'wss' : 'ws';
   const serverUrl = `${wsProto}://${req.get('host')}`;
   let script = readFileSync(installShPath, 'utf8');
-  // Bake in server URL and host key so the user isn't prompted for them
   script = script.replace('SERVER_URL="${CODETTE_SERVER_URL:-}"', `SERVER_URL="${serverUrl}"`);
-  script = script.replace('HOST_KEY="${CODETTE_HOST_KEY:-}"', `HOST_KEY="${HOST_KEY}"`);
+  script = script.replace('HOST_KEY="${CODETTE_HOST_KEY:-}"', `HOST_KEY="${token}"`);
   res.type('text/plain').send(script);
 });
 
@@ -322,7 +370,7 @@ wss.on('connection', (ws, req) => {
 
   // ── Host connection ────────────────────────────────────────────────────────
   if (url.pathname === '/host') {
-    if (url.searchParams.get('token') !== HOST_KEY) { ws.close(1008, 'Unauthorized'); return; }
+    if (!validateToken(url.searchParams.get('token'))) { ws.close(1008, 'Unauthorized'); return; }
     const clientUsername = url.searchParams.get('clientUsername');
     if (!clientUsername) { ws.close(1008, 'clientUsername required'); return; }
     if (hosts.has(clientUsername)) { ws.close(1008, 'Host already connected for this username'); return; }
