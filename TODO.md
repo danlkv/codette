@@ -4,7 +4,7 @@
 
 1. Question tool not supported in `--json` mode — remove it or figure out how to support.
 2. WebSocket status reported as inactive if host is inactive at start.
-3. First message in a new session is not displayed in the client UI.
+3. [x] First message in a new session is not displayed in the client UI.
 4. [x] Host crashes if the directory for a new session does not exist.
 5. ExitPlanMode is silently rejecting in `--json` mode.
 
@@ -46,7 +46,7 @@ Theme: no way to show someone a session without giving them account access.
    - Share link opens a view-only render — no auth required, no input controls.
    - Expiry and revocation controlled by the owner.
 
-5. E2E encryption & device trust
+5. [x] E2E encryption & device trust
 Theme: the server is a relay — it sees all session traffic in plaintext, so a compromised relay exposes full history.
    - Encrypt messages on the client before sending; decrypt on receive — relay sees only ciphertext.
    - Device pairing flow to share keys across devices.
@@ -80,7 +80,7 @@ Theme: PDF re-renders fully on each zoom step, causing lag; no dark mode invert.
    - Debounce or cancel in-flight renders on rapid zoom changes.
    - Add invert mode (CSS filter) for dark-background reading.
 
-6. Session renaming
+6. [x] Session renaming
 Theme: session list shows only AI-generated slugs — no way to label sessions by purpose.
    - Inline rename on double-click or via context menu.
    - Persisted per-session.
