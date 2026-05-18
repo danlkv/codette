@@ -66,7 +66,7 @@ fi
 echo ""
 echo "Configure your client access credentials:"
 DEFAULT_USER="$(whoami)"
-DEFAULT_PASS="$(head -c 32 /dev/urandom | LC_ALL=C tr -dc 'a-zA-Z0-9' | head -c 10)"
+DEFAULT_PASS="$(LC_ALL=C tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 10)"
 
 USERNAME=$(ask "Username" "$DEFAULT_USER")
 PASSWORD=$(ask "Password" "$DEFAULT_PASS")
