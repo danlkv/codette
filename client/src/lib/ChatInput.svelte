@@ -14,7 +14,8 @@
     { cmd: '/status',  desc: 'connection status' },
     { cmd: '/btw',     desc: 'side message (not in history)' },
     { cmd: '/reload',  desc: 'clear cache and refetch full history' },
-    { cmd: '/inline-files', desc: 'instruct agent to use inline file viewer' },
+    { cmd: '/codette-inline-files', desc: 'instruct agent to use inline file viewer' },
+    { cmd: '/codette-html-render', desc: 'enable live HTML rendering' },
   ];
 
   let prefix = $derived(value.split(' ')[0]);
