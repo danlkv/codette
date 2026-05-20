@@ -4,28 +4,6 @@
 <script>
   let { html } = $props();
   let collapsed = $state(false);
-  let iframeEl = $state(null);
-
-  function resize() {
-    if (!iframeEl) return;
-    try {
-      const h = iframeEl.contentDocument?.documentElement?.scrollHeight;
-      if (h) iframeEl.style.height = Math.min(h + 4, 600) + 'px';
-    } catch { /* cross-origin fallback: keep default height */ }
-  }
-
-  $effect(() => {
-    if (!iframeEl || !html) return;
-    const doc = iframeEl.contentDocument;
-    if (!doc) return;
-    doc.open();
-    doc.write(html);
-    doc.close();
-    // resize once loaded
-    iframeEl.addEventListener('load', resize, { once: true });
-    // also resize after a tick for synchronous content
-    setTimeout(resize, 50);
-  });
 </script>
 
 <div class="html-render">
@@ -37,7 +15,7 @@
   </div>
   {#if !collapsed}
     <iframe
-      bind:this={iframeEl}
+      srcdoc={html}
       sandbox="allow-scripts"
       title="rendered html"
       class="hr-frame"
