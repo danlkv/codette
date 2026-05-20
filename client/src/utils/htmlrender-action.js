@@ -3,12 +3,14 @@
 
 import { mount } from 'svelte';
 import HtmlRender from '../lib/HtmlRender.svelte';
+import { htmlRenderStore } from './markdown.js';
 
 export function htmlRenderAction(node) {
   function run() {
     for (const el of node.querySelectorAll('.html-render-block:not([data-mounted])')) {
       el.dataset.mounted = '1';
-      const html = el.dataset.html;
+      const id = el.dataset.hrid;
+      const html = id ? htmlRenderStore.get(id) : null;
       if (!html) continue;
       mount(HtmlRender, {
         target: el,

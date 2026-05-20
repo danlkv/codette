@@ -7,6 +7,10 @@ import katex from 'katex';
 
 const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+// Store htmlrender content out-of-band so DOMPurify can't strip it
+let _hrId = 0;
+export const htmlRenderStore = new Map();
+
 function renderMath(tex, display) {
   try {
     return katex.renderToString(tex, { displayMode: display, throwOnError: false, output: 'html' });
@@ -50,7 +54,9 @@ marked.use({
     code(token) {
       if (token.lang === 'mermaid') return `<div class="mermaid">${esc(token.text)}</div>`;
       if (token.lang === 'htmlrender') {
-        return `<div class="html-render-block" data-html="${esc(token.text).replace(/"/g, '&quot;')}"></div>`;
+        const id = String(++_hrId);
+        htmlRenderStore.set(id, token.text);
+        return `<div class="html-render-block" data-hrid="${id}"></div>`;
       }
       if (token.lang === 'sourcefile') {
         const [pathLine, ...annotLines] = token.text.trim().split('\n');
@@ -76,7 +82,7 @@ marked.use({
 
 const DOMPURIFY_CONFIG = {
   ADD_TAGS: ['div'],
-  ADD_ATTR: ['aria-hidden', 'data-path', 'data-ranges', 'data-ann', 'data-html'],
+  ADD_ATTR: ['aria-hidden', 'data-path', 'data-ranges', 'data-ann', 'data-hrid'],
 };
 
 export function renderMd(text) {
