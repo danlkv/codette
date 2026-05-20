@@ -15,7 +15,7 @@ import { makeInlineFilePrompt } from '../shared/prompts.js';
 import { hmacVerify, deriveKey, deriveNonceKey, encrypt, encryptDet, decrypt } from '../shared/crypto.js';
 import { APP_NAME } from '../shared/constants.js';
 // ── Config loading ──────────────────────────────────────────────────────────
-// Precedence: CLI flags > credentials.json > CODETTE_* env > old env vars > defaults
+// Precedence: CLI flags > env vars > credentials.json > defaults
 
 function loadCredentials() {
   const p = join(homedir(), '.config', 'codette', 'credentials.json');
@@ -37,14 +37,17 @@ function parseCliFlags() {
 const _cli = parseCliFlags();
 const _creds = loadCredentials();
 
-const SERVER_URL = _cli.server || _creds.server
-  || process.env.CODETTE_SERVER_URL || process.env.SERVER_URL || 'ws://localhost:3000';
-const CLIENT_USERNAME = _cli.username || _creds.username
-  || process.env.CODETTE_USERNAME || process.env.CLIENT_USERNAME || execSync('whoami').toString().trim();
-const CLIENT_PASSWORD = _cli.password || _creds.password
-  || process.env.CODETTE_PASSWORD || process.env.CLIENT_PASSWORD || 'changeme';
-const HOST_TOKEN = _creds.hostKey
-  || process.env.CODETTE_HOST_KEY || process.env.HOST_KEY || 'host-key-change-me';
+const SERVER_URL = _cli.server
+  || process.env.CODETTE_SERVER_URL || process.env.SERVER_URL
+  || _creds.server || 'ws://localhost:3000';
+const CLIENT_USERNAME = _cli.username
+  || process.env.CODETTE_USERNAME || process.env.CLIENT_USERNAME
+  || _creds.username || execSync('whoami').toString().trim();
+const CLIENT_PASSWORD = _cli.password
+  || process.env.CODETTE_PASSWORD || process.env.CLIENT_PASSWORD
+  || _creds.password || 'changeme';
+const HOST_TOKEN = process.env.CODETTE_HOST_KEY || process.env.HOST_KEY
+  || _creds.hostKey || 'host-key-change-me';
 const CLAUDE_DIR       = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
 const E2E_ENABLED      = process.env.E2E !== '0';
 const TRACE            = process.env.CODETTE_TRACE === '1';
