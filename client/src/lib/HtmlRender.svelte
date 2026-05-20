@@ -55,8 +55,6 @@
 
 <style>
   .html-render {
-    border: 1px solid var(--border, #333);
-    border-radius: 5px;
     overflow: hidden;
     margin: .5em 0;
   }
