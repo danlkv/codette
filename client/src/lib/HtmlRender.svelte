@@ -7,38 +7,52 @@
   let iframeEl = $state(null);
   let height = $state(300);
 
-  // Inject a small script that posts the document height back to the parent.
-  // Uses document.body.offsetHeight (actual content size) instead of
-  // documentElement.scrollHeight (which returns max(content, viewport) and
-  // creates a feedback loop when the parent adds padding to the height).
-  // Debounced to avoid rapid-fire MutationObserver events.
+  // Inject a script that posts content height to parent via ResizeObserver.
+  // ResizeObserver fires only when body dimensions actually change (unlike
+  // MutationObserver which fires on every DOM mutation and can loop forever
+  // with dynamic content). Guard against posting unchanged values.
+  // Measure a wrapper div (#_hr) instead of body/documentElement.
+  // A non-root div's offsetHeight is pure content height — unaffected by
+  // the viewport, so changing the outer iframe height won't inflate
+  // the next measurement (breaks the feedback loop).
   const resizeScript = `<script>
-    var _hrTimer;
-    function _hrResize() {
-      clearTimeout(_hrTimer);
-      _hrTimer = setTimeout(function() {
-        var h = document.body.offsetHeight;
-        parent.postMessage({ __hrResize: true, height: h }, '*');
-      }, 50);
+    var _hrLast = -1, _hrN = 0;
+    function _hrPost() {
+      var el = document.getElementById('_hr');
+      if (!el) return;
+      var h = el.offsetHeight;
+      if (h === _hrLast) return;
+      _hrLast = h;
+      var n = ++_hrN;
+      console.log('[hr-iframe] resize #' + n, { height: h });
+      parent.postMessage({ __hrResize: true, height: h }, '*');
     }
-    window.addEventListener('load', _hrResize);
-    new MutationObserver(_hrResize).observe(document.body, { childList: true, subtree: true, attributes: true });
-    setTimeout(_hrResize, 100);
+    var _hrEl = document.getElementById('_hr');
+    if (_hrEl) new ResizeObserver(function() { _hrPost(); }).observe(_hrEl);
+    window.addEventListener('load', _hrPost);
+    setTimeout(_hrPost, 200);
   <\/script>`;
 
-  const baseStyle = '<style>html,body{background:transparent;margin:0;height:auto;overflow:hidden}</style>';
-  let srcdoc = $derived(baseStyle + html + resizeScript);
+  const baseStyle = '<style>html,body{background:transparent;margin:0}</style>';
+  let srcdoc = $derived(baseStyle + '<div id="_hr">' + html + '</div>' + resizeScript);
 
   $effect(() => {
     if (!iframeEl) return;
+    const iframeId = Math.random().toString(36).slice(2, 6);
+    console.log('[hr-parent] effect setup, iframe:', iframeId);
     function onMsg(e) {
       if (e.source !== iframeEl.contentWindow) return;
       if (e.data?.__hrResize) {
-        height = Math.min(Math.max(e.data.height, 40), 800);
+        const newH = Math.min(Math.max(e.data.height + 1, 40), 800);
+        console.log('[hr-parent] resize msg', iframeId, { raw: e.data.height, clamped: newH, prev: height });
+        height = newH;
       }
     }
     window.addEventListener('message', onMsg);
-    return () => window.removeEventListener('message', onMsg);
+    return () => {
+      console.log('[hr-parent] cleanup listener', iframeId);
+      window.removeEventListener('message', onMsg);
+    };
   });
 </script>
 
@@ -84,7 +98,7 @@
     cursor: pointer; font-size: .7rem; padding: 2px 4px;
   }
   .hr-frame-wrap {
-    overflow: auto;
+    overflow: hidden;
   }
   .hr-frame {
     width: 100%;
