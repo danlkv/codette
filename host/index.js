@@ -12,7 +12,7 @@ import { join, resolve } from 'path';
 import { SignJWT, importPKCS8 } from 'jose';
 import { ClaudeRenderer, toolSummary } from './renderer.js';
 import { RpcServer } from './rpc.js';
-import { makeInlineFilePrompt } from '../shared/prompts.js';
+import { makeInlineFilePrompt, HTML_RENDER_PROMPT } from '../shared/prompts.js';
 import { hmacVerify, deriveKey, deriveNonceKey, encrypt, encryptDet, decrypt } from '../shared/crypto.js';
 import { APP_NAME } from '../shared/constants.js';
 // ── Config loading ──────────────────────────────────────────────────────────
@@ -764,9 +764,11 @@ function connect() {
             return;
           }
         }
-        const extraArgs = (settings.inlineFiles !== false)
-          ? ['--append-system-prompt', makeInlineFilePrompt(cwd)]
-          : [];
+        const extraArgs = [];
+        if (settings.inlineFiles !== false)
+          extraArgs.push('--append-system-prompt', makeInlineFilePrompt(cwd));
+        if (settings.htmlRender)
+          extraArgs.push('--append-system-prompt', HTML_RENDER_PROMPT);
         const session = startSession(extraArgs, null, cwd);
         // Defer echo until system.init provides the real sessionId
         session.pendingEcho = echoLine;

@@ -5,6 +5,7 @@
   import { renderMd } from '../utils/markdown.js';
   import { mermaidRender } from '../utils/mermaid-action.js';
   import { sourceFileRender } from '../utils/sourcefile-action.js';
+  import { htmlRenderAction } from '../utils/htmlrender-action.js';
   import { syntaxHighlight } from '../utils/syntax-highlight-action.js';
   import { fmtTime } from '../utils/time.js';
   import { effectiveSyntaxTheme } from '../store.js';
@@ -36,7 +37,7 @@
       {#if msg.role === 'user'}
         <p class="user-text">{msg.text}</p>
       {:else}
-        <div class="prose" use:mermaidRender={msg.text} use:sourceFileRender={{ text: msg.text, sessionId, token, onOpenFile, messageTime: msg.ts ?? null }} use:syntaxHighlight={{ theme: $effectiveSyntaxTheme, streaming: isStreaming }}>
+        <div class="prose" use:mermaidRender={msg.text} use:sourceFileRender={{ text: msg.text, sessionId, token, onOpenFile, messageTime: msg.ts ?? null }} use:htmlRenderAction={msg.text} use:syntaxHighlight={{ theme: $effectiveSyntaxTheme, streaming: isStreaming }}>
           {@html renderMd(msg.text)}{#if isStreaming}<span class="cur">▌</span>{/if}
         </div>
       {/if}

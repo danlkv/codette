@@ -49,6 +49,9 @@ marked.use({
   renderer: {
     code(token) {
       if (token.lang === 'mermaid') return `<div class="mermaid">${esc(token.text)}</div>`;
+      if (token.lang === 'htmlrender') {
+        return `<div class="html-render-block" data-html="${esc(token.text).replace(/"/g, '&quot;')}"></div>`;
+      }
       if (token.lang === 'sourcefile') {
         const [pathLine, ...annotLines] = token.text.trim().split('\n');
         const colonIdx = pathLine.lastIndexOf(':');
@@ -73,7 +76,7 @@ marked.use({
 
 const DOMPURIFY_CONFIG = {
   ADD_TAGS: ['div'],
-  ADD_ATTR: ['aria-hidden', 'data-path', 'data-ranges', 'data-ann'],
+  ADD_ATTR: ['aria-hidden', 'data-path', 'data-ranges', 'data-ann', 'data-html'],
 };
 
 export function renderMd(text) {
