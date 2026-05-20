@@ -520,7 +520,7 @@
       case '/btw':
         if (arg) wsSend({ type: 'user', sessionId: get(currentSessionId), message: { role: 'user', content: arg } });
         return true;
-      case '/inline-files': {
+      case '/codette-inline-files': {
         const sid = get(currentSessionId);
         const cwd = get(sessions).find(s => s.id === sid)?.cwd ?? null;
         const prompt = makeInlineFilePrompt(cwd);

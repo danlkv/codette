@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Danylo Lykov
 
-import { spawn, execSync, execFileSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
+import { createSpawnSession, createSdkSession } from './session.js';
 import { generateKeyPairSync, createPrivateKey, createPublicKey, randomBytes } from 'crypto';
 import { WebSocket } from 'ws';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync, existsSync } from 'fs';
@@ -30,6 +31,8 @@ function parseCliFlags() {
     if ((args[i] === '--server' || args[i] === '-s') && args[i + 1]) flags.server = args[++i];
     else if ((args[i] === '--username' || args[i] === '-u') && args[i + 1]) flags.username = args[++i];
     else if ((args[i] === '--password' || args[i] === '-p') && args[i + 1]) flags.password = args[++i];
+    else if (args[i] === '--backend' && args[i + 1]) flags.backend = args[++i];
+    else if (args[i] === '--permission-mode' && args[i + 1]) flags.permissionMode = args[++i];
   }
   return flags;
 }
@@ -162,11 +165,13 @@ Options:
   -s, --server <url>    Server WebSocket URL
   -u, --username <name> Username shown in chat
   -p, --password <pass> Password for web login
+  --backend <type>      Session backend: sdk (default) or spawn
+  --permission-mode <m> Permission mode (default: bypassPermissions)
   --no-dir-privacy      Disable cwd-restriction on get_fs/get_file
   -v, --version         Print version
   -h, --help            Show this help
 
-Config precedence: CLI flags > ~/.config/codette/credentials.json > env vars > defaults
+Config precedence: CLI flags > env vars > ~/.config/codette/credentials.json > defaults
 
 Environment variables:
   CODETTE_SERVER_URL    WebSocket server URL          (default: ws://localhost:3000)
@@ -261,8 +266,8 @@ function listSessions() {
               sessionMetaCache.set(filePath, { mtime: ts, title, msgCount, cwd });
             }
           } catch {}
-          const agentEntry = agents.get(id);
-          const agentState = agentEntry ? (agentEntry.streaming ? 'running' : 'idle') : null;
+          const sess = agents.get(id);
+          const agentState = sess ? (sess.streaming ? 'running' : 'idle') : null;
           sessions.push({ id, title, ts, agentState, msgCount, cwd, ...(names[id] && { name: names[id] }) });
         }
       } catch {}
@@ -311,8 +316,10 @@ function sendSessionList() {
 }
 
 // ── Agent registry ────────────────────────────────────────────────────────────
-// Map<sessionId, { proc, buf, streaming, renderer, sessionId }>
+// Map<sessionId, session>
 const agents = new Map();
+// Map<toolUseId, {resolve, reject}> — pending SDK permission requests awaiting browser response
+const pendingPermissions = new Map();
 
 function sendAgentEvent(sessionId, event) {
   hostSend({ type: 'agent_event', sessionId, event });
@@ -320,146 +327,126 @@ function sendAgentEvent(sessionId, event) {
   if (event === 'streaming' || event === 'idle' || event === 'stopped') sendSessionList();
 }
 
-// ── Streaming / terminal rendering ───────────────────────────────────────────
-function renderLine(line, agentEntry) {
-  const sid = agentEntry.sessionId?.slice(0, 6) ?? '??????';
-  const tag = agents.size > 1 ? `${A.gray}[${sid}]${A.reset} ` : '';
-  const out = agentEntry.renderer.feed(line, tag);
-  if (out) w(out);
-}
-
-// ── spawnClaude ───────────────────────────────────────────────────────────────
+// ── startSession ─────────────────────────────────────────────────────────────
+// Creates a Claude session via the session abstraction layer.
 // sessionIdHint: the --resume sessionId, or null for new session
 // cwd: optional working directory override
-// Returns the agent entry object.
-function spawnClaude(extraArgs = [], sessionIdHint = null, overrideCwd = null) {
+function startSession(extraArgs = [], sessionIdHint = null, overrideCwd = null) {
   const resumeIdx = extraArgs.indexOf('--resume');
   const resumeId  = resumeIdx !== -1 ? extraArgs[resumeIdx + 1] : null;
   const spawnCwd  = overrideCwd || (resumeId ? getSessionCwd(resumeId) : null);
+  const backend   = _cli.backend || 'sdk';
 
-  log('info', 'spawning claude', { args: extraArgs, cwd: spawnCwd, hint: sessionIdHint?.slice(0, 8) ?? null });
+  log('info', 'starting session', { backend, args: extraArgs, cwd: spawnCwd, hint: sessionIdHint?.slice(0, 8) ?? null });
 
-  const proc = spawn('claude', [
-    '--dangerously-skip-permissions',
-    '--input-format', 'stream-json',
-    '--output-format', 'stream-json',
-    '--include-partial-messages',
-    '--verbose',
-    ...extraArgs,
-  ], {
-    stdio: ['pipe', 'pipe', 'pipe'],
-    ...(spawnCwd && { cwd: spawnCwd }),
-  });
+  let session;
+  if (backend === 'sdk') {
+    // Extract --append-system-prompt value from extraArgs if present
+    let systemPrompt = null;
+    const sysIdx = extraArgs.indexOf('--append-system-prompt');
+    if (sysIdx !== -1) systemPrompt = extraArgs[sysIdx + 1];
 
-  // Use hint as temporary key; replaced once system.init arrives
-  const agentEntry = {
-    proc,
-    buf: '',
-    streaming: false,
-    renderer: new ClaudeRenderer({ summarize: toolSummary }),
-    sessionId: sessionIdHint,  // may be null for new sessions
+    session = createSdkSession({
+      cwd: spawnCwd,
+      permissionMode: _cli.permissionMode || 'bypassPermissions',
+      resume: resumeId || undefined,
+      systemPrompt,
+    });
+  } else {
+    const permFlag = _cli.permissionMode
+      ? ['--permission-mode', _cli.permissionMode]
+      : ['--dangerously-skip-permissions'];
+    session = createSpawnSession([
+      'claude',
+      ...permFlag,
+      '--input-format', 'stream-json',
+      '--output-format', 'stream-json',
+      '--include-partial-messages',
+      '--verbose',
+      ...extraArgs,
+    ], spawnCwd);
+  }
+
+  session.sessionId = sessionIdHint;
+  const renderer = new ClaudeRenderer({ summarize: toolSummary });
+
+  if (sessionIdHint) agents.set(sessionIdHint, session);
+
+  session.onInit = (newId, ev) => {
+    log('info', `claude → system.init`, { session: newId?.slice(0, 8) });
+    w(`${A.gray}session ${newId?.slice(0, 8) ?? '?'}${A.reset}\n`);
+
+    // Re-key in the map if sessionId changed or was null
+    if (newId && newId !== session.sessionId) {
+      if (session.sessionId) agents.delete(session.sessionId);
+    }
+    if (newId) agents.set(newId, session);
+    session.sessionId = newId;
+
+    sendAgentEvent(newId, 'started');
+
+    // Echo first message back to client (deferred until sessionId is known)
+    if (session.pendingEcho) {
+      hostSend({ type: 'claude_line', sessionId: newId, line: session.pendingEcho });
+      session.pendingEcho = null;
+    }
+
+    // Broadcast session list immediately — file may not exist yet so inject
+    // a synthetic entry for the new session so it appears in the sidebar now.
+    if (newId) {
+      const list = listSessions();
+      if (!list.find(s => s.id === newId)) {
+        list.unshift({ id: newId, title: '', ts: Date.now(), agentState: 'idle', msgCount: 0, cwd: ev.cwd || null });
+      }
+      hostSend({ type: 'session_list', sessions: list, hostCwd: process.cwd() });
+    }
   };
 
-  // Register under hint so messages can be routed before init arrives
-  if (sessionIdHint) agents.set(sessionIdHint, agentEntry);
-
-  proc.stderr.on('data', (chunk) => {
-    const msg = chunk.toString().trimEnd();
-    log('error', `[stderr] ${msg}`);
-  });
-
-  proc.stdout.on('data', (chunk) => {
-    agentEntry.buf += chunk.toString();
-    const lines = agentEntry.buf.split('\n');
-    agentEntry.buf = lines.pop();
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-
-      // Parse for internal state transitions first
-      let ev = null;
-      try { ev = JSON.parse(line); } catch {}
-
-      if (ev) {
-        if (ev.type === 'system' && ev.subtype === 'init') {
-          const newId = ev.session_id ?? null;
-          log('info', `claude → system.init`, { session: newId?.slice(0, 8) });
-          w(`${A.gray}session ${newId?.slice(0, 8) ?? '?'}${A.reset}\n`);
-
-          // Re-key agent in the map if sessionId changed or was null
-          if (newId && newId !== agentEntry.sessionId) {
-            if (agentEntry.sessionId) agents.delete(agentEntry.sessionId);
-            agentEntry.sessionId = newId;
-            agents.set(newId, agentEntry);
-          } else if (newId && !agentEntry.sessionId) {
-            agentEntry.sessionId = newId;
-            agents.set(newId, agentEntry);
-          }
-
-          sendAgentEvent(newId, 'started');
-
-          // Echo first message back to client (deferred until sessionId is known)
-          if (agentEntry.pendingEcho) {
-            hostSend({ type: 'claude_line', sessionId: newId, line: agentEntry.pendingEcho });
-            agentEntry.pendingEcho = null;
-          }
-
-          // Broadcast session list immediately — file may not exist yet so inject
-          // a synthetic entry for the new session so it appears in the sidebar now.
-          if (newId) {
-            const list = listSessions();
-            if (!list.find(s => s.id === newId)) {
-              list.unshift({ id: newId, title: '', ts: Date.now(), agentState: 'idle', msgCount: 0, cwd: ev.cwd || null });
-            }
-            hostSend({ type: 'session_list', sessions: list, hostCwd: process.cwd() });
-          }
-        }
-
-        if (ev.type === 'assistant' && !agentEntry.streaming) {
-          agentEntry.streaming = true;
-          sendAgentEvent(agentEntry.sessionId, 'streaming');
-        }
-
-        if (ev.type === 'result') {
-          log('info', `claude → result`, { subtype: ev.subtype, session: agentEntry.sessionId?.slice(0, 8) });
-          agentEntry.streaming = false;
-          sendAgentEvent(agentEntry.sessionId, 'idle');
-          sendSessionList(); // file has content now — updates sidebar with new/updated session
-        }
-      }
-
-      renderLine(line, agentEntry);
-
-      // Forward stripped line to server
-      const sessionId = agentEntry.sessionId;
-      const strippedLine = stripThinking([line])[0];
-      if (ws?.readyState === WebSocket.OPEN) {
-        hostSend({ type: 'claude_line', sessionId, line: strippedLine });
-      } else {
-        log('warn', 'ws not open, dropping claude line');
-      }
-    }
-  });
-
-  proc.on('exit', (code, signal) => {
-    const sessionId = agentEntry.sessionId;
-    log('info', `claude exited`, { code, signal, session: sessionId?.slice(0, 8) });
-
-    if (code === 0 || code === null) {
-      // Clean exit — remove from map and send stopped
-      if (sessionId) agents.delete(sessionId);
-      sendAgentEvent(sessionId, 'stopped');
+  session.onState = (state) => {
+    if (state === 'streaming') {
+      sendAgentEvent(session.sessionId, 'streaming');
+    } else if (state === 'idle') {
+      log('info', `claude → result`, { session: session.sessionId?.slice(0, 8) });
+      sendAgentEvent(session.sessionId, 'idle');
       sendSessionList();
+    } else if (state === 'stopped') {
+      log('info', `claude stopped`, { session: session.sessionId?.slice(0, 8) });
+      if (session.sessionId) agents.delete(session.sessionId);
+      sendAgentEvent(session.sessionId, 'stopped');
+      sendSessionList();
+    }
+  };
+
+  session.onLine = (line) => {
+    // Terminal rendering
+    const sid = session.sessionId?.slice(0, 6) ?? '??????';
+    const tag = agents.size > 1 ? `${A.gray}[${sid}]${A.reset} ` : '';
+    const out = renderer.feed(line, tag);
+    if (out) w(out);
+
+    // Forward stripped line to server
+    const strippedLine = stripThinking([line])[0];
+    if (ws?.readyState === WebSocket.OPEN) {
+      hostSend({ type: 'claude_line', sessionId: session.sessionId, line: strippedLine });
     } else {
-      // Unexpected exit — report and remove, do NOT auto-respawn
-      log('error', `claude exited unexpectedly`, { code, signal, session: sessionId?.slice(0, 8) });
-      if (sessionId) agents.delete(sessionId);
-      sendAgentEvent(sessionId, 'stopped');
-      sendSessionList();
+      log('warn', 'ws not open, dropping claude line');
     }
-  });
+  };
 
-  return agentEntry;
+  // SDK permission relay: forward canUseTool requests to browser
+  if (backend === 'sdk') {
+    session.onPermission = ({ toolName, input, toolUseId, handler }) => {
+      log('info', 'permission request', { tool: toolName, session: session.sessionId?.slice(0, 8) });
+      pendingPermissions.set(toolUseId, handler);
+      hostSend({
+        type: 'permission_request',
+        sessionId: session.sessionId,
+        toolUseId, toolName, input,
+      });
+    };
+  }
+
+  return session;
 }
 
 // ── RPC handlers (request/response over WS) ───────────────────────────────────
@@ -657,8 +644,8 @@ function connect() {
     ws.send(JSON.stringify({ type: 'host_pubkey', pubkey: HOST_PUB_KEY }));
     // Re-announce agent states in one batch so server map is correct after reconnect/restart
     const states = {};
-    for (const [sessionId, entry] of agents) {
-      if (sessionId) states[sessionId] = entry.streaming ? 'streaming' : 'idle';
+    for (const [sessionId, session] of agents) {
+      if (sessionId) states[sessionId] = session.streaming ? 'streaming' : 'idle';
     }
     if (Object.keys(states).length > 0) hostSend({ type: 'agent_event', states });
   });
@@ -717,24 +704,38 @@ function connect() {
 
     if (msg.type === 'agent_ctl') {
       const { sessionId, event } = msg;
-      const agentEntry = agents.get(sessionId);
-      if (!agentEntry) {
+      const session = agents.get(sessionId);
+      if (!session) {
         log('warn', 'agent_ctl: no agent for session', { sessionId: String(sessionId).slice(0, 8), event });
         return;
       }
       if (event === 'stop') {
         log('info', 'stopping agent', { sessionId: String(sessionId).slice(0, 8) });
-        agentEntry.proc.kill();
+        session.stop();
       } else if (event === 'interrupt') {
         log('info', 'interrupting agent', { sessionId: String(sessionId).slice(0, 8) });
-        agentEntry.proc.kill('SIGUSR1');
+        session.interrupt();
       } else {
         log('warn', 'agent_ctl: unknown event', { event });
       }
       return;
     }
 
-    // get_session_history is now an RPC handler (see rpc.register below)
+    if (msg.type === 'permission_response') {
+      const { toolUseId, allow, message: denyMsg } = msg;
+      const handler = pendingPermissions.get(toolUseId);
+      if (!handler) {
+        log('warn', 'permission_response: no pending request', { toolUseId });
+        return;
+      }
+      pendingPermissions.delete(toolUseId);
+      if (allow) {
+        handler.resolve({ behavior: 'allow' });
+      } else {
+        handler.resolve({ behavior: 'deny', message: denyMsg || 'denied by user' });
+      }
+      return;
+    }
 
     if (msg.type === 'user') {
       const { sessionId, message } = msg;
@@ -761,13 +762,11 @@ function connect() {
         const extraArgs = (settings.inlineFiles !== false)
           ? ['--append-system-prompt', makeInlineFilePrompt(cwd)]
           : [];
-        const agentEntry = spawnClaude(extraArgs, null, cwd);
+        const session = startSession(extraArgs, null, cwd);
         // Defer echo until system.init provides the real sessionId
-        agentEntry.pendingEcho = echoLine;
+        session.pendingEcho = echoLine;
         setImmediate(() => {
-          agentEntry.proc.stdin.write(
-            JSON.stringify({ type: 'user', message }) + '\n'
-          );
+          session.send({ type: 'user', message });
         });
         return;
       }
@@ -775,20 +774,18 @@ function connect() {
       // ── Existing session ───────────────────────────────────────────────────
       const sendEcho = () => hostSend({ type: 'claude_line', sessionId, line: echoLine });
 
-      let agentEntry = agents.get(sessionId);
-      if (!agentEntry) {
+      let session = agents.get(sessionId);
+      if (!session) {
         // No running agent — auto-resume this session then write message
         log('info', 'no agent for session, auto-resuming', { sessionId: String(sessionId).slice(0, 8) });
-        agentEntry = spawnClaude(['--resume', sessionId], sessionId);
+        session = startSession(['--resume', sessionId], sessionId);
         // Write after a tick so the process has started; echo after write
         setImmediate(() => {
-          const ok = agentEntry.proc.stdin.write(JSON.stringify(msg) + '\n');
-          if (!ok) log('warn', 'stdin write buffered (backpressure)');
+          session.send(msg);
           sendEcho();
         });
       } else {
-        const ok = agentEntry.proc.stdin.write(JSON.stringify(msg) + '\n');
-        if (!ok) log('warn', 'stdin write buffered (backpressure)');
+        session.send(msg);
         sendEcho();
       }
       return;
@@ -807,7 +804,7 @@ connect();
 
 // ── Graceful shutdown ─────────────────────────────────────────────────────────
 function shutdown() {
-  for (const [, entry] of agents) entry.proc.kill();
+  for (const [, session] of agents) session.stop();
   process.exit(0);
 }
 process.on('SIGTERM', shutdown);

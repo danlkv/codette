@@ -49,11 +49,11 @@ for d in "$ROOT/.dev-data/alice/.claude" "$ROOT/.dev-data/bob/.claude"; do
 done
 
 echo "==> Starting host1: alice ($HOST1_LOG)"
-(cd "$ROOT/host" && CODETTE_DATA_HOME="$ROOT/.dev-data/alice" CLAUDE_CONFIG_DIR="$ROOT/.dev-data/alice/.claude" CLIENT_USERNAME=alice CLIENT_PASSWORD=pass1 node index.js --no-dir-privacy) >"$HOST1_LOG" 2>&1 &
+(cd "$ROOT/host" && CODETTE_DATA_HOME="$ROOT/.dev-data/alice" CLAUDE_CONFIG_DIR="$ROOT/.dev-data/alice/.claude" node index.js --server "$SERVER_URL" --username alice --password pass1 --no-dir-privacy) >"$HOST1_LOG" 2>&1 &
 HOST1_PID=$!
 
 echo "==> Starting host2: bob ($HOST2_LOG)"
-(cd "$ROOT/host" && CODETTE_DATA_HOME="$ROOT/.dev-data/bob" CLAUDE_CONFIG_DIR="$ROOT/.dev-data/bob/.claude" CLIENT_USERNAME=bob CLIENT_PASSWORD=pass2 node index.js) >"$HOST2_LOG" 2>&1 &
+(cd "$ROOT/host" && CODETTE_DATA_HOME="$ROOT/.dev-data/bob" CLAUDE_CONFIG_DIR="$ROOT/.dev-data/bob/.claude" node index.js --server "$SERVER_URL" --username bob --password pass2) >"$HOST2_LOG" 2>&1 &
 HOST2_PID=$!
 
 printf '%s\n' "$SERVER_PID" "$HOST1_PID" "$HOST2_PID" > "$PIDFILE"
