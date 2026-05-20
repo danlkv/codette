@@ -4,6 +4,33 @@
 <script>
   let { html } = $props();
   let collapsed = $state(false);
+  let iframeEl = $state(null);
+  let height = $state(300);
+
+  // Inject a small script that posts the document height back to the parent
+  const resizeScript = `<script>
+    function _hrResize() {
+      var h = document.documentElement.scrollHeight;
+      parent.postMessage({ __hrResize: true, height: h }, '*');
+    }
+    window.addEventListener('load', _hrResize);
+    new MutationObserver(_hrResize).observe(document.body, { childList: true, subtree: true, attributes: true });
+    setTimeout(_hrResize, 100);
+  <\/script>`;
+
+  let srcdoc = $derived(html + resizeScript);
+
+  $effect(() => {
+    if (!iframeEl) return;
+    function onMsg(e) {
+      if (e.source !== iframeEl.contentWindow) return;
+      if (e.data?.__hrResize) {
+        height = Math.min(Math.max(e.data.height + 4, 60), 800);
+      }
+    }
+    window.addEventListener('message', onMsg);
+    return () => window.removeEventListener('message', onMsg);
+  });
 </script>
 
 <div class="html-render">
@@ -15,10 +42,12 @@
   </div>
   {#if !collapsed}
     <iframe
-      srcdoc={html}
+      bind:this={iframeEl}
+      srcdoc={srcdoc}
       sandbox="allow-scripts"
       title="rendered html"
       class="hr-frame"
+      style="height: {height}px"
     ></iframe>
   {/if}
 </div>
@@ -46,7 +75,6 @@
   }
   .hr-frame {
     width: 100%;
-    height: 300px;
     border: none;
     background: #fff;
   }
