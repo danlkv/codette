@@ -60,7 +60,7 @@ else
 fi
 
 # 2. Install host dependencies
-(cd "$INSTALL_DIR/host" && npm install --silent)
+(cd "$INSTALL_DIR/host" && npm ci --silent)
 
 # 3. Prompt for username and password
 echo ""

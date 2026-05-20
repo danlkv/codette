@@ -3,7 +3,7 @@
 
 import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
-import jwt from 'jsonwebtoken';
+import { jwtVerify, importSPKI } from 'jose';
 import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import path from 'path';
@@ -125,14 +125,17 @@ function getCookie(req, name) {
 }
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
-function requireJwt(req, res, next) {
+async function requireJwt(req, res, next) {
   const auth = req.headers.authorization || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : req.query.token;
   const username = getCookie(req, 'username') ?? req.query.username;
   const host = hosts.get(username);
-  if (!host?.pubkey) return res.status(503).json({ error: 'Host not connected' });
-  try { req.user = jwt.verify(token, host.pubkey, { algorithms: ['ES256'] }); next(); }
-  catch { res.status(401).json({ error: 'Unauthorized' }); }
+  if (!host?.pubkeyKey) return res.status(503).json({ error: 'Host not connected' });
+  try {
+    const { payload } = await jwtVerify(token, await host.pubkeyKey, { algorithms: ['ES256'] });
+    req.user = payload;
+    next();
+  } catch { res.status(401).json({ error: 'Unauthorized' }); }
 }
 
 function requireHost(req, res, next) {
@@ -359,13 +362,13 @@ if (existsSync(hostDir)) {
 }
 
 // ── SPA fallback ──────────────────────────────────────────────────────────────
-app.get('*', (_req, res) => res.sendFile(path.join(clientDist, 'index.html')));
+app.get(/.*/, (_req, res) => res.sendFile(path.join(clientDist, 'index.html')));
 
 // ── WebSocket server ──────────────────────────────────────────────────────────
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
-wss.on('connection', (ws, req) => {
+wss.on('connection', async (ws, req) => {
   const url = new URL(req.url, 'http://localhost');
 
   // ── Host connection ────────────────────────────────────────────────────────
@@ -393,6 +396,10 @@ wss.on('connection', (ws, req) => {
       if (ev?.type === 'host_pubkey') {
         wtrace('host', 'server', 'host_pubkey');
         host.pubkey = ev.pubkey;
+        // Eagerly import as a Promise — verify sites just `await host.pubkeyKey`.
+        // A rejected import will surface as a verification failure (caught downstream).
+        host.pubkeyKey = importSPKI(ev.pubkey, 'ES256');
+        host.pubkeyKey.catch(e => console.error(`[server] host pubkey import failed (${clientUsername}):`, e.message));
         console.log(`[server] host pubkey registered: ${clientUsername}`);
         return;
       }
@@ -454,8 +461,9 @@ wss.on('connection', (ws, req) => {
     const host = hosts.get(username);
     let user;
     try {
-      if (!host?.pubkey) throw new Error('Host not connected');
-      user = jwt.verify(token, host.pubkey, { algorithms: ['ES256'] });
+      if (!host?.pubkeyKey) throw new Error('Host not connected');
+      const { payload } = await jwtVerify(token, await host.pubkeyKey, { algorithms: ['ES256'] });
+      user = payload;
     } catch { ws.close(1008, 'Unauthorized'); return; }
 
     const { username: verifiedUsername } = user;

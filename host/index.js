@@ -9,7 +9,7 @@ import { WebSocket } from 'ws';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync, existsSync } from 'fs';
 import { homedir } from 'os';
 import { join, resolve } from 'path';
-import jwt from 'jsonwebtoken';
+import { SignJWT, importPKCS8 } from 'jose';
 import { ClaudeRenderer, toolSummary } from './renderer.js';
 import { RpcServer } from './rpc.js';
 import { makeInlineFilePrompt } from '../shared/prompts.js';
@@ -100,6 +100,7 @@ function loadOrGenerateKeypair() {
 }
 
 const { privateKey: HOST_PRIV_KEY, publicKey: HOST_PUB_KEY } = loadOrGenerateKeypair();
+const HOST_PRIV_KEY_JOSE = await importPKCS8(HOST_PRIV_KEY, 'ES256');
 
 // ── E2E encryption keys ───────────────────────────────────────────────────────
 // Derived from CLIENT_PASSWORD + CLIENT_USERNAME (matches client derivation).
@@ -621,7 +622,11 @@ rpc.register('auth_verify', async (msg) => {
   pendingChallenges.delete(nonce);
   const ok = await hmacVerify(CLIENT_PASSWORD, nonce, response);
   if (!ok) throw new Error('authentication failed');
-  const token = jwt.sign({ username }, HOST_PRIV_KEY, { algorithm: 'ES256', expiresIn: '7d' });
+  const token = await new SignJWT({ username })
+    .setProtectedHeader({ alg: 'ES256' })
+    .setIssuedAt()
+    .setExpirationTime('7d')
+    .sign(HOST_PRIV_KEY_JOSE);
   await encKeyReady;
   log('info', 'auth_verify ok, token issued', { username });
   return { token };
