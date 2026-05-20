@@ -18,7 +18,8 @@
     setTimeout(_hrResize, 100);
   <\/script>`;
 
-  let srcdoc = $derived(html + resizeScript);
+  const baseStyle = '<style>body{background:transparent;margin:0}</style>';
+  let srcdoc = $derived(baseStyle + html + resizeScript);
 
   $effect(() => {
     if (!iframeEl) return;
@@ -76,6 +77,6 @@
   .hr-frame {
     width: 100%;
     border: none;
-    background: #fff;
+    background: transparent;
   }
 </style>
