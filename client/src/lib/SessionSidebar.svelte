@@ -30,6 +30,7 @@
   let showNew = $state(false);
   let newCwd = $state('');
   let inlineFiles = $state(getSettings('inlineFiles'));
+  let htmlRender = $state(getSettings('htmlRender'));
 
   let menuId = $state(null);
   let menuName = $state('');
@@ -54,7 +55,8 @@
 
   function startNew() {
     saveSettings('inlineFiles', inlineFiles);
-    onNewSession?.(newCwd.trim() || null, { inlineFiles });
+    saveSettings('htmlRender', htmlRender);
+    onNewSession?.(newCwd.trim() || null, { inlineFiles, htmlRender });
     showNew = false;
     newCwd = hostCwd || '';
   }
@@ -123,6 +125,10 @@
     <label class="inline-files-toggle">
       <input type="checkbox" bind:checked={inlineFiles} />
       <span>instruct agent to use inline file viewer</span>
+    </label>
+    <label class="inline-files-toggle">
+      <input type="checkbox" bind:checked={htmlRender} />
+      <span>enable live HTML rendering</span>
     </label>
   {/if}
   <div class="list">
