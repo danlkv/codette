@@ -767,7 +767,7 @@ function connect() {
         const extraArgs = [];
         if (settings.inlineFiles !== false)
           extraArgs.push('--append-system-prompt', makeInlineFilePrompt(cwd));
-        if (settings.htmlRender)
+        if (settings.htmlRender !== false)
           extraArgs.push('--append-system-prompt', HTML_RENDER_PROMPT);
         const session = startSession(extraArgs, null, cwd);
         // Defer echo until system.init provides the real sessionId
