@@ -7,18 +7,26 @@
   let iframeEl = $state(null);
   let height = $state(300);
 
-  // Inject a small script that posts the document height back to the parent
+  // Inject a small script that posts the document height back to the parent.
+  // Uses document.body.offsetHeight (actual content size) instead of
+  // documentElement.scrollHeight (which returns max(content, viewport) and
+  // creates a feedback loop when the parent adds padding to the height).
+  // Debounced to avoid rapid-fire MutationObserver events.
   const resizeScript = `<script>
+    var _hrTimer;
     function _hrResize() {
-      var h = document.documentElement.scrollHeight;
-      parent.postMessage({ __hrResize: true, height: h }, '*');
+      clearTimeout(_hrTimer);
+      _hrTimer = setTimeout(function() {
+        var h = document.body.offsetHeight;
+        parent.postMessage({ __hrResize: true, height: h }, '*');
+      }, 50);
     }
     window.addEventListener('load', _hrResize);
     new MutationObserver(_hrResize).observe(document.body, { childList: true, subtree: true, attributes: true });
     setTimeout(_hrResize, 100);
   <\/script>`;
 
-  const baseStyle = '<style>body{background:transparent;margin:0}</style>';
+  const baseStyle = '<style>html,body{background:transparent;margin:0;height:auto;overflow:hidden}</style>';
   let srcdoc = $derived(baseStyle + html + resizeScript);
 
   $effect(() => {
@@ -26,7 +34,7 @@
     function onMsg(e) {
       if (e.source !== iframeEl.contentWindow) return;
       if (e.data?.__hrResize) {
-        height = Math.min(Math.max(e.data.height + 4, 60), 800);
+        height = Math.min(Math.max(e.data.height, 40), 800);
       }
     }
     window.addEventListener('message', onMsg);
@@ -42,14 +50,17 @@
     </button>
   </div>
   {#if !collapsed}
-    <iframe
-      bind:this={iframeEl}
-      srcdoc={srcdoc}
-      sandbox="allow-scripts"
-      title="rendered html"
-      class="hr-frame"
-      style="height: {height}px"
-    ></iframe>
+    <!-- Wrapper div absorbs dynamic height so the iframe element's attributes
+         never change after mount (prevents browser iframe reloads). -->
+    <div class="hr-frame-wrap" style="height: {height}px">
+      <iframe
+        bind:this={iframeEl}
+        srcdoc={srcdoc}
+        sandbox="allow-scripts"
+        title="rendered html"
+        class="hr-frame"
+      ></iframe>
+    </div>
   {/if}
 </div>
 
@@ -72,8 +83,12 @@
     background: none; border: none; color: var(--text-muted, #888);
     cursor: pointer; font-size: .7rem; padding: 2px 4px;
   }
+  .hr-frame-wrap {
+    overflow: auto;
+  }
   .hr-frame {
     width: 100%;
+    height: 100%;
     border: none;
     background: transparent;
   }
