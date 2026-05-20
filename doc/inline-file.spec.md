@@ -195,3 +195,11 @@ IntersectionObserver for lazy loading + in-flight deduplication. The `hlSet` ite
 | `client/src/lib/ChatInput.svelte` | `/inline-files` in autocomplete |
 | `client/src/utils/sourcefile-action.js` | DOM hydration action, `parseRanges` |
 | `client/src/lib/SourceFileBlock.svelte` | file panel component |
+
+---
+
+## See also
+
+**HTML Render** (`htmlrender` code fence) — renders live HTML/JS/CSS in sandboxed iframes.
+Inspired by [The Unreasonable Effectiveness of HTML](https://thariqs.github.io/html-effectiveness/):
+interactive HTML artifacts often communicate complex ideas better than markdown.
