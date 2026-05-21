@@ -79,6 +79,8 @@ Set up login credentials for your browser to connect to this host.
   • One host runs per username at a time. If you install codette
     on multiple machines and want them online concurrently, give
     each a different username.
+  • Saved to: $CONFIG_DIR/credentials.json
+    (you can edit or re-read this file later).
 ──────────────────────────────────────────────────────────────────
 
 EXPLAIN
