@@ -45,23 +45,19 @@ export function createParser({ messages, currentSessionId, lastCost, lastUsage, 
   }
 
   function commitTool(b) {
+    const base = { id: uid(), role: 'tool', toolId: b.id, name: b.name, input: b.input };
     if (b.name === 'AskUserQuestion') {
-      mutMsg(ms => [...ms, {
-        id: uid(), role: 'user_question',
-        toolId: b.id, questions: b.input?.questions ?? [],
-      }]);
+      mutMsg(ms => [...ms, { ...base, kind: 'question', questions: b.input?.questions ?? [] }]);
     } else if (b.name === 'TodoWrite') {
-      mutMsg(ms => [...ms, {
-        id: uid(), role: 'todo',
-        toolId: b.id, todos: b.input?.todos ?? [],
-      }]);
+      mutMsg(ms => [...ms, { ...base, kind: 'todo', todos: b.input?.todos ?? [] }]);
+    } else if (b.name === 'ExitPlanMode') {
+      // Find the plan .md file from the most recent Write tool_use in this turn
+      const cur = _batch !== null ? _batch : get(messages);
+      const writeMsg = [...cur].reverse().find(m => m.role === 'tool' && m.name === 'Write' && m.input?.file_path?.includes('/plans/'));
+      const planFile = writeMsg?.input?.file_path ?? null;
+      mutMsg(ms => [...ms, { ...base, kind: 'plan', planFile }]);
     } else {
-      mutMsg(ms => [...ms, {
-        id: uid(), role: 'tool',
-        toolId: b.id, name: b.name,
-        input: b.input, summary: toolSummary(b.name, b.input),
-        running: true,
-      }]);
+      mutMsg(ms => [...ms, { ...base, kind: 'regular', summary: toolSummary(b.name, b.input), running: true }]);
     }
   }
 
@@ -89,11 +85,36 @@ export function createParser({ messages, currentSessionId, lastCost, lastUsage, 
               : Array.isArray(raw) ? raw.filter(c => c.type === 'text').map(c => c.text).join('') : '';
             const capped = full.length > RESULT_CAP;
             const text = capped ? full.slice(0, RESULT_CAP) + '\n…' : full;
-            return { id: b.tool_use_id, result: { text, total: full.length, capped } };
+            return { id: b.tool_use_id, isError: !!b.is_error, result: { text, total: full.length, capped } };
           });
         if (results.length) mutMsg(ms => ms.map(m => {
           const r = results.find(r => r.id === m.toolId);
-          return m.role === 'tool' && r ? { ...m, running: false, result: r.result } : m;
+          if (!(m.role === 'tool' && r)) return m;
+          const update = { ...m, running: false, result: r.result };
+          // Infer permission outcome for interactive tools when replaying history.
+          // tool_result with is_error means denied; otherwise approved.
+          if (m.kind === 'plan' || m.kind === 'question') {
+            update.resolved = true;
+            update.decision = r.isError ? 'denied' : 'allowed';
+          }
+          // Restore selected answers for questions from tool_result content.
+          // SDK format: 'Your questions have been answered: "Q1"="A1", "Q2"="A2"'
+          // or JSON {questions, answers} from our own updatedInput merge.
+          if (m.kind === 'question' && !r.isError && r.result?.text) {
+            const txt = r.result.text;
+            try {
+              const data = JSON.parse(txt);
+              if (data.answers) update.answers = data.answers;
+            } catch {
+              // Parse SDK human-readable format: "question"="answer"
+              const answers = {};
+              for (const m2 of txt.matchAll(/"([^"]+)"="([^"]+)"/g)) {
+                answers[m2[1]] = m2[2];
+              }
+              if (Object.keys(answers).length) update.answers = answers;
+            }
+          }
+          return update;
         }));
       }
       return;

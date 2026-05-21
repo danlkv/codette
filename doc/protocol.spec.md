@@ -54,6 +54,7 @@ One persistent connection. Host reconnects on drop.
 | `claude_line` | `sessionId`, `line` | every stdout line; server broadcasts to all WS clients |
 | `agent_event` | `sessionId`, `event` | state transition; server broadcasts and updates agent map |
 | `session_list` | `sessions: Session[]`, `hostCwd: string` | response to `list_sessions`; server caches and returns via REST |
+| `permission_request` | `sessionId`, `toolUseId`, `toolName`, `input`, `title?`, `displayName?`, `description?` | SDK `canUseTool` callback; server broadcasts to clients. Host stores `{handler, input}` in `pendingPermissions` keyed by `toolUseId` |
 
 **`agent_event` values:** `started` · `streaming` · `idle` · `stopped`
 
@@ -73,6 +74,7 @@ One persistent connection. Host reconnects on drop.
 | `delete_session` | `sessionId` | delete `.jsonl` file; host sends updated `session_list` |
 | `agent_ctl` | `sessionId`, `event: 'stop'\|'interrupt'` | `stop`: kill process · `interrupt`: SIGUSR1 |
 | `user` | `sessionId`, `message: {role, content}` | forward to claude stdin; host auto-resumes if no agent running |
+| `permission_response` | `toolUseId`, `allow: bool`, `message?`, `updatedInput?` | client decision; host merges `{...originalInput, ...updatedInput}` before resolving SDK promise (SDK replaces, not merges) |
 
 ---
 
@@ -105,6 +107,7 @@ Push events and stateful commands only. No capability negotiation on connect —
 | `claude_line` | `sessionId`, `line` | clients route to per-session message store |
 | `agent_event` | `sessionId`, `event` | clients update `agentActive` |
 | `host_status` | `connected: bool` | host connect/disconnect |
+| `permission_request` | `sessionId`, `toolUseId`, `toolName`, `input`, `title?`, `displayName?`, `description?` | passthrough from host; client renders interactive block based on `toolName` |
 
 **Client → Server**
 
@@ -113,10 +116,20 @@ Push events and stateful commands only. No capability negotiation on connect —
 | `list_sessions` | — | client requests session list; first message after WS open |
 | `agent_ctl` | `sessionId`, `event: 'stop'\|'interrupt'` | forwarded to host |
 | `user` | `sessionId`, `message: {role, content}` | server forwards to host stdin; **host** echoes back as `claude_line({type:'user'})` to all clients |
+| `permission_response` | `toolUseId`, `allow: bool`, `message?`, `updatedInput?` | server forwards to host blindly; `updatedInput` is a partial overlay (e.g. `{answers}` for AskUserQuestion) |
 
 ---
 
 ## Implementation Notes
+
+**Permission flow (SDK backend only):** The SDK's `canUseTool` callback fires for every tool invocation, including `AskUserQuestion` and `ExitPlanMode` (whose `checkPermissions` always returns `{behavior:'ask'}`, even in `bypassPermissions` mode). Host creates a pending Promise keyed by `toolUseId` and stores `{handler, input}`. Server broadcasts `permission_request` to all clients. Client renders an interactive block based on `toolName`:
+- `AskUserQuestion` → `QuestionBlock` (clickable options, "Other" free text)
+- `ExitPlanMode` → `PlanBlock` (Approve / Reject with optional feedback)
+- Everything else → `PermissionBlock` (Allow / Deny with collapsible input detail)
+
+Client sends `permission_response` with `{toolUseId, allow, updatedInput?, message?}`. Host merges `updatedInput` onto the original input (`{...pending.input, ...updatedInput}`) before resolving the SDK promise. This merge is required because the SDK does full replacement (`updatedInput` replaces `input`), so the client only needs to send the changed fields (e.g. `{answers}` for AskUserQuestion, not the full `{questions, answers}` object).
+
+**Permission history replay:** `permission_request`/`permission_response` are WS-only — they are not persisted in the session JSONL. The client parser infers outcomes from `tool_result` events when replaying history: `is_error: false` → resolved as approved, `is_error: true` → resolved as denied. For AskUserQuestion, selected answers are extracted from the tool_result content string (SDK format: `"question"="answer"` pairs parsed via regex, or JSON `{answers}` from the updatedInput merge). PlanBlock's plan file path is inferred by finding the most recent Write tool_use targeting a `/plans/` path.
 
 **User message echo (host):** The server does not echo user messages — it forwards them to the host, which emits a `claude_line({type:'user'})` after writing to Claude's stdin. This ensures the echo confirms delivery to the agent. On the sending client, the send button switches to a progress indicator immediately on send; it clears and the message bubble renders only when the echo `claude_line` arrives. Other clients receive the same `claude_line` broadcast and render the bubble identically.
 

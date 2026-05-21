@@ -11,23 +11,29 @@
   import ToolBlock from './ToolBlock.svelte';
   import QuestionBlock from './QuestionBlock.svelte';
   import TodoBlock from './TodoBlock.svelte';
-  let { msg, isStreaming = false, sessionId = null, token = null, onOpenFile = null } = $props();
+  import PermissionBlock from './PermissionBlock.svelte';
+  import PlanBlock from './PlanBlock.svelte';
+  let { msg, isStreaming = false, sessionId = null, token = null, onOpenFile = null, onRespond = null } = $props();
 </script>
 
 {#if msg.role === 'system'}
   <p class="sys">{msg.text}</p>
 
 {:else if msg.role === 'tool'}
-  <div class="tool-row">
-    <span class="label">⚙</span>
-    <ToolBlock tool={msg} running={msg.running} {onOpenFile} />
-  </div>
-
-{:else if msg.role === 'user_question'}
-  <QuestionBlock {msg} />
-
-{:else if msg.role === 'todo'}
-  <TodoBlock {msg} />
+  {#if msg.kind === 'todo'}
+    <TodoBlock {msg} />
+  {:else if msg.kind === 'question'}
+    <QuestionBlock {msg} onRespond={msg.toolUseId ? onRespond : null} />
+  {:else if msg.kind === 'plan'}
+    <PlanBlock {msg} onRespond={msg.toolUseId ? onRespond : null} {onOpenFile} />
+  {:else if msg.toolUseId && (!msg.resolved || msg.decision === 'denied')}
+    <PermissionBlock {msg} {onRespond} />
+  {:else}
+    <div class="tool-row">
+      <span class="label">⚙</span>
+      <ToolBlock tool={msg} running={msg.running} {onOpenFile} />
+    </div>
+  {/if}
 
 {:else}
   <div class="row {msg.role}">

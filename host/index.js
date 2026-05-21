@@ -436,13 +436,14 @@ function startSession(extraArgs = [], sessionIdHint = null, overrideCwd = null) 
 
   // SDK permission relay: forward canUseTool requests to browser
   if (backend === 'sdk') {
-    session.onPermission = ({ toolName, input, toolUseId, handler }) => {
+    session.onPermission = ({ toolName, input, toolUseId, title, displayName, description, handler }) => {
       log('info', 'permission request', { tool: toolName, session: session.sessionId?.slice(0, 8) });
-      pendingPermissions.set(toolUseId, handler);
+      pendingPermissions.set(toolUseId, { handler, input });
       hostSend({
         type: 'permission_request',
         sessionId: session.sessionId,
         toolUseId, toolName, input,
+        title, displayName, description,
       });
     };
   }
@@ -727,18 +728,24 @@ function connect() {
     }
 
     if (msg.type === 'permission_response') {
-      const { toolUseId, allow, message: denyMsg } = msg;
-      const handler = pendingPermissions.get(toolUseId);
-      if (!handler) {
+      const { toolUseId, allow, message: denyMsg, updatedInput } = msg;
+      log('info', 'permission response', { toolUseId, allow });
+      const pending = pendingPermissions.get(toolUseId);
+      if (!pending) {
         log('warn', 'permission_response: no pending request', { toolUseId });
         return;
       }
       pendingPermissions.delete(toolUseId);
-      if (allow) {
-        handler.resolve({ behavior: 'allow' });
-      } else {
-        handler.resolve({ behavior: 'deny', message: denyMsg || 'denied by user' });
-      }
+      // SDK replaces (not merges) input with updatedInput, so we must
+      // spread the original input and layer the client's partial update on top.
+      const mergedInput = updatedInput
+        ? { ...pending.input, ...updatedInput }
+        : pending.input;
+      const result = allow
+        ? { behavior: 'allow', updatedInput: mergedInput }
+        : { behavior: 'deny', message: denyMsg || 'denied by user' };
+      log('info', 'resolving permission', { toolUseId, behavior: result.behavior });
+      pending.handler.resolve(result);
       return;
     }
 

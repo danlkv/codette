@@ -118,6 +118,7 @@
   let loadingEarlier = false;      // guard against concurrent earlier-batch fetches
   let sessionTitle = $state('');
   let awaitingNewSession = false;
+  const pendingPerms = new Map(); // toolUseId → permFields; drained after commitTool
   let pendingCwd = null;
   let pendingSettings = null;
 
@@ -188,28 +189,8 @@
   const dedupById = arr => [...new Map(arr.map(s => [s.id, s])).values()];
 
   async function initSessions() {
-    // Sessions arrive via WS (triggered by list_sessions on connect).
-    // Pre-populate files from localStorage caches (no extra API calls)
-    const sessionList = [];
-    const filesMap = {};
-    for (const s of sessionList) {
-      const cached = getHistory(s.id);
-      if (cached?.lines) filesMap[s.id] = extractFilesFromLines(cached.lines, s.cwd ?? null);
-    }
-    if (Object.keys(filesMap).length) {
-      sessions.update(list => list.map(s => filesMap[s.id] ? { ...s, files: filesMap[s.id] } : s));
-    }
-
-    if (sessionList.length === 0) { console.debug('[history] initSessions: no sessions, defaulting to __new__'); currentSessionId.set('__new__'); return; }
-    const { sessionId: hashId, file: hashFile } = parseHash();
-    const target = (hashId && hashId !== 'new' && sessionList.find(s => s.id === hashId))
-      ? hashId
-      : sessionList[0].id;
-    console.debug('[history] initSessions: target session', target, '(hash was:', hashId + ')');
-    history.replaceState(null, '', makeHash(target, hashFile));
-    currentSessionId.set(target);
-    if (hashFile) fileViewPath = hashFile;
-    await loadSessionHistory(target);
+    // Sessions arrive via WS (session_list message) — nothing to do here.
+    // The WS handler restores from hash once the list arrives.
   }
 
 
@@ -371,7 +352,7 @@
           return incoming.map(s => filesMap.has(s.id) ? { ...s, files: filesMap.get(s.id) } : s);
         });
         if (msg.hostCwd) hostCwd = msg.hostCwd;
-        // Under e2e, sessions arrive via WS only — do initial navigation if not yet done
+        // Sessions arrive via WS only — do initial navigation if not yet done
         if (incoming.length > 0 && !get(currentSessionId)) {
           const { sessionId: hashId, file: hashFile } = parseHash();
           const target = (hashId && hashId !== 'new' && incoming.find(s => s.id === hashId))
@@ -401,6 +382,15 @@
           currentLines.push(line);
           lineCount++;
           parser.parseLine(line, true);
+          // Drain any permission_requests that arrived before their tool_use claude_line
+          if (pendingPerms.size) {
+            const before = pendingPerms.size;
+            messages.update(ms => ms.map(m => {
+              const pf = m.toolId && pendingPerms.get(m.toolId);
+              if (pf) { pendingPerms.delete(m.toolId); return { ...m, ...pf }; }
+              return m;
+            }));
+          }
           try { const ev = JSON.parse(line); if (ev.type === 'assistant') updateSessionFiles(sessionId, currentLines); } catch {}
         } else {
           if (!sessionData.has(sessionId)) sessionData.set(sessionId, []);
@@ -429,11 +419,34 @@
           }
         }
       }
+      else if (msg.type === 'permission_request') {
+        const { sessionId: sid, toolUseId, toolName, input, title, displayName, description } = msg;
+        if (sid !== get(currentSessionId)) return;
+        const permFields = { toolUseId, toolName, displayName, title, description, resolved: false };
+        const cur = get(messages);
+        const match = cur.find(m => m.toolId === toolUseId);
+        if (match) {
+          messages.update(ms => ms.map(m =>
+            m.toolId === toolUseId ? { ...m, ...permFields } : m
+          ));
+        } else {
+          pendingPerms.set(toolUseId, permFields);
+        }
+      }
       else if (msg.type === 'host_status') {
         hostStatus.set(msg.connected ? 'connected' : 'disconnected');
         if (!msg.connected) { parser.finalizeIncomplete(); }
       }
     };
+  }
+
+  function respondPermission(toolUseId, allow, opts = {}) {
+    wsSend({ type: 'permission_response', toolUseId, allow, ...opts });
+    messages.update(ms => ms.map(m =>
+      m.toolUseId === toolUseId
+        ? { ...m, resolved: true, decision: allow ? 'allowed' : 'denied' }
+        : m
+    ));
   }
 
   async function switchSession(id) {
@@ -736,7 +749,7 @@
         />
       {/if}
       <div class="chat-main" class:hidden={fileViewPath || diffViewCommit || diffViewFile}>
-        <MessageList hostStatus={$hostStatus} {historyLoading} sessionId={$currentSessionId} {token} onOpenFile={path => handleFileOpen({ path })} hasMoreHistory={lineCount - currentLines.length > 0} onLoadEarlier={loadEarlierHistory} />
+        <MessageList hostStatus={$hostStatus} {historyLoading} sessionId={$currentSessionId} {token} onOpenFile={path => handleFileOpen({ path })} hasMoreHistory={lineCount - currentLines.length > 0} onLoadEarlier={loadEarlierHistory} onRespond={respondPermission} />
       </div>
       <div class="ctx-shell" class:ctx-open={ctxBarOpen}
         style={$lastContextUsage ? `--ctx-pct:${Math.min(100, $lastContextUsage.used / $lastContextUsage.total * 100).toFixed(1)}%` : '--ctx-pct:0%'}>

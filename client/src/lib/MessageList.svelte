@@ -7,7 +7,7 @@
   import { tweened } from 'svelte/motion';
   import { cubicOut } from 'svelte/easing';
   let { hostStatus, historyLoading = false, sessionId = null, token = null, onOpenFile = null,
-        hasMoreHistory = false, onLoadEarlier = () => {} } = $props();
+        hasMoreHistory = false, onLoadEarlier = () => {}, onRespond = null } = $props();
 
   let el = $state();
   let pinned = $state(true);
@@ -119,7 +119,7 @@
         {#if hasMoreHistory && i === sentinelIndex}
           <div use:sentinel style="height:1px;margin:0"></div>
         {/if}
-        <MessageBubble msg={m} isStreaming={!!m.streaming} {sessionId} {token} {onOpenFile} />
+        <MessageBubble msg={m} isStreaming={!!m.streaming} {sessionId} {token} {onOpenFile} {onRespond} />
       {/each}
     </div>
   </div>

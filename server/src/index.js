@@ -419,6 +419,11 @@ wss.on('connection', async (ws, req) => {
         return;
       }
 
+      if (ev?.type === 'permission_request') {
+        host.broadcast(ev);
+        return;
+      }
+
       if (ev?.type === 'session_list') {
         wtrace('host', 'server', 'session_list');
         if (ev.ciphertext) {

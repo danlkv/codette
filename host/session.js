@@ -98,7 +98,7 @@ export function createSdkSession({ cwd, permissionMode, resume, allowedTools, sy
       inputResolve?.();
     },
     stop()      { abortController.abort('stop'); },
-    interrupt() { abortController.abort('interrupt'); },
+    interrupt() { q?.interrupt(); },
   };
 
   const abortController = new AbortController();
@@ -113,11 +113,15 @@ export function createSdkSession({ cwd, permissionMode, resume, allowedTools, sy
     }
   }
 
+  const effectiveMode = permissionMode || 'bypassPermissions';
+
   const options = {
-    permissionMode: permissionMode || 'bypassPermissions',
+    permissionMode: effectiveMode,
+    ...(effectiveMode === 'bypassPermissions' && { allowDangerouslySkipPermissions: true }),
     includePartialMessages: true,
+    abortController,
     ...(cwd && { cwd }),
-    ...(resume && { continue: true, resume }),
+    ...(resume && { resume }),
     ...(allowedTools && { allowedTools }),
     ...(systemPrompt && { systemPrompt }),
     canUseTool: async (toolName, input, ctx) => {
@@ -125,7 +129,8 @@ export function createSdkSession({ cwd, permissionMode, resume, allowedTools, sy
       return new Promise((resolve, reject) => {
         const handler = { resolve, reject };
         ctx.signal.addEventListener('abort', () => reject(ctx.signal.reason));
-        session.onPermission({ toolName, input, toolUseId: ctx.toolUseID, handler });
+        session.onPermission({ toolName, input, toolUseId: ctx.toolUseID,
+          title: ctx.title, displayName: ctx.displayName, description: ctx.description, handler });
       });
     },
   };

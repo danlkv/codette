@@ -25,6 +25,16 @@ Key arg extracted per tool:
 - **Write / Edit** — file path, expand to see content
 - **Grep** — pattern
 
+### Interactive tool blocks
+Certain tools render as interactive blocks instead of the standard tool row:
+- **AskUserQuestion** → `QuestionBlock`: clickable option buttons, "Other" free text input. Single-select single-question responds immediately on click. Multi-question shows "Submit answers" button.
+- **ExitPlanMode** → `PlanBlock`: shows allowed tools/prompts from the plan, "view plan" button to open the `.md` plan file in the file viewer, Approve/Reject buttons (reject accepts optional feedback).
+- **Other tools** (when `--permission-mode default`) → `PermissionBlock`: tool name + collapsible input detail, Allow/Deny buttons.
+
+Active (unresolved) blocks have a colored border (amber for question/permission, blue for plan). Resolved blocks fade to neutral border + reduced opacity.
+
+**History replay:** Permission state is not persisted separately. The parser infers outcomes from `tool_result` events: `is_error: false` → approved, `is_error: true` → denied. For questions, selected answers are extracted from the tool_result content (SDK format: `"Q"="A"` pairs, or JSON `{answers}` from our merge flow).
+
 ### Slash commands
 Typed in the input bar; handled client-side before sending to claude.
 
