@@ -7,6 +7,12 @@
   let iframeEl = $state(null);
   let height = $state(300);
 
+  // TODO: auto-resize still feedback-loops for HTML using viewport-relative
+  // units (100dvh, 100vh). body.offsetHeight matches viewport → parent sets
+  // same → stable in theory, but in practice some content triggers +1 drift.
+  // Possible fixes: measure once then stop, or detect viewport-unit usage and
+  // skip auto-resize (use fixed height + internal scroll).
+
   // Inject a resize script that posts body height to parent.
   // Uses document.body.offsetHeight (content-driven with height:auto).
   // No +N padding — that caused feedback loops with viewport-relative content.
