@@ -23,7 +23,7 @@ HOST_KEY="${CODETTE_HOST_KEY:-}"
 
 # Read from /dev/tty so prompts work even when piped (curl | sh)
 ask() {
-  printf '%s [%s]: ' "$1" "$2" > /dev/tty
+  printf '%s [%s] (press Enter for default): ' "$1" "$2" > /dev/tty
   read -r val < /dev/tty
   echo "${val:-$2}"
 }
@@ -45,14 +45,14 @@ echo "Installing codette host..."
 # 1. Clone or update source — try git, fall back to server tarball
 if [ -d "$INSTALL_DIR/.git" ]; then
   echo "Updating existing installation..."
-  if ! git -C "$INSTALL_DIR" fetch --depth 1 origin 2>/dev/null; then
+  if ! git -C "$INSTALL_DIR" fetch --depth 1 origin --quiet 2>/dev/null; then
     echo "git fetch failed, downloading tarball from server..."
     curl -fsSL "$(http_url)/host.tar.gz" | tar xz -C "$INSTALL_DIR" --strip-components=0
   else
-    git -C "$INSTALL_DIR" reset --hard origin/HEAD
+    git -C "$INSTALL_DIR" reset --hard origin/HEAD --quiet
   fi
-elif command -v git >/dev/null 2>&1 && git clone --depth 1 "$REPO_URL" "$INSTALL_DIR" 2>/dev/null; then
-  echo "Cloned from GitHub"
+elif command -v git >/dev/null 2>&1 && git clone --depth 1 --quiet "$REPO_URL" "$INSTALL_DIR" 2>/dev/null; then
+  :  # cloned silently
 else
   echo "git unavailable or clone failed, downloading tarball from server..."
   mkdir -p "$INSTALL_DIR"
@@ -63,10 +63,25 @@ fi
 (cd "$INSTALL_DIR/host" && npm ci --silent)
 
 # 3. Prompt for username and password
-echo ""
-echo "Configure your client access credentials:"
 DEFAULT_USER="$(whoami)"
 DEFAULT_PASS="$(LC_ALL=C tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 10)"
+
+cat >/dev/tty <<EXPLAIN
+
+──────────────────────────────────────────────────────────────────
+Set up login credentials for your browser to connect to this host.
+
+  • These are NEW credentials, just for codette — not your system
+    or any existing account. You'll type them once in the browser
+    when you visit the codette server.
+  • Defaults are auto-generated (a random password). Press Enter
+    to accept, or type your own.
+  • One host runs per username at a time. If you install codette
+    on multiple machines and want them online concurrently, give
+    each a different username.
+──────────────────────────────────────────────────────────────────
+
+EXPLAIN
 
 USERNAME=$(ask "Username" "$DEFAULT_USER")
 PASSWORD=$(ask "Password" "$DEFAULT_PASS")
