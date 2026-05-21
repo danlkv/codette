@@ -97,6 +97,12 @@ export function createParser({ messages, currentSessionId, lastCost, lastUsage, 
             update.resolved = true;
             update.decision = r.isError ? 'denied' : 'allowed';
           }
+          // Detect denied regular tools from SDK rejection boilerplate
+          if (m.kind === 'regular' && r.isError && r.result?.text?.includes('tool use was rejected')) {
+            update.kind = 'permission';
+            update.resolved = true;
+            update.decision = 'denied';
+          }
           // Restore selected answers for questions from tool_result content.
           // SDK format: 'Your questions have been answered: "Q1"="A1", "Q2"="A2"'
           // or JSON {questions, answers} from our own updatedInput merge.

@@ -2,31 +2,31 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
-  import { toolIcon } from '../utils/tools.js';
-  let { msg, onRespond = null } = $props();
-  let open = $state(false);
-  const inputStr = msg.input ? JSON.stringify(msg.input, null, 2) : '';
+  import ToolBlock from './ToolBlock.svelte';
+  let { msg, onRespond = null, onOpenFile = null } = $props();
+
+  // Map permission msg shape to what ToolBlock expects
+  const tool = $derived({
+    name: msg.toolName ?? msg.name,
+    summary: msg.summary ?? null,
+    input: msg.input ?? null,
+    id: msg.toolId ?? null,
+    result: msg.result ?? null,
+  });
 </script>
 
-<div class="perm" class:resolved={msg.resolved}>
-  <div class="pheader">
-    <span class="icon">{toolIcon(msg.toolName)}</span>
-    <span class="name">{msg.displayName || msg.toolName}</span>
-    {#if msg.title}<span class="title">{msg.title}</span>{/if}
-    <span class="spacer"></span>
-    {#if msg.resolved}
-      <span class="tag" class:allowed={msg.decision === 'allowed'} class:denied={msg.decision === 'denied'}>
-        {msg.decision}
-      </span>
-    {:else}
-      <span class="tag pending">pending</span>
-    {/if}
-    <button class="chevron" onclick={() => open = !open}>{open ? '▾' : '▸'}</button>
-  </div>
-
-  {#if open && inputStr}
-    <pre class="detail">{inputStr}</pre>
+{#snippet permBadge()}
+  {#if msg.resolved}
+    <span class="tag" class:allowed={msg.decision === 'allowed'} class:denied={msg.decision === 'denied'}>
+      {msg.decision}
+    </span>
+  {:else}
+    <span class="tag pending">pending</span>
   {/if}
+{/snippet}
+
+<div class="perm" class:resolved={msg.resolved}>
+  <ToolBlock {tool} running={false} {onOpenFile} badge={permBadge} />
 
   {#if !msg.resolved && onRespond}
     <div class="actions">
@@ -50,16 +50,12 @@
     opacity: 0.65;
   }
 
-  .pheader {
-    display: flex; align-items: center; gap: 6px;
-    padding: 4px 10px;
-    font-size: .8rem; color: var(--text-muted);
+  /* Embedded ToolBlock should have no extra border/margin */
+  .perm :global(.tool) {
+    border: none;
+    border-radius: 0;
+    margin-top: 0;
   }
-  .pheader:hover { background: var(--bg-elevated); }
-  .icon { font-size: .85rem; }
-  .name { color: var(--text); font-weight: 600; }
-  .title { color: var(--text-dim); font-size: .75rem; }
-  .spacer { flex: 1; }
 
   .tag {
     font-size: .7rem; padding: 1px 6px; border-radius: 99px;
@@ -67,21 +63,6 @@
   .tag.pending { background: #78350f; color: #fcd34d; }
   .tag.allowed { background: #14532d; color: #86efac; }
   .tag.denied  { background: #7f1d1d; color: #fca5a5; }
-
-  .chevron {
-    background: none; border: none; color: var(--text-dim);
-    cursor: pointer; font-size: .7rem; padding: 0 4px;
-  }
-
-  .detail {
-    padding: 8px 12px; margin: 0;
-    font-size: .72rem; color: var(--text-muted);
-    background: var(--bg-primary);
-    border-top: 1px solid var(--border);
-    max-height: 200px; overflow: auto;
-    white-space: pre-wrap; word-break: break-word;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-  }
 
   .actions {
     display: flex; gap: 8px;

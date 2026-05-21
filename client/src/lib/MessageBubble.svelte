@@ -26,8 +26,10 @@
     <QuestionBlock {msg} onRespond={msg.toolUseId ? onRespond : null} />
   {:else if msg.kind === 'plan'}
     <PlanBlock {msg} onRespond={msg.toolUseId ? onRespond : null} {onOpenFile} />
+  {:else if msg.kind === 'permission'}
+    <PermissionBlock {msg} {onRespond} {onOpenFile} />
   {:else if msg.toolUseId && (!msg.resolved || msg.decision === 'denied')}
-    <PermissionBlock {msg} {onRespond} />
+    <PermissionBlock {msg} {onRespond} {onOpenFile} />
   {:else}
     <div class="tool-row">
       <span class="label">⚙</span>

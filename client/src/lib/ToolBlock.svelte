@@ -4,7 +4,7 @@
 <script>
   import { toolIcon } from '../utils/tools.js';
   import { sessionCwd } from '../store.js';
-  let { tool, running = false, onOpenFile = null } = $props(); // tool: { name, summary, input, id }
+  let { tool, running = false, onOpenFile = null, badge = null } = $props(); // tool: { name, summary, input, id }
 
   let open = $state(false);
 
@@ -31,7 +31,9 @@
       <span class="arg">{rel(tool.summary)}</span>
     {/if}
     <span class="spacer"></span>
-    {#if running}
+    {#if badge}
+      {@render badge()}
+    {:else if running}
       <span class="badge running">running</span>
     {:else}
       <span class="badge done">done</span>
