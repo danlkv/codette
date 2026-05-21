@@ -27,6 +27,7 @@ const SETTINGS = {
   font:         { key: 'font',                      fallback: 'mono' },
   showFileChips:{ key: `${APP_NAME}_showFileChips`,   fallback: true,   encode: v => v ? 'true':'false', decode: v => v !== 'false' },
   inlineFiles:  { key: `${APP_NAME}_inlineFiles`,     fallback: true,   encode: v => v ? 'true':'false', decode: v => v !== 'false' },
+  htmlRender:   { key: `${APP_NAME}_htmlRender`,      fallback: true,   encode: v => v ? 'true':'false', decode: v => v !== 'false' },
   sidebarOpen:  { key: `${APP_NAME}_sidebarOpen`,     fallback: true,   encode: v => v ? 'true':'false', decode: v => v !== 'false' },
   gitChanges:   { key: `${APP_NAME}_gitChanges`,      fallback: false,  encode: v => v ? 'true':'false', decode: v => v === 'true' },
   gitLog:       { key: `${APP_NAME}_gitLog`,           fallback: false,  encode: v => v ? 'true':'false', decode: v => v === 'true' },

@@ -4,6 +4,7 @@
 <script>
   import { onMount } from 'svelte';
   import SourceFileBlock from './SourceFileBlock.svelte';
+  import HtmlRender from './HtmlRender.svelte';
   import { fetchFile } from '../utils/api.js';
   import ImagePreview from './ImagePreview.svelte';
 
@@ -13,14 +14,25 @@
   const ext = $derived(path.split('.').pop().toLowerCase());
   const isImage = $derived(IMAGE_EXTS.has(ext));
   const isPdf = $derived(ext === 'pdf');
+  const isHtml = $derived(ext === 'html' || ext === 'htm');
+  const hasCodeContext = $derived(ranges.length > 0 || annotations.length > 0);
   const isBinary = $derived(isImage || isPdf);
 
+  // HTML files without code context → live by default; with → code by default
+  let showLive = $state(false);
+  $effect(() => { showLive = isHtml && !hasCodeContext; });
+
   let imgSrc = $state(null);
+  let htmlContent = $state(null);
   let error = $state(null);
   let loading = $state(true);
   let containerEl = $state(null);
 
   onMount(() => {
+    if (isHtml) {
+      fetchHtmlContent();
+      return;
+    }
     if (!isBinary) return;
     const observer = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting) {
@@ -31,6 +43,18 @@
     observer.observe(containerEl);
     return () => observer.disconnect();
   });
+
+  async function fetchHtmlContent() {
+    try {
+      const data = await fetchFile(sessionId, path, token);
+      if (data.error) { error = data.error; return; }
+      htmlContent = data.content;
+    } catch (e) {
+      error = String(e);
+    } finally {
+      loading = false;
+    }
+  }
 
   async function fetchBinary() {
     try {
@@ -49,7 +73,31 @@
   }
 </script>
 
-{#if isBinary}
+{#if isHtml}
+  <div class="if-block">
+    <div class="if-header">
+      <span class="if-path" title={path}>{path}</span>
+      <button class="if-btn" onclick={() => showLive = !showLive}>
+        {showLive ? 'view source' : 'preview'}
+      </button>
+      {#if onOpenFile}
+        <button class="if-btn" onclick={() => onOpenFile(path)} title="View full file">view file</button>
+      {/if}
+      <button class="if-btn" onclick={copyPath} title="Copy path">copy path</button>
+    </div>
+    <div class="if-body">
+      {#if loading}
+        <div class="if-status">loading…</div>
+      {:else if error}
+        <div class="if-status if-error">{error}</div>
+      {:else if showLive && htmlContent}
+        <HtmlRender html={htmlContent} />
+      {:else}
+        <SourceFileBlock {path} {ranges} {annotations} {sessionId} {token} {onOpenFile} {messageTime} />
+      {/if}
+    </div>
+  </div>
+{:else if isBinary}
   <div class="if-block" bind:this={containerEl}>
     <div class="if-header">
       <span class="if-path" title={path}>{path}</span>

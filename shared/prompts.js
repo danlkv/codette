@@ -23,3 +23,13 @@ export function makeInlineFilePrompt(cwd) {
   const cwdNote = cwd ? `\nPaths must be absolute or relative to the working directory (${cwd}).` : '';
   return INLINE_FILE_PROMPT + cwdNote;
 }
+
+export const HTML_RENDER_PROMPT =
+  'This chat can render live HTML blocks. When you want to present rich visual content — ' +
+  'diagrams, interactive widgets, styled explanations — use a ```htmlrender code fence. ' +
+  'Each block will be rendered in a sandboxed iframe with scripts enabled. ' +
+  'You can use inline CSS and JavaScript freely. Multiple blocks per message are supported. ' +
+  'Use ```html for code snippets you want displayed as code. ' +
+  'When generating SVG or visual diagrams from scratch, prefer htmlrender so they render live. ' +
+  'When the user is working on an existing SVG file, use sourcefile to show the code. ' +
+  'Use ```htmlrender only when rendering would genuinely improve understanding.';

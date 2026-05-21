@@ -5,7 +5,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { get } from 'svelte/store';
 
-  import { makeInlineFilePrompt } from '../../../shared/prompts.js';
+  import { makeInlineFilePrompt, HTML_RENDER_PROMPT } from '../../../shared/prompts.js';
   import { messages, lastCost, lastUsage, lastContextUsage, hostStatus, wsOk, colorScheme, highContrast, vibrateOnDone, fontStyle, syntaxTheme, accentColor,
            sessions, currentSessionId, sessionData, showFileChips } from '../store.js';
   import { createParser } from './parser.js';
@@ -115,6 +115,7 @@
   let historyLoading = $state(true);
   let currentLines = $state([]);   // raw jsonl lines for current session (for cache writes)
   let lineCount = $state(0);       // server totalLines at last fetch + live lines since; offset for next incremental fetch
+  let rawLinesLoaded = $state(0);  // raw lines loaded including filtered (ai-title etc.) — used for earlier-history offset
   let loadingEarlier = false;      // guard against concurrent earlier-batch fetches
   let sessionTitle = $state('');
   let awaitingNewSession = false;
@@ -209,6 +210,7 @@
       if (cached.title) sessionTitle = cached.title;
       if (cached.contextWindow) storedContextWindow = cached.contextWindow;
       lineCount = cached.lineCount;
+      rawLinesLoaded = cached.lineCount; // cache represents all raw lines up to lineCount
       applyHistoryLines(cached.lines);
     }
     await fetchAndApplyHistory(id, cached);
@@ -238,14 +240,17 @@
         }
         const merged = [...cached.lines, ...lines];
         lineCount = data.totalLines;
+        rawLinesLoaded = data.totalLines; // incremental: cache + new = everything
         applyHistoryLines(merged);
         saveHistory(id, { lines: merged, lineCount: data.totalLines, title: sessionTitle, contextWindow: storedContextWindow });
       } else {
         if (lines.length === 0 && currentLines.length > 0) {
           // Live lines arrived during fetch — don't overwrite them with empty history
           lineCount = data.totalLines + currentLines.length;
+          rawLinesLoaded = lineCount;
         } else {
           lineCount = data.totalLines;
+          rawLinesLoaded = lines.length; // non-incremental: only fetched tail
           applyHistoryLines(lines);
         }
         saveHistory(id, { lines: currentLines, lineCount, title: sessionTitle, contextWindow: storedContextWindow });
@@ -256,7 +261,7 @@
   async function loadEarlierHistory() {
     const id = get(currentSessionId);
     if (!id || id === '__new__' || loadingEarlier) return;
-    const startLine = lineCount - currentLines.length;
+    const startLine = lineCount - rawLinesLoaded;
     if (startLine <= 0) return;
     loadingEarlier = true;
     try {
@@ -267,6 +272,7 @@
       const batch = data.lines ?? [];
       if (batch.length === 0) return;
       console.debug('[history] loadEarlierHistory: prepending', batch.length, 'lines');
+      rawLinesLoaded += batch.length;
       applyHistoryLines([...batch, ...currentLines]);
       // lineCount unchanged — prepend doesn't change server file size
     } catch (e) { console.error('loadEarlierHistory:', e); }
@@ -381,6 +387,7 @@
           } catch {}
           currentLines.push(line);
           lineCount++;
+          rawLinesLoaded++;
           parser.parseLine(line, true);
           // Drain any permission_requests that arrived before their tool_use claude_line
           if (pendingPerms.size) {
@@ -462,6 +469,7 @@
     currentSessionId.set(id);
     currentLines = [];
     lineCount = 0;
+    rawLinesLoaded = 0;
     sessionTitle = '';
     storedContextWindow = null;
     parser.resetTurnState();
@@ -476,6 +484,7 @@
       lineCount = lsCached
         ? lsCached.lineCount + (sd.length - lsCached.lines.length)
         : sd.length;
+      rawLinesLoaded = lineCount; // sessionData has everything we've seen
       console.debug('[history] switchSession: restoring from sessionData', sd.length, 'lines, lineCount=', lineCount);
       applyHistoryLines(currentLines);
     } else {
@@ -523,6 +532,7 @@
         if (id && id !== '__new__') {
           removeHistory(id);
           currentLines = [];
+          rawLinesLoaded = 0;
           messages.set([]);
           parser.resetTurnState();
           sysMsg('cache cleared — refetching…');
@@ -539,6 +549,12 @@
         const prompt = makeInlineFilePrompt(cwd);
         wsSend({ type: 'user', sessionId: sid, message: { role: 'user', content: prompt } });
         sysMsg('inline file viewer enabled');
+        return true;
+      }
+      case '/codette-html-render': {
+        const sid = get(currentSessionId);
+        wsSend({ type: 'user', sessionId: sid, message: { role: 'user', content: HTML_RENDER_PROMPT } });
+        sysMsg('html render enabled');
         return true;
       }
       default:
@@ -584,6 +600,7 @@
     history.pushState(null, '', makeHash('new'));
     currentSessionId.set('__new__');
     currentLines = [];
+    rawLinesLoaded = 0;
     messages.set([]);
     parser.resetTurnState();
     if (window.innerWidth <= 640) sidebarOpen = false;
@@ -749,7 +766,7 @@
         />
       {/if}
       <div class="chat-main" class:hidden={fileViewPath || diffViewCommit || diffViewFile}>
-        <MessageList hostStatus={$hostStatus} {historyLoading} sessionId={$currentSessionId} {token} onOpenFile={path => handleFileOpen({ path })} hasMoreHistory={lineCount - currentLines.length > 0} onLoadEarlier={loadEarlierHistory} onRespond={respondPermission} />
+        <MessageList hostStatus={$hostStatus} {historyLoading} sessionId={$currentSessionId} {token} onOpenFile={path => handleFileOpen({ path })} hasMoreHistory={lineCount - rawLinesLoaded > 0} onLoadEarlier={loadEarlierHistory} onRespond={respondPermission} />
       </div>
       <div class="ctx-shell" class:ctx-open={ctxBarOpen}
         style={$lastContextUsage ? `--ctx-pct:${Math.min(100, $lastContextUsage.used / $lastContextUsage.total * 100).toFixed(1)}%` : '--ctx-pct:0%'}>

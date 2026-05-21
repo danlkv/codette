@@ -7,6 +7,13 @@ import katex from 'katex';
 
 const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+// Store htmlrender content out-of-band so DOMPurify can't strip it.
+// Content-keyed: same HTML always gets the same ID (prevents duplication
+// when renderMd is called multiple times for the same message).
+let _hrId = 0;
+export const htmlRenderStore = new Map();   // id → html
+const _hrContentKey = new Map();            // html → id
+
 function renderMath(tex, display) {
   try {
     return katex.renderToString(tex, { displayMode: display, throwOnError: false, output: 'html' });
@@ -49,6 +56,15 @@ marked.use({
   renderer: {
     code(token) {
       if (token.lang === 'mermaid') return `<div class="mermaid">${esc(token.text)}</div>`;
+      if (token.lang === 'htmlrender') {
+        let id = _hrContentKey.get(token.text);
+        if (!id) {
+          id = String(++_hrId);
+          _hrContentKey.set(token.text, id);
+          htmlRenderStore.set(id, token.text);
+        }
+        return `<div class="html-render-block" data-hrid="${id}"></div>`;
+      }
       if (token.lang === 'sourcefile') {
         const [pathLine, ...annotLines] = token.text.trim().split('\n');
         const colonIdx = pathLine.lastIndexOf(':');
@@ -73,7 +89,7 @@ marked.use({
 
 const DOMPURIFY_CONFIG = {
   ADD_TAGS: ['div'],
-  ADD_ATTR: ['aria-hidden', 'data-path', 'data-ranges', 'data-ann'],
+  ADD_ATTR: ['aria-hidden', 'data-path', 'data-ranges', 'data-ann', 'data-hrid'],
 };
 
 export function renderMd(text) {

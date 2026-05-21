@@ -7,16 +7,22 @@
 3. [x] First message in a new session is not displayed in the client UI.
 4. [x] Host crashes if the directory for a new session does not exist.
 5. ExitPlanMode is silently rejecting in `--json` mode.
+6. [x] Page reload does not reopen the active chat.
+7. Logout does not clear cached data.
+8. Messages routed to wrong session — resume returns a different session ID.
+9. Client page loads delayed while agent is thinking.
+10. New chat: textbox clears before message appears in chat history.
+11. htmlrender iframe auto-resize feedback loop with viewport-relative CSS (100dvh, 100vh). `body.offsetHeight` matches viewport → parent sets same height → body re-measures → +1 drift in some cases. Possible fix: detect viewport-unit usage and use fixed height with internal scroll instead of auto-resize.
 
 ## Enablers & Blockers
 Unblock workflows that are not possible today.
 
 1. File access & iteration
 Theme: no fast path to open or revisit files — every access goes through the tree or message scroll.
-   1. HTML rendering in FileView
+   1. [x] HTML rendering in FileView
       - Render `.html` files as an iframe instead of source.
-      - Should be as simple as setting `src` to a blob URL or data URI.
-      - Enables in-app iteration on design prototypes (e.g. ctx-designs.html).
+      - Toggle between live preview and source view.
+      - Also renders in InlineFile (sourcefile blocks) for `.html` files.
    2. File reload on update
       - Detect when an open file changes on disk and reload automatically.
    3. Recently used files + pinned files
@@ -97,3 +103,9 @@ Theme: session list grows unbounded with no grouping.
 Theme: long sessions parse and render the full history on every load, causing lag.
    - On open, render only from the last summarization boundary (or last N messages).
    - Load earlier history on scroll-to-top.
+
+10. Fullscreen file viewer with rendering caps
+Theme: large or repeatedly-edited files bloat the chat and have no dedicated view.
+   - Fullscreen toggle for file content (like the existing mermaid fullscreen) — code, HTML preview, etc.
+   - HTML rendering caps: truncate or collapse inline file content beyond a threshold.
+   - When Claude edits the same HTML file multiple times, prefer inline file attachment over repeated full dumps.

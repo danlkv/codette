@@ -6,6 +6,7 @@
   import { sessions, currentSessionId, effectiveSyntaxTheme } from '../store.js';
   import { highlightLines, langFromPath } from '../utils/highlight.js';
   import ImagePreview from './ImagePreview.svelte';
+  import HtmlRender from './HtmlRender.svelte';
 
   let { sessionId = null, path = '', token = null, onClose } = $props();
 
@@ -16,19 +17,21 @@
   let loading = $state(true);
   let hlHtml = $state(null);
   let pdfPages = $state(null); // array of canvas elements after render
+  let showHtmlSource = $state(false);
 
   let sessionCwd = $derived($sessions.find(s => s.id === $currentSessionId)?.cwd ?? null);
   let relativePath = $derived((sessionCwd && path.startsWith(sessionCwd))
     ? path.slice(sessionCwd.length).replace(/^\//, '')
     : path);
   let isMarkdown = $derived(/\.md$/i.test(path));
+  let isHtml = $derived(/\.html?$/i.test(path));
   let isImage = $derived(!!mimeType && mimeType.startsWith('image/'));
   let isPdf = $derived(mimeType === 'application/pdf');
   let renderedHtml = $derived(isMarkdown && content ? renderMd(content) : null);
 
   $effect(() => {
     const theme = $effectiveSyntaxTheme;
-    if (!theme || !content || isMarkdown) { hlHtml = null; return; }
+    if (!theme || !content || isMarkdown || (isHtml && !showHtmlSource)) { hlHtml = null; return; }
     const lang = langFromPath(path);
     highlightLines(content, lang, theme)
       .then(({ lines }) => { hlHtml = lines.join('\n'); })
@@ -153,6 +156,11 @@
         <button class="fv-zoom-btn" onclick={() => pdfScale = Math.min(4, +(pdfScale + 0.25).toFixed(2))} title="Zoom in">+</button>
       </div>
     {/if}
+    {#if isHtml && content}
+      <button class="fv-toggle" onclick={() => showHtmlSource = !showHtmlSource}>
+        {showHtmlSource ? 'preview' : 'view source'}
+      </button>
+    {/if}
     <button class="fv-close" onclick={onClose} title="Close file view" aria-label="Close">×</button>
   </div>
 
@@ -168,6 +176,10 @@
         <div class="fv-status">rendering pdf…</div>
       {/if}
       <div class="fv-pdf" bind:this={pdfContainerEl}></div>
+    {:else if isHtml && content && !showHtmlSource}
+      <div class="fv-html-live">
+        <HtmlRender html={content} />
+      </div>
     {:else if renderedHtml}
       <div class="fv-md" use:mermaidRender={renderedHtml} use:syntaxHighlight={{ theme: $effectiveSyntaxTheme }}>{@html renderedHtml}</div>
     {:else if hlHtml}
@@ -222,6 +234,24 @@
     transition: color .15s;
   }
   .fv-close:hover { color: var(--text); }
+
+  .fv-toggle {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: .72rem;
+    padding: 2px 8px;
+    flex-shrink: 0;
+    transition: color .15s, border-color .15s;
+  }
+  .fv-toggle:hover { color: var(--accent-light); border-color: var(--accent); }
+
+  .fv-html-live {
+    padding: 0;
+    flex: 1;
+  }
 
   .fv-body {
     flex: 1;
