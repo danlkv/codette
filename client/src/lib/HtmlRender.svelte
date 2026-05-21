@@ -7,34 +7,30 @@
   let iframeEl = $state(null);
   let height = $state(300);
 
-  // Inject a script that posts content height to parent via ResizeObserver.
-  // ResizeObserver fires only when body dimensions actually change (unlike
-  // MutationObserver which fires on every DOM mutation and can loop forever
-  // with dynamic content). Guard against posting unchanged values.
-  // Measure a wrapper div (#_hr) instead of body/documentElement.
-  // A non-root div's offsetHeight is pure content height — unaffected by
-  // the viewport, so changing the outer iframe height won't inflate
-  // the next measurement (breaks the feedback loop).
+  // Inject a resize script that posts body height to parent.
+  // Uses document.body.offsetHeight (content-driven with height:auto).
+  // No +N padding — that caused feedback loops with viewport-relative content.
+  // Same-value guard (_hrLast) ensures stability:
+  //   - Small content: body shrinks to content → stable
+  //   - Viewport content (100dvh): body = viewport height → set same → stable
+  // No #_hr wrapper — full HTML documents (<!DOCTYPE>) can't nest in a div.
   const resizeScript = `<script>
     var _hrLast = -1, _hrN = 0;
     function _hrPost() {
-      var el = document.getElementById('_hr');
-      if (!el) return;
-      var h = el.offsetHeight;
+      var h = document.body.offsetHeight;
       if (h === _hrLast) return;
       _hrLast = h;
       var n = ++_hrN;
       console.log('[hr-iframe] resize #' + n, { height: h });
       parent.postMessage({ __hrResize: true, height: h }, '*');
     }
-    var _hrEl = document.getElementById('_hr');
-    if (_hrEl) new ResizeObserver(function() { _hrPost(); }).observe(_hrEl);
+    new ResizeObserver(function() { _hrPost(); }).observe(document.body);
     window.addEventListener('load', _hrPost);
     setTimeout(_hrPost, 200);
   <\/script>`;
 
   const baseStyle = '<style>html,body{background:transparent;margin:0}</style>';
-  let srcdoc = $derived(baseStyle + '<div id="_hr">' + html + '</div>' + resizeScript);
+  let srcdoc = $derived(baseStyle + html + resizeScript);
 
   $effect(() => {
     if (!iframeEl) return;
@@ -43,7 +39,7 @@
     function onMsg(e) {
       if (e.source !== iframeEl.contentWindow) return;
       if (e.data?.__hrResize) {
-        const newH = Math.min(Math.max(e.data.height + 1, 40), 800);
+        const newH = Math.min(Math.max(e.data.height, 40), 800);
         console.log('[hr-parent] resize msg', iframeId, { raw: e.data.height, clamped: newH, prev: height });
         height = newH;
       }
