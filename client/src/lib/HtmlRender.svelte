@@ -2,7 +2,7 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
-  let { html } = $props();
+  let { html, fullHeight = false } = $props();
   let collapsed = $state(false);
   let iframeEl = $state(null);
   let height = $state(300);
@@ -34,10 +34,10 @@
   <\/script>`;
 
   const baseStyle = '<style>html,body{background:transparent;margin:0}</style>';
-  let srcdoc = $derived(baseStyle + html + resizeScript);
+  let srcdoc = $derived(fullHeight ? baseStyle + html : baseStyle + html + resizeScript);
 
   $effect(() => {
-    if (!iframeEl) return;
+    if (!iframeEl || fullHeight) return;
     function onMsg(e) {
       if (e.source !== iframeEl.contentWindow) return;
       if (e.data?.__hrResize) {
@@ -49,27 +49,35 @@
   });
 </script>
 
-<div class="html-render">
-  <div class="hr-header">
-    <span class="hr-label">HTML</span>
-    <button class="hr-toggle" onclick={() => collapsed = !collapsed}>
-      {collapsed ? '▶' : '▼'}
-    </button>
-  </div>
-  {#if !collapsed}
-    <!-- Wrapper div absorbs dynamic height so the iframe element's attributes
-         never change after mount (prevents browser iframe reloads). -->
-    <div class="hr-frame-wrap" style="height: {height}px">
-      <iframe
-        bind:this={iframeEl}
-        srcdoc={srcdoc}
-        sandbox="allow-scripts"
-        title="rendered html"
-        class="hr-frame"
-      ></iframe>
+{#if fullHeight}
+  <iframe
+    bind:this={iframeEl}
+    srcdoc={srcdoc}
+    sandbox="allow-scripts"
+    title="rendered html"
+    class="hr-frame hr-full"
+  ></iframe>
+{:else}
+  <div class="html-render">
+    <div class="hr-header">
+      <span class="hr-label">HTML</span>
+      <button class="hr-toggle" onclick={() => collapsed = !collapsed}>
+        {collapsed ? '▶' : '▼'}
+      </button>
     </div>
-  {/if}
-</div>
+    {#if !collapsed}
+      <div class="hr-frame-wrap" style="height: {height}px">
+        <iframe
+          bind:this={iframeEl}
+          srcdoc={srcdoc}
+          sandbox="allow-scripts"
+          title="rendered html"
+          class="hr-frame"
+        ></iframe>
+      </div>
+    {/if}
+  </div>
+{/if}
 
 <style>
   .html-render {
@@ -94,6 +102,12 @@
     overflow: hidden;
   }
   .hr-frame {
+    width: 100%;
+    height: 100%;
+    border: none;
+    background: transparent;
+  }
+  .hr-full {
     width: 100%;
     height: 100%;
     border: none;

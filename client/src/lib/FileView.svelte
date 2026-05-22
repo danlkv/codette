@@ -178,7 +178,7 @@
       <div class="fv-pdf" bind:this={pdfContainerEl}></div>
     {:else if isHtml && content && !showHtmlSource}
       <div class="fv-html-live">
-        <HtmlRender html={content} />
+        <HtmlRender html={content} fullHeight />
       </div>
     {:else if renderedHtml}
       <div class="fv-md" use:mermaidRender={renderedHtml} use:syntaxHighlight={{ theme: $effectiveSyntaxTheme }}>{@html renderedHtml}</div>
@@ -249,8 +249,7 @@
   .fv-toggle:hover { color: var(--accent-light); border-color: var(--accent); }
 
   .fv-html-live {
-    padding: 0;
-    flex: 1;
+    height: 100%;
   }
 
   .fv-body {
