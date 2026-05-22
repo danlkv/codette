@@ -690,13 +690,21 @@ async function checkUpdate() {
   } catch {}
 }
 
+let firstConnect = true;
 function connect() {
   ws = new WebSocket(`${SERVER_URL}/host?token=${encodeURIComponent(HOST_TOKEN)}&clientUsername=${encodeURIComponent(CLIENT_USERNAME)}`);
 
   ws.on('open', () => {
     hr();
     w(`${A.bold}${A.cyan}Claude Web Host${A.reset}  ${A.gray}${SERVER_URL}${A.reset}\n`);
-    w(`${A.dim}Serving clients as: ${A.reset}${A.bold}${CLIENT_USERNAME}${A.reset}  ${A.dim}password: ${A.reset}${A.bold}${CLIENT_PASSWORD}${A.reset}\n`);
+    if (firstConnect) {
+      // Show credentials only once per process so the password doesn't end up
+      // repeatedly in systemd / nohup logs on every reconnect.
+      w(`${A.dim}Serving clients as: ${A.reset}${A.bold}${CLIENT_USERNAME}${A.reset}  ${A.dim}password: ${A.reset}${A.bold}${CLIENT_PASSWORD}${A.reset}\n`);
+      firstConnect = false;
+    } else {
+      w(`${A.dim}Serving clients as: ${A.reset}${A.bold}${CLIENT_USERNAME}${A.reset}\n`);
+    }
     if (NO_DIR_PRIVACY) w(`${A.yellow}[warn] --no-dir-privacy: file access unrestricted${A.reset}\n`);
     hr();
     log('info', 'host connected to server', { url: SERVER_URL });
