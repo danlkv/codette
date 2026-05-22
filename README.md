@@ -69,7 +69,8 @@ Multiple clients can connect to the same host. Multiple hosts (different usernam
 | `SERVER_URL` | `ws://localhost:3000` | Server WebSocket URL (host → server) |
 | `CLIENT_USERNAME` | `whoami` | Username for web login |
 | `CLIENT_PASSWORD` | `changeme` | Password for web login |
-| `HOST_KEY` | `host-key-change-me` | Shared secret between host and server |
+| `HOST_KEY` (server) | _(none)_ | Optional master-shortcut secret. If set, any host presenting it authenticates without going through `/install.sh`. Unset = only per-IP tokens accepted. |
+| `CODETTE_HOST_KEY` (host) | _(none)_ | Token the host presents to the server. Normally written into `credentials.json` by `install.sh`. Required on the host side. |
 | `PORT` | `3000` | Server listen port |
 | `CODETTE_DATA_HOME` | platform default | Override data directory (host keys, session names) |
 | `CODETTE_TRACE` | off | Set to `1` for protocol-level trace logging |

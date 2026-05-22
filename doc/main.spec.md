@@ -31,9 +31,7 @@ Certain tools render as interactive blocks instead of the standard tool row:
 - **ExitPlanMode** → `PlanBlock`: shows allowed tools/prompts from the plan, "view plan" button to open the `.md` plan file in the file viewer, Approve/Reject buttons (reject accepts optional feedback).
 - **Other tools** (when `--permission-mode default`) → `PermissionBlock`: tool name + collapsible input detail, Allow/Deny buttons.
 
-Active (unresolved) blocks have a colored border (amber for question/permission, blue for plan). Resolved blocks fade to neutral border + reduced opacity.
-
-**History replay:** Permission state is not persisted separately. The parser infers outcomes from `tool_result` events: `is_error: false` → approved, `is_error: true` → denied. For questions, selected answers are extracted from the tool_result content (SDK format: `"Q"="A"` pairs, or JSON `{answers}` from our merge flow).
+Active (unresolved) blocks have a colored border (amber for question/permission, blue for plan). Resolved blocks fade to neutral border + reduced opacity. See [`protocol.spec.md`](protocol.spec.md) for permission mode behavior by backend and history replay semantics.
 
 ### Slash commands
 Typed in the input bar; handled client-side before sending to claude.
@@ -167,7 +165,7 @@ CLI flags → `~/.config/codette/credentials.json` → env vars → defaults.
 | Setting | Config key | Env var | CLI flag | Default |
 |---------|-----------|---------|----------|---------|
 | Server URL | `server` | `CODETTE_SERVER_URL` | `--server`, `-s` | `ws://localhost:3000` |
-| Host key | `hostKey` | `CODETTE_HOST_KEY` | — | `host-key-change-me` |
+| Host key | `hostKey` | `CODETTE_HOST_KEY` | — | _required (no default)_ |
 | Username | `username` | `CODETTE_USERNAME` | `--username`, `-u` | `$(whoami)` |
 | Password | `password` | `CODETTE_PASSWORD` | `--password`, `-p` | `changeme` |
 

@@ -70,10 +70,9 @@ One persistent connection. Host reconnects on drop.
 | type | key fields | notes |
 |------|-----------|-------|
 | `list_sessions` | — | on host connect; response populates server's session cache |
-| `new_session` | `cwd?: string`, `firstMessage?: string` | spawn fresh claude; if `firstMessage` provided, written to stdin immediately to trigger `system.init` |
-| `delete_session` | `sessionId` | delete `.jsonl` file; host sends updated `session_list` |
+| `delete_session` | `sessionId`, `nonce?`, `ciphertext?` | delete `.jsonl` file; host sends updated `session_list`. Under e2e the request carries an encrypted empty `{}` body — host rejects plaintext when `encKey` is derived |
 | `agent_ctl` | `sessionId`, `event: 'stop'\|'interrupt'` | `stop`: kill process · `interrupt`: SIGUSR1 |
-| `user` | `sessionId`, `message: {role, content}` | forward to claude stdin; host auto-resumes if no agent running |
+| `user` | `sessionId`, `message: {role, content}`, `cwd?`, `codette_settings?` | forward to claude stdin; host auto-resumes if no agent running. `sessionId === '__new__'` spawns a fresh claude using `cwd` (validated against `process.cwd()` + `ALLOWED_PREFIXES`, override with `--no-dir-privacy`) |
 | `permission_response` | `toolUseId`, `allow: bool`, `message?`, `updatedInput?` | client decision; host merges `{...originalInput, ...updatedInput}` before resolving SDK promise (SDK replaces, not merges) |
 
 ---
@@ -90,8 +89,8 @@ JWT in `Authorization: Bearer <token>` header (obtained via challenge/verify flo
 | `POST` | `/api/auth/verify` | `{username, nonce, response}` | `{token}` | HMAC-SHA256 response; sets `username` cookie; no capabilities — e2e is implicit from password |
 | `GET` | `/api/sessions` | — | `{sessions: Session[], hostCwd: string}` | cached session list from host; clients should prefer WS `list_sessions` for fresh data |
 | `GET` | `/api/sessions/:id/history` | `?offset=N` / `?limit=N` / `?offset=N&limit=M` | `{lines: string[], totalLines: number, incremental: bool}` | raw JSONL lines; `?limit=N` → last N lines; `?offset=N&limit=M` → lines [N, N+M); `?offset=N` → lines [N, end). Server dedup key: `sessionId:offset:limit` |
-| `POST` | `/api/sessions` | `{cwd?: string, firstMessage?: string}` | 202 | create session; `firstMessage` bootstraps `system.init`; client auto-switches on `agent_event: started` |
-| `DELETE` | `/api/sessions/:id` | — | 204 | broadcasts new `session_list` from host  over WS |
+| `DELETE` | `/api/sessions/:id` | `?enc=<packed>` | 204 | broadcasts new `session_list` from host over WS. Under e2e the client sends `?enc=base64url(nonce ‖ ciphertext)` (encrypting `'{}'`); server `unpackParam`s and forwards `{nonce, ciphertext}` to the host alongside the plaintext `sessionId` routing field |
+| `PUT` | `/api/sessions/:id/name` | `{enc}` or `{name}` | `{ok}` | rename a session. Under e2e the body is `{enc: base64url(nonce ‖ ciphertext)}` encrypting `{name}`; without e2e the plaintext `{name}` form is accepted for debug |
 | `GET` | `/api/logs` | `?fmt=text` | JSON array or plain text | `x-host-key` auth |
 | `GET` | `/*` | — | `index.html` | SPA fallback |
 
@@ -122,7 +121,17 @@ Push events and stateful commands only. No capability negotiation on connect —
 
 ## Implementation Notes
 
-**Permission flow (SDK backend only):** The SDK's `canUseTool` callback fires for every tool invocation, including `AskUserQuestion` and `ExitPlanMode` (whose `checkPermissions` always returns `{behavior:'ask'}`, even in `bypassPermissions` mode). Host creates a pending Promise keyed by `toolUseId` and stores `{handler, input}`. Server broadcasts `permission_request` to all clients. Client renders an interactive block based on `toolName`:
+**Permission mode behavior by backend:**
+
+|                    | spawn `--dangerously-skip-permissions` | spawn `default` | SDK `bypassPermissions` | SDK `default` |
+|--------------------|----------------------------------------|-----------------|-------------------------|---------------|
+| Bash / Edit / etc. | auto-execute                           | blocks (no tty) | auto-execute            | web Allow/Deny |
+| AskUserQuestion    | auto-rejected by CLI                   | terminal prompt | web interactive         | web interactive |
+| ExitPlanMode       | auto-rejected by CLI                   | terminal prompt | web interactive         | web interactive |
+
+SDK `bypassPermissions` is the default — interactive questions/plans without approving every tool. The SDK's `canUseTool` callback still fires for AskUserQuestion and ExitPlanMode because their `checkPermissions` always returns `{behavior:'ask'}`, regardless of permission mode.
+
+**Permission flow (SDK backend only):** Host creates a pending Promise keyed by `toolUseId` and stores `{handler, input}`. Server broadcasts `permission_request` to all clients. Client renders an interactive block based on `toolName`:
 - `AskUserQuestion` → `QuestionBlock` (clickable options, "Other" free text)
 - `ExitPlanMode` → `PlanBlock` (Approve / Reject with optional feedback)
 - Everything else → `PermissionBlock` (Allow / Deny with collapsible input detail)
@@ -147,11 +156,29 @@ If `totalLines < lineCount`, file was truncated — drop cache and refetch `?lim
 **Client in-memory store:** `sessionData: Map<sessionId, string[]>` is the authoritative in-memory store for non-current sessions. On switch-away, `currentLines` is saved into `sessionData`; background `claude_line` events push directly into it. On switch-back, `currentLines` is restored from `sessionData` with no HTTP fetch — the incremental fetch is skipped. HTTP fetch only on: initial load (no sessionData, no localStorage), page reload (sessionData gone), or WS reconnect (potential gap).
 
 **New session flow:** clicking "+ new" switches client to local `__new__` state (no network call).
-First message send POSTs `{ cwd, firstMessage }` to `/api/sessions` with `awaitingNewSession = true` set
-before the fetch. Host spawns claude and writes `firstMessage` to stdin immediately, triggering `system.init`.
-On `system.init`, host injects a synthetic session entry into the `session_list` broadcast (file may not exist yet).
-Client auto-switches on the next `agent_event: started` for a non-current session.
-After `result`, host calls `sendSessionList()` again with real file data (title, msgCount, cwd).
+First message send goes over the WS as `user { sessionId:'__new__', cwd, codette_settings, message }` (encrypted
+under e2e like any other `user` message) with `awaitingNewSession = true` set before send. Host validates
+`cwd` via `cwdAllowed()` (must be under `process.cwd()` or in `ALLOWED_PREFIXES` unless `--no-dir-privacy`),
+spawns claude, and writes the first message to stdin immediately — triggering `system.init`. On `system.init`,
+host injects a synthetic session entry into the `session_list` broadcast (file may not exist yet). Client
+auto-switches on the next `agent_event: started` for a non-current session. After `result`, host calls
+`sendSessionList()` again with real file data (title, msgCount, cwd). New sessions are created exclusively
+via WS — there is no REST endpoint for session creation.
+
+**E2E enforcement (host):** when `encKey` is derived, the host rejects plaintext messages of any
+client-originated type that carries security-sensitive payload:
+`{ user, agent_ctl, permission_response, list_sessions, delete_session, set_session_name }`.
+Server-initiated reads (`get_*`, `auth_*`) and metadata-only frames (`agent_event`, `host_status`) stay
+plaintext — their outer routing fields are constructed by the relay from REST params it must already read.
+The check fires after the per-field decrypt: a message that arrived as `{type, nonce, ciphertext}` and was
+merged with its inner JSON sets `wasDecrypted = true` and passes; a bare-plaintext frame of a sensitive type
+is dropped with a `warn` log. With `E2E=0` (no `encKey`) the check is skipped.
+
+**Session-id validation (host):** `findSessionFile()` strictly validates `sessionId` against the canonical
+Claude UUID shape (`/^[0-9a-f]{8}-…{12}$/i`) before any path operation, and verifies the resolved file path
+stays under `${CLAUDE_CONFIG_DIR || ~/.claude}/projects/<project>/` via `path.relative()`. Any other shape
+(including the `__new__` spawn sentinel, which is intercepted earlier in the `user` handler) yields `null`,
+short-circuiting `get_session_history`, `delete_session`, and `getSessionCwd`.
 
 **504 resilience:** `pendingHistoryHttp` entries store `{ res, incremental, offset }`.
 On host reconnect, server immediately re-sends `get_session_history` for all parked requests,

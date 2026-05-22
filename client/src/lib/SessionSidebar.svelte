@@ -4,6 +4,7 @@
 <script>
   import { fmtAge } from '../utils/time.js';
   import { getSettings, saveSettings } from '../utils/storage.js';
+  import { setSessionName } from '../utils/api.js';
   import FileExplorer from './FileExplorer.svelte';
   import GitLog from './GitLog.svelte';
 
@@ -98,11 +99,9 @@
   async function saveMenuName(id) {
     const v = menuName.trim();
     menuId = null;
-    await fetch(`/api/sessions/${encodeURIComponent(id)}/name`, {
-      method: 'PUT',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: v || null }),
-    });
+    // Encrypts `{name}` under the active e2e key when present, so the
+    // session-name payload never travels plaintext through the relay.
+    await setSessionName(id, v || null, token);
   }
 
   function menuNameKeydown(e, id) {

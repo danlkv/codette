@@ -21,7 +21,9 @@ const root = join(__dirname, '..');
 const PORT     = process.env.TEST_PORT || '3111';
 const USERNAME = process.env.TEST_USERNAME || 'testuser';
 const PASSWORD = process.env.TEST_PASSWORD || 'testpass';
-const HOST_KEY = process.env.HOST_KEY || 'host-key-change-me';
+// Server refuses to start with the placeholder HOST_KEY; use a fixed test
+// value so tests are deterministic but the server's safety check still works.
+const HOST_KEY = process.env.HOST_KEY || 'test-host-key-do-not-use-in-prod';
 
 // ── Isolated data dir (like run_dev.sh) ──────────────────────────────────────
 const dataDir = join(root, '.dev-data', USERNAME);
@@ -101,7 +103,10 @@ const hostEnv = {
 };
 delete hostEnv.CLAUDECODE;  // allow Claude Code to spawn inside test env
 
-host = spawn('node', ['host/index.js'], {
+const hostArgs = ['host/index.js'];
+if (process.env.TEST_BACKEND) hostArgs.push('--backend', process.env.TEST_BACKEND);
+
+host = spawn('node', hostArgs, {
   cwd: root,
   env: hostEnv,
   stdio: ['ignore', hostLogFd, hostLogFd],

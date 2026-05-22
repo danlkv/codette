@@ -8,7 +8,7 @@ import { generateKeyPairSync, createPrivateKey, createPublicKey, randomBytes } f
 import { WebSocket } from 'ws';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync, existsSync } from 'fs';
 import { homedir } from 'os';
-import { join, resolve } from 'path';
+import { join, resolve, relative, isAbsolute } from 'path';
 import { SignJWT, importPKCS8 } from 'jose';
 import { ClaudeRenderer, toolSummary } from './renderer.js';
 import { RpcServer } from './rpc.js';
@@ -49,10 +49,18 @@ const CLIENT_USERNAME = _cli.username
 const CLIENT_PASSWORD = _cli.password
   || process.env.CODETTE_PASSWORD || process.env.CLIENT_PASSWORD
   || _creds.password || 'changeme';
+// Token presented on /host WS. Normally written by install.sh into
+// credentials.json. Required — fail-fast happens after early-exit subcommands.
 const HOST_TOKEN = process.env.CODETTE_HOST_KEY || process.env.HOST_KEY
-  || _creds.hostKey || 'host-key-change-me';
+  || _creds.hostKey || null;
 const CLAUDE_DIR       = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
 const E2E_ENABLED      = process.env.E2E !== '0';
+// Client-originated types that must arrive encrypted under e2e. Server-initiated
+// reads (get_*, auth_*) flow plaintext — their routing fields are server-built.
+const E2E_REQUIRED_TYPES = new Set([
+  'user', 'agent_ctl', 'permission_response',
+  'list_sessions', 'delete_session', 'set_session_name',
+]);
 const TRACE            = process.env.CODETTE_TRACE === '1';
 function trace(obj) { if (TRACE) process.stdout.write('TRACE ' + JSON.stringify(obj) + '\n'); }
 
@@ -178,11 +186,18 @@ Environment variables:
   CODETTE_SERVER_URL    WebSocket server URL          (default: ws://localhost:3000)
   CODETTE_USERNAME      Username shown in chat        (default: whoami)
   CODETTE_PASSWORD      Password for web login        (default: changeme)
-  CODETTE_HOST_KEY      Shared secret with server     (default: host-key-change-me)
+  CODETTE_HOST_KEY      Token issued by the server    (required; install.sh writes it)
 
 Legacy env vars also supported: SERVER_URL, CLIENT_USERNAME, CLIENT_PASSWORD, HOST_KEY
 `);
   process.exit(0);
+}
+
+if (!HOST_TOKEN) {
+  process.stderr.write('codette: no host token configured.\n');
+  process.stderr.write('  Run the installer:  curl -fsSL https://<your-server>/install.sh | sh\n');
+  process.stderr.write('  Or set CODETTE_HOST_KEY in the environment.\n');
+  process.exit(1);
 }
 
 // ── ANSI helpers ──────────────────────────────────────────────────────────────
@@ -204,12 +219,18 @@ function log(level, msg, data = null) {
 // ── Session tracking ──────────────────────────────────────────────────────────
 const sessionMetaCache = new Map(); // filePath → { mtime, title, msgCount }
 
+// Claude session IDs are UUIDs; anything else is a traversal attempt.
+const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function findSessionFile(sessionId) {
-  if (!sessionId) return null;
+  if (!sessionId || !SESSION_ID_RE.test(sessionId)) return null;
   const claudeDir = join(CLAUDE_DIR, 'projects');
   try {
     for (const project of readdirSync(claudeDir)) {
-      const file = join(claudeDir, project, `${sessionId}.jsonl`);
+      const projectDir = join(claudeDir, project);
+      const file = join(projectDir, `${sessionId}.jsonl`);
+      const rel = relative(projectDir, file);
+      if (rel.startsWith('..') || isAbsolute(rel)) continue;
       try { readFileSync(file); return file; } catch {}
     }
   } catch {}
@@ -484,6 +505,15 @@ function pathAllowed(p, sessionCwd) {
   return ALLOWED_PREFIXES.some(prefix => p === prefix || p.startsWith(prefix + '/'));
 }
 
+// cwd allowlist for newly-spawned sessions; mirrors pathAllowed.
+function cwdAllowed(cwd) {
+  if (NO_DIR_PRIVACY) return true;
+  if (!cwd) return false;
+  const root = process.cwd();
+  if (cwd === root || cwd.startsWith(root + '/')) return true;
+  return ALLOWED_PREFIXES.some(prefix => cwd === prefix || cwd.startsWith(prefix + '/'));
+}
+
 rpc.register('get_fs', (msg) => {
   const sessionCwd = getSessionCwd(msg.sessionId);
   const path = resolveFsPath(msg.path, sessionCwd) || sessionCwd;
@@ -668,13 +698,14 @@ function connect() {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
 
-    // Per-field decrypt: if message has nonce+ciphertext, decrypt content and merge,
-    // preserving outer routing fields (type, id, sessionId).
+    // Per-field decrypt: nonce+ciphertext → inner JSON merged onto outer routing fields.
+    let wasDecrypted = false;
     if (msg?.nonce && msg?.ciphertext && encKey) {
       try {
         const inner = JSON.parse(await decrypt(encKey, msg.nonce, msg.ciphertext));
         const { nonce: _, ciphertext: __, ...outer } = msg;
         msg = { ...outer, ...inner };
+        wasDecrypted = true;
         trace({ ts: Date.now(), src: 'server', dst: 'host', e2e: 'decrypted', type: msg.type });
       } catch (e) {
         process.stderr.write('e2e decrypt failed: ' + e.message + '\n');
@@ -682,6 +713,11 @@ function connect() {
       }
     } else if (msg?.type && msg.type !== 'log') {
       trace({ ts: Date.now(), src: 'server', dst: 'host', type: msg.type });
+    }
+
+    if (encKey && !wasDecrypted && E2E_REQUIRED_TYPES.has(msg?.type)) {
+      log('warn', 'rejecting plaintext message under e2e', { type: msg?.type });
+      return;
     }
 
     try {
@@ -706,12 +742,6 @@ function connect() {
         } catch (e) { log('error', `delete failed: ${e.message}`); }
       }
       sendSessionList();
-      return;
-    }
-
-    if (msg.type === 'new_session') {
-      // Legacy: bare new_session without a message (no Claude spawn until first message)
-      log('info', 'new_session (no message)', { cwd: msg.cwd });
       return;
     }
 
@@ -773,6 +803,10 @@ function connect() {
         const cwd = msg.cwd || null;
         const settings = msg.codette_settings ?? {};
         if (cwd) {
+          if (!cwdAllowed(cwd)) {
+            log('error', 'new_session: cwd outside allowed root', { cwd, root: process.cwd(), allowed: ALLOWED_PREFIXES });
+            return;
+          }
           try { statSync(cwd); } catch {
             log('error', 'new_session: cwd does not exist', { cwd });
             return;

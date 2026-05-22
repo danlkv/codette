@@ -15,8 +15,12 @@ import { unpackParam } from '../../shared/crypto.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const HOST_KEY   = process.env.HOST_KEY   || 'host-key-change-me';
-const HOST_TOKEN_TTL = parseInt(process.env.HOST_TOKEN_TTL || '0', 10); // seconds, 0 = never expires
+// Optional master-shortcut. Unset = only per-IP tokens accepted.
+const HOST_KEY = process.env.HOST_KEY;
+const HOST_TOKEN_TTL = parseInt(process.env.HOST_TOKEN_TTL || '0', 10); // 0 = never expires
+if (HOST_TOKEN_TTL === 0) {
+  console.warn('[server] HOST_TOKEN_TTL=0 (host tokens never expire). Set a finite value (e.g. 2592000 = 30 days) in .env.');
+}
 
 const PORT       = parseInt(process.env.PORT || '3000', 10);
 
@@ -35,7 +39,7 @@ function saveTokens(tokens) {
 }
 
 function validateToken(token) {
-  if (token === HOST_KEY) return true; // master key always valid
+  if (HOST_KEY && token === HOST_KEY) return true; // master shortcut, when configured
   const tokens = loadTokens();
   const entry = Object.values(tokens).find(e => e.token === token);
   if (!entry) return false;
@@ -96,12 +100,18 @@ app.set('trust proxy', true);
 app.use(express.json());
 
 // ── REST request logging ──────────────────────────────────────────────────────
+// Query params that are bearer-credential-shaped and must never appear in logs.
+const REDACTED_QS_KEYS = new Set(['token', 'access_token', 'auth']);
 app.use((req, res, next) => {
   res.on('finish', () => {
     if (req.path.startsWith('/api/')) {
       const sessionMatch = req.path.match(/\/sessions\/([^/]+)/);
       const sessionId = sessionMatch ? sessionMatch[1].slice(0, 8) : '';
-      const qs = Object.keys(req.query).length ? '?' + new URLSearchParams(req.query).toString() : '';
+      const params = new URLSearchParams(req.query);
+      for (const key of REDACTED_QS_KEYS) {
+        if (params.has(key)) params.set(key, '[redacted]');
+      }
+      const qs = params.toString() ? '?' + params.toString() : '';
       console.log('[rest]', req.method, req.path + qs, res.statusCode, sessionId);
     }
   });
@@ -125,14 +135,20 @@ function getCookie(req, name) {
 }
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
+// `username` (cookie/query) is untrusted — it only selects which host's pubkey
+// to verify against. The JWT is the trust anchor: host-issued, signed by that
+// host's private key. We require payload.username to match to prevent any
+// registered host from minting JWTs for other users.
 async function requireJwt(req, res, next) {
   const auth = req.headers.authorization || '';
-  const token = auth.startsWith('Bearer ') ? auth.slice(7) : req.query.token;
+  if (!auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
+  const token = auth.slice(7);
   const username = getCookie(req, 'username') ?? req.query.username;
   const host = hosts.get(username);
   if (!host?.pubkeyKey) return res.status(503).json({ error: 'Host not connected' });
   try {
     const { payload } = await jwtVerify(token, await host.pubkeyKey, { algorithms: ['ES256'] });
+    if (payload.username !== username) return res.status(401).json({ error: 'Unauthorized' });
     req.user = payload;
     next();
   } catch { res.status(401).json({ error: 'Unauthorized' }); }
@@ -299,28 +315,26 @@ app.get('/api/sessions/:id/git/file-diff', requireJwt, requireHost, (req, res) =
 
 // ── Session name ──────────────────────────────────────────────────────────────
 app.put('/api/sessions/:id/name', requireJwt, requireHost, (req, res) => {
-  const { name } = req.body || {};
-  const rid = req.claudeHost.rpc.call(req.claudeHost.ws, 'set_session_name',
-    { sessionId: req.params.id, name: name || null },
+  const { enc, name } = req.body || {};
+  const params = enc
+    ? { sessionId: req.params.id, ...unpackParam(enc) }
+    : { sessionId: req.params.id, name: name || null };
+  const rid = req.claudeHost.rpc.call(req.claudeHost.ws, 'set_session_name', params,
     (err, result) => { if (!res.headersSent) err ? res.status(504).json({ error: err.message }) : res.json(result); });
   res.on('close', () => req.claudeHost.rpc.cancel(rid));
-});
-
-// ── Create session ────────────────────────────────────────────────────────────
-app.post('/api/sessions', requireJwt, requireHost, (req, res) => {
-  const { cwd, codette_settings } = req.body || {};
-  wtrace('server', 'host', 'new_session');
-  req.claudeHost.ws.send(JSON.stringify({ type: 'new_session', cwd, codette_settings }));
-  res.status(202).json({});
 });
 
 // ── Delete session ────────────────────────────────────────────────────────────
 app.delete('/api/sessions/:id', requireJwt, requireHost, (req, res) => {
   const host = req.claudeHost;
   const id = req.params.id;
+  const enc = req.query.enc;
+  const wireMsg = enc
+    ? { type: 'delete_session', sessionId: id, ...unpackParam(enc) }
+    : { type: 'delete_session', sessionId: id };
   host.pendingDelete.set(id, res);
   wtrace('server', 'host', 'delete_session', { sessionId: id.slice(0, 8) });
-  host.ws.send(JSON.stringify({ type: 'delete_session', sessionId: id }));
+  host.ws.send(JSON.stringify(wireMsg));
 
   const timer = setTimeout(() => {
     if (host.pendingDelete.get(id) === res) {
@@ -333,12 +347,20 @@ app.delete('/api/sessions/:id', requireJwt, requireHost, (req, res) => {
 
 // ── Install script ───────────────────────────────────────────────────────────
 const installShPath = path.resolve(__dirname, '../../install.sh');
+// Hostname is read from env, never from request headers — the value is
+// interpolated into a shell script every installer pipes to `sh`.
 app.get('/install.sh', (req, res) => {
+  const hostname = process.env.SERVER_HOSTNAME;
+  if (!hostname) {
+    return res.status(503).type('text/plain')
+      .send('# SERVER_HOSTNAME not configured on server. Set it in .env before serving installs.\n');
+  }
   const ip = req.ip;
   const { token, error } = getOrCreateTokenForIp(ip);
   if (error) return res.status(403).type('text/plain').send(`# Error: ${error}\n`);
-  const wsProto = req.protocol === 'https' ? 'wss' : 'ws';
-  const serverUrl = `${wsProto}://${req.get('host')}`;
+  const isLocal = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(hostname);
+  const wsProto = isLocal ? 'ws' : 'wss';
+  const serverUrl = `${wsProto}://${hostname}`;
   let script = readFileSync(installShPath, 'utf8');
   script = script.replace('SERVER_URL="${CODETTE_SERVER_URL:-}"', `SERVER_URL="${serverUrl}"`);
   script = script.replace('HOST_KEY="${CODETTE_HOST_KEY:-}"', `HOST_KEY="${token}"`);
@@ -461,6 +483,8 @@ wss.on('connection', async (ws, req) => {
 
   // ── Client connection ──────────────────────────────────────────────────────
   } else if (url.pathname === '/ws') {
+    // Same trust model as requireJwt: cookie/query `username` is untrusted,
+    // JWT is host-issued, payload.username must match.
     const token = url.searchParams.get('token');
     const username = getCookie(req, 'username') ?? url.searchParams.get('username');
     const host = hosts.get(username);
@@ -468,6 +492,7 @@ wss.on('connection', async (ws, req) => {
     try {
       if (!host?.pubkeyKey) throw new Error('Host not connected');
       const { payload } = await jwtVerify(token, await host.pubkeyKey, { algorithms: ['ES256'] });
+      if (payload.username !== username) throw new Error('Username/JWT mismatch');
       user = payload;
     } catch { ws.close(1008, 'Unauthorized'); return; }
 

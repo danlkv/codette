@@ -181,23 +181,6 @@ IntersectionObserver for lazy loading + in-flight deduplication. The `hlSet` ite
 
 ---
 
-## Files changed
-
-| file | change |
-|------|--------|
-| `host/index.js` | read `settings.inlineFiles`, pass `--append-system-prompt` |
-| `server/src/index.js` | forward `settings` in `new_session` to host |
-| `shared/prompts.js` | single source of truth for agent prompt |
-| `client/src/utils/markdown.js` | `sourcefile` fence renderer, `data-ranges` attr |
-| `client/src/lib/MessageBubble.svelte` | `sessionId`+`token`+`onOpenFile` props, `use:sourceFileRender` |
-| `client/src/lib/SessionSidebar.svelte` | inline-files checkbox |
-| `client/src/lib/ChatLayout.svelte` | `handleNewSession` settings; `/inline-files` handler |
-| `client/src/lib/ChatInput.svelte` | `/inline-files` in autocomplete |
-| `client/src/utils/sourcefile-action.js` | DOM hydration action, `parseRanges` |
-| `client/src/lib/SourceFileBlock.svelte` | file panel component |
-
----
-
 ## See also
 
 **HTML Render** (`htmlrender` code fence) — renders live HTML/JS/CSS in sandboxed iframes.

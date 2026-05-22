@@ -6,7 +6,7 @@
  * All functions throw (or return {error}) on failure — callers decide how to surface it.
  */
 import { wtrace } from './trace.js';
-import { encryptDet, packParam, decrypt } from './crypto.js';
+import { encrypt, encryptDet, packParam, decrypt } from './crypto.js';
 
 // ── E2E key state (set by App.svelte effect) ─────────────────────────────────
 let _encKey = null, _nonceKey = null;
@@ -69,21 +69,36 @@ export async function fetchSessions(token) {
   return decryptResponse(await res.json());
 }
 
-export async function createSession(token, body) {
-  wtrace('client', 'server', 'new_session');
-  const res = await fetch('/api/sessions', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+export async function deleteSession(sessionId, token) {
+  wtrace('client', 'server', 'delete_session', sessionId);
+  // Encrypt '{}' under e2e — host requires nonce+ciphertext on this type, and
+  // decrypts to a valid (empty) JSON object before merging.
+  let url = `/api/sessions/${encodeURIComponent(sessionId)}`;
+  if (_encKey) {
+    const { nonce, ciphertext } = await encrypt(_encKey, '{}');
+    url += `?enc=${encodeURIComponent(packParam(nonce, ciphertext))}`;
+  }
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
 
-export async function deleteSession(sessionId, token) {
-  wtrace('client', 'server', 'delete_session', sessionId);
-  const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
+export async function setSessionName(sessionId, name, token) {
+  wtrace('client', 'server', 'set_session_name', sessionId);
+  const url = `/api/sessions/${encodeURIComponent(sessionId)}/name`;
+  let body;
+  if (_encKey) {
+    const { nonce, ciphertext } = await encrypt(_encKey, JSON.stringify({ name: name || null }));
+    body = JSON.stringify({ enc: packParam(nonce, ciphertext) });
+  } else {
+    body = JSON.stringify({ name: name || null });
+  }
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body,
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }

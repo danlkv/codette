@@ -29,7 +29,7 @@ All clients for the same username share the same password and thus derive the sa
 
 The host derives the same pair at startup. The server never sees the password and cannot derive either key.
 
-**Message encryption:** every encrypted message keeps `type` in plaintext; all content fields are encrypted into a single ciphertext blob. When neither side has a password, messages flow as plaintext. When keys exist, both sides encrypt unconditionally and reject plaintext messages (except `host_status` and `agent_event` which are metadata-only).
+**Message encryption:** every encrypted message keeps `type` (and routing fields like `sessionId` or RPC `id`) in plaintext; all content fields are encrypted into a single ciphertext blob. When neither side has a password, messages flow as plaintext. When keys exist, both sides encrypt unconditionally. The host enforces presence of `nonce`+`ciphertext` on client-originated sensitive types — `{user, agent_ctl, permission_response, list_sessions, delete_session, set_session_name}` — and drops bare plaintext of those types with a `warn` log. Server-initiated reads (`get_*`, `auth_*`) are allowed plaintext because their outer fields come from REST routing the relay must already see; their responses are still encrypted. `host_status` and `agent_event` are metadata-only and exempt.
 
 **Nonce strategy:**
 - WS broadcasts: random 96-bit nonce per message (unchanged).
@@ -45,9 +45,11 @@ Messages fall into two categories:
 ```
 claude_line    { type, nonce, ciphertext }        // decrypts to {sessionId, line}
 session_list   { type, nonce, ciphertext }        // decrypts to {sessions, hostCwd}
-user           { type, nonce, ciphertext }        // decrypts to {sessionId, message}
-create_session { type, nonce, ciphertext }        // decrypts to {cwd}
-delete_session { type, nonce, ciphertext }        // decrypts to {sessionId}
+user           { type, sessionId, nonce, ciphertext }  // decrypts to {message[, cwd, codette_settings]}
+                                                  // sessionId === '__new__' carries cwd + codette_settings
+                                                  // for the spawn path
+delete_session { type, sessionId, nonce, ciphertext }  // server-initiated from DELETE /api/sessions/:id;
+                                                  // ciphertext encrypts '{}' — presence proves key possession
 agent_event    { type, sessionId, event }         // plaintext — metadata only
 agent_event    { type, states }                   // plaintext — batch variant
 host_status    { type, connected }                // plaintext — server-generated

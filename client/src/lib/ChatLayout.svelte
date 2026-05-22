@@ -9,7 +9,7 @@
   import { messages, lastCost, lastUsage, lastContextUsage, hostStatus, wsOk, colorScheme, highContrast, vibrateOnDone, fontStyle, syntaxTheme, accentColor,
            sessions, currentSessionId, sessionData, showFileChips } from '../store.js';
   import { createParser } from './parser.js';
-  import { fetchHistory, createSession, deleteSession } from '../utils/api.js';
+  import { fetchHistory, deleteSession } from '../utils/api.js';
   import { getHistory, saveHistory, removeHistory, hasHistory, getSettings, saveSettings } from '../utils/storage.js';
   import { wtrace } from '../utils/trace.js';
   import { encrypt, decrypt } from '../utils/crypto.js';

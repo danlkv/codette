@@ -6,9 +6,11 @@ set -e
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
-# Force local-dev defaults (ignore shell env to avoid production leaks)
-export HOST_KEY="${HOST_KEY:-host-key-change-me}"
+# Local-dev defaults. HOST_KEY is regenerated per run and shared via env so
+# alice/bob can use the master-shortcut without going through install.sh.
+export HOST_KEY="${HOST_KEY:-$(openssl rand -hex 32 2>/dev/null || node -e 'console.log(require("crypto").randomBytes(32).toString("hex"))')}"
 export SERVER_URL="ws://localhost:3000"
+export SERVER_HOSTNAME="localhost:3000"
 export PORT=3000
 
 SERVER_LOG=/tmp/e2e-server.log
@@ -49,7 +51,7 @@ for d in "$ROOT/.dev-data/alice/.claude" "$ROOT/.dev-data/bob/.claude"; do
 done
 
 echo "==> Starting host1: alice ($HOST1_LOG)"
-(cd "$ROOT/host" && CODETTE_DATA_HOME="$ROOT/.dev-data/alice" CLAUDE_CONFIG_DIR="$ROOT/.dev-data/alice/.claude" node index.js --server "$SERVER_URL" --username alice --password pass1 --no-dir-privacy) >"$HOST1_LOG" 2>&1 &
+(cd "$ROOT/host" && CODETTE_DATA_HOME="$ROOT/.dev-data/alice" CLAUDE_CONFIG_DIR="$ROOT/.dev-data/alice/.claude" node index.js --server "$SERVER_URL" --username alice --password pass1 --no-dir-privacy --permission-mode default) >"$HOST1_LOG" 2>&1 &
 HOST1_PID=$!
 
 echo "==> Starting host2: bob ($HOST2_LOG)"

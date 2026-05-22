@@ -37,7 +37,13 @@ if [ -z "$SERVER_URL" ]; then
   SERVER_URL=$(ask "Server URL" "ws://localhost:3000")
 fi
 if [ -z "$HOST_KEY" ]; then
-  HOST_KEY=$(ask "Host key" "host-key-change-me")
+  HOST_KEY=$(ask "Host key (required, no default)" "")
+fi
+if [ -z "$HOST_KEY" ]; then
+  echo "Error: host key is required." >&2
+  echo "Obtain one by piping the server-hosted installer: curl -fsSL <server>/install.sh | sh" >&2
+  echo "Or set CODETTE_HOST_KEY in the environment before running this script." >&2
+  exit 1
 fi
 
 echo "Installing codette host..."
