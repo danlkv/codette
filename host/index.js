@@ -18,9 +18,10 @@ import { APP_NAME } from '../shared/constants.js';
 // ── Config loading ──────────────────────────────────────────────────────────
 // Precedence: CLI flags > env vars > credentials.json > defaults
 
+const CREDS_PATH = join(homedir(), '.config', 'codette', 'credentials.json');
+
 function loadCredentials() {
-  const p = join(homedir(), '.config', 'codette', 'credentials.json');
-  try { if (existsSync(p)) return JSON.parse(readFileSync(p, 'utf8')); } catch {}
+  try { if (existsSync(CREDS_PATH)) return JSON.parse(readFileSync(CREDS_PATH, 'utf8')); } catch {}
   return {};
 }
 
@@ -697,6 +698,7 @@ function connect() {
     hr();
     w(`${A.bold}${A.cyan}Claude Web Host${A.reset}  ${A.gray}${SERVER_URL}${A.reset}\n`);
     w(`${A.dim}Serving clients as: ${A.reset}${A.bold}${CLIENT_USERNAME}${A.reset}\n`);
+    if (existsSync(CREDS_PATH)) w(`${A.dim}credentials: ${A.reset}${CREDS_PATH}\n`);
     if (NO_DIR_PRIVACY) w(`${A.yellow}[warn] --no-dir-privacy: file access unrestricted${A.reset}\n`);
     hr();
     log('info', 'host connected to server', { url: SERVER_URL });
