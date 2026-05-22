@@ -40,6 +40,14 @@ function parseCliFlags() {
 
 const _cli = parseCliFlags();
 const _creds = loadCredentials();
+// True iff the active CLIENT_PASSWORD will come from credentials.json (no
+// higher-precedence source provided one). Used to gate the banner line that
+// points users at the creds file — pointless to print when the password
+// actually came from a CLI flag or env var.
+const _passwordFromCreds = !_cli.password
+  && !process.env.CODETTE_PASSWORD
+  && !process.env.CLIENT_PASSWORD
+  && !!_creds.password;
 
 const SERVER_URL = _cli.server
   || process.env.CODETTE_SERVER_URL || process.env.SERVER_URL
@@ -698,7 +706,7 @@ function connect() {
     hr();
     w(`${A.bold}${A.cyan}Claude Web Host${A.reset}  ${A.gray}${SERVER_URL}${A.reset}\n`);
     w(`${A.dim}Serving clients as: ${A.reset}${A.bold}${CLIENT_USERNAME}${A.reset}\n`);
-    if (existsSync(CREDS_PATH)) w(`${A.dim}credentials: ${A.reset}${CREDS_PATH}\n`);
+    if (_passwordFromCreds) w(`${A.dim}credentials: ${A.reset}${CREDS_PATH}\n`);
     if (NO_DIR_PRIVACY) w(`${A.yellow}[warn] --no-dir-privacy: file access unrestricted${A.reset}\n`);
     hr();
     log('info', 'host connected to server', { url: SERVER_URL });
