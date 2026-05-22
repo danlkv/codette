@@ -387,6 +387,10 @@ app.get('/install.sh', (req, res) => {
 const appRoot = path.resolve(__dirname, '../..');
 const hostDir = path.join(appRoot, 'host');
 if (existsSync(hostDir)) {
+  const hostPkgVersion = JSON.parse(
+    readFileSync(path.join(hostDir, 'package.json'), 'utf8')
+  ).version;
+  app.get('/version', (_req, res) => res.json({ host: hostPkgVersion }));
   app.get('/host.tar.gz', (_req, res) => {
     try {
       const tar = execFileSync('tar', [

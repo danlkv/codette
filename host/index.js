@@ -673,6 +673,23 @@ rpc.register('auth_verify', async (msg) => {
 // ── Server connection ─────────────────────────────────────────────────────────
 let ws;
 
+// One-shot version check against the server's served host package. Silent on
+// any failure (network, JSON, missing field) — never blocks startup.
+let versionChecked = false;
+async function checkUpdate() {
+  if (versionChecked) return;
+  versionChecked = true;
+  try {
+    const httpUrl = SERVER_URL.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
+    const r = await fetch(`${httpUrl}/version`);
+    if (!r.ok) return;
+    const { host: latest } = await r.json();
+    if (latest && latest !== HOST_VERSION) {
+      w(`${A.yellow}update available: v${HOST_VERSION} → v${latest}${A.reset}  ${A.dim}run: codette update${A.reset}\n`);
+    }
+  } catch {}
+}
+
 function connect() {
   ws = new WebSocket(`${SERVER_URL}/host?token=${encodeURIComponent(HOST_TOKEN)}&clientUsername=${encodeURIComponent(CLIENT_USERNAME)}`);
 
@@ -691,6 +708,7 @@ function connect() {
       if (sessionId) states[sessionId] = session.streaming ? 'streaming' : 'idle';
     }
     if (Object.keys(states).length > 0) hostSend({ type: 'agent_event', states });
+    checkUpdate();
   });
 
   ws.on('message', async (data) => {
