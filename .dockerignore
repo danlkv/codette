@@ -1,0 +1,11 @@
+node_modules
+**/node_modules
+.git
+.dev-data
+_worktrees
+test-results
+.last-run.json
+.env
+client/dist
+*.log
+.DS_Store

@@ -17,7 +17,7 @@ COPY server/package*.json ./
 RUN npm ci --omit=dev
 COPY server/ ./
 COPY shared/ /app/shared/
-COPY host/index.js host/package.json host/package-lock.json host/renderer.js host/rpc.js /app/host/
+COPY host/ /app/host/
 COPY install.sh /app/install.sh
 COPY --from=client-builder /app/client/dist /app/client/dist
 RUN mkdir -p /data
