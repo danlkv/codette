@@ -335,7 +335,14 @@ function sendAgentEvent(sessionId, event) {
 function startSession(extraArgs = [], sessionIdHint = null, overrideCwd = null) {
   const resumeIdx = extraArgs.indexOf('--resume');
   const resumeId  = resumeIdx !== -1 ? extraArgs[resumeIdx + 1] : null;
-  const spawnCwd  = overrideCwd || (resumeId ? getSessionCwd(resumeId) : null);
+  let spawnCwd   = overrideCwd || (resumeId ? getSessionCwd(resumeId) : null);
+  // If recorded cwd doesn't exist on this host (e.g., session was created on
+  // another machine), fall back to $HOME — spawn would fail with a misleading
+  // "binary failed to launch" error otherwise.
+  if (spawnCwd && !existsSync(spawnCwd)) {
+    log('warn', `session cwd does not exist on this host, falling back to home`, { cwd: spawnCwd, fallback: homedir() });
+    spawnCwd = homedir();
+  }
   const backend   = _cli.backend || 'sdk';
 
   log('info', 'starting session', { backend, args: extraArgs, cwd: spawnCwd, hint: sessionIdHint?.slice(0, 8) ?? null });
