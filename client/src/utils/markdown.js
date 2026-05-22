@@ -77,8 +77,8 @@ marked.use({
         const escAttr = s => esc(s).replace(/"/g, '&quot;');
         const annAttr = annotations.length ? escAttr(JSON.stringify(annotations)) : '';
         return `<div class="source-file-block"` +
-          ` data-path="${esc(filePath)}"` +
-          ` data-ranges="${esc(ranges)}"` +
+          ` data-path="${escAttr(filePath)}"` +
+          ` data-ranges="${escAttr(ranges)}"` +
           (annAttr ? ` data-ann="${annAttr}"` : '') +
           `></div>`;
       }

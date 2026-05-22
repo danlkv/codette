@@ -215,7 +215,9 @@ app.post('/api/auth/verify', authRateLimit, (req, res) => {
       wtrace('host', 'server', 'auth_verify');
       if (res.headersSent) return;
       if (err) return res.status(401).json({ error: err.message });
-      res.setHeader('Set-Cookie', `username=${encodeURIComponent(username)}; Path=/; SameSite=Strict`);
+      // username cookie is a non-credential routing hint; Secure when over TLS.
+      const secure = req.secure ? '; Secure' : '';
+      res.setHeader('Set-Cookie', `username=${encodeURIComponent(username)}; Path=/; SameSite=Strict${secure}`);
       res.json(result);
     },
     10000);
