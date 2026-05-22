@@ -161,35 +161,49 @@ function requireHost(req, res, next) {
   next();
 }
 
-// ── Auth rate limiting ────────────────────────────────────────────────────────
-const AUTH_WINDOW_MS  = 60_000;   // 1 minute window
-const AUTH_MAX_TRIES  = 10;       // max attempts per IP per window
-const authAttempts    = new Map(); // ip → { count, resetAt }
-
-function authRateLimit(req, res, next) {
-  const ip = req.ip;
-  const now = Date.now();
-  let entry = authAttempts.get(ip);
-  if (!entry || now > entry.resetAt) {
-    entry = { count: 0, resetAt: now + AUTH_WINDOW_MS };
-    authAttempts.set(ip, entry);
-  }
-  entry.count++;
-  if (entry.count > AUTH_MAX_TRIES) {
-    const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
-    res.set('Retry-After', String(retryAfter));
-    return res.status(429).json({ error: 'Too many auth attempts, try again later' });
-  }
-  next();
+// ── Rate limiting ─────────────────────────────────────────────────────────────
+// Limiters key on req.ip. Under `trust proxy: true`, that value reflects
+// X-Forwarded-For — pin trust proxy to a specific upstream before relying
+// on these limits.
+function makeRateLimit(label, windowMs, max) {
+  const attempts = new Map(); // ip → { count, resetAt }
+  setInterval(() => {
+    const now = Date.now();
+    for (const [ip, entry] of attempts) {
+      if (now > entry.resetAt) attempts.delete(ip);
+    }
+  }, windowMs).unref();
+  return function rateLimit(req, res, next) {
+    const ip = req.ip;
+    const now = Date.now();
+    let entry = attempts.get(ip);
+    if (!entry || now > entry.resetAt) {
+      entry = { count: 0, resetAt: now + windowMs };
+      attempts.set(ip, entry);
+    }
+    entry.count++;
+    if (entry.count > max) {
+      const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
+      res.set('Retry-After', String(retryAfter));
+      return res.status(429).json({ error: `Rate limit exceeded (${label})` });
+    }
+    next();
+  };
 }
 
-// Periodically clean up stale entries
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, entry] of authAttempts) {
-    if (now > entry.resetAt) authAttempts.delete(ip);
-  }
-}, AUTH_WINDOW_MS).unref();
+// Tiered limits. apiLimiter is a broad flood guard; expensiveLimiter wraps
+// host-RPC handlers (history/file/fs/git) that force the host to do work;
+// installLimiter and tarballLimiter protect unauthenticated endpoints that
+// issue credentials or shell out per request.
+const authRateLimit    = makeRateLimit('auth',      60_000, 10);
+const apiLimiter       = makeRateLimit('api',       60_000, 600);
+const expensiveLimiter = makeRateLimit('expensive', 60_000, 60);
+const installLimiter   = makeRateLimit('install',   60_000, 5);
+const tarballLimiter   = makeRateLimit('tarball',   60_000, 5);
+
+app.use('/api', apiLimiter);
+app.use('/install.sh', installLimiter);
+app.use('/host.tar.gz', tarballLimiter);
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 app.post('/api/auth/challenge', authRateLimit, (req, res) => {
@@ -231,7 +245,7 @@ app.get('/api/sessions', requireJwt, (req, res) => {
 });
 
 // ── Session history ───────────────────────────────────────────────────────────
-app.get('/api/sessions/:id/history', requireJwt, requireHost, (req, res) => {
+app.get('/api/sessions/:id/history', expensiveLimiter, requireJwt, requireHost, (req, res) => {
   const host = req.claudeHost;
   const id = req.params.id;
   const offset = req.query.offset !== undefined ? Number(req.query.offset) : null;
@@ -248,7 +262,7 @@ app.get('/api/sessions/:id/history', requireJwt, requireHost, (req, res) => {
 });
 
 // ── File system listing ───────────────────────────────────────────────────────
-app.get('/api/sessions/:id/fs', requireJwt, requireHost, (req, res) => {
+app.get('/api/sessions/:id/fs', expensiveLimiter, requireJwt, requireHost, (req, res) => {
   const encPath = req.query.enc_path;
   const payload = encPath
     ? { sessionId: req.params.id, ...unpackParam(encPath) }
@@ -260,7 +274,7 @@ app.get('/api/sessions/:id/fs', requireJwt, requireHost, (req, res) => {
 });
 
 // ── File content ──────────────────────────────────────────────────────────────
-app.get('/api/sessions/:id/file', requireJwt, requireHost, (req, res) => {
+app.get('/api/sessions/:id/file', expensiveLimiter, requireJwt, requireHost, (req, res) => {
   const encPath = req.query.enc_path;
   const payload = encPath
     ? { sessionId: req.params.id, ...unpackParam(encPath) }
@@ -272,7 +286,7 @@ app.get('/api/sessions/:id/file', requireJwt, requireHost, (req, res) => {
 });
 
 // ── Git log ───────────────────────────────────────────────────────────────────
-app.get('/api/sessions/:id/git/log', requireJwt, requireHost, (req, res) => {
+app.get('/api/sessions/:id/git/log', expensiveLimiter, requireJwt, requireHost, (req, res) => {
   const rid = req.claudeHost.rpc.call(req.claudeHost.ws, 'get_git_log',
     { sessionId: req.params.id },
     (err, result) => { if (!res.headersSent) err ? res.status(504).json({ error: err.message }) : res.json(result); });
@@ -280,7 +294,7 @@ app.get('/api/sessions/:id/git/log', requireJwt, requireHost, (req, res) => {
 });
 
 // ── Git status ────────────────────────────────────────────────────────────────
-app.get('/api/sessions/:id/git/status', requireJwt, requireHost, (req, res) => {
+app.get('/api/sessions/:id/git/status', expensiveLimiter, requireJwt, requireHost, (req, res) => {
   const rid = req.claudeHost.rpc.call(req.claudeHost.ws, 'get_git_status',
     { sessionId: req.params.id },
     (err, result) => { if (!res.headersSent) err ? res.status(504).json({ error: err.message }) : res.json(result); });
@@ -288,7 +302,7 @@ app.get('/api/sessions/:id/git/status', requireJwt, requireHost, (req, res) => {
 });
 
 // ── Git diff ──────────────────────────────────────────────────────────────────
-app.get('/api/sessions/:id/git/diff', requireJwt, requireHost, (req, res) => {
+app.get('/api/sessions/:id/git/diff', expensiveLimiter, requireJwt, requireHost, (req, res) => {
   const commit = req.query.commit;
   if (!commit) return res.status(400).json({ error: 'commit required' });
   const rid = req.claudeHost.rpc.call(req.claudeHost.ws, 'get_git_diff',
@@ -298,7 +312,7 @@ app.get('/api/sessions/:id/git/diff', requireJwt, requireHost, (req, res) => {
 });
 
 // ── Git file diff ─────────────────────────────────────────────────────────────
-app.get('/api/sessions/:id/git/file-diff', requireJwt, requireHost, (req, res) => {
+app.get('/api/sessions/:id/git/file-diff', expensiveLimiter, requireJwt, requireHost, (req, res) => {
   const encPath = req.query.enc_path;
   if (encPath) {
     const rid = req.claudeHost.rpc.call(req.claudeHost.ws, 'get_git_file_diff',
