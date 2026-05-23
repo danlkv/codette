@@ -13,7 +13,7 @@ import { SignJWT, importPKCS8 } from 'jose';
 import { ClaudeRenderer, toolSummary } from './renderer.js';
 import { RpcServer } from './rpc.js';
 import { makeInlineFilePrompt, HTML_RENDER_PROMPT } from '../shared/prompts.js';
-import { hmacVerify, deriveKey, deriveNonceKey, encrypt, encryptDet, decrypt } from '../shared/crypto.js';
+import { hmacVerify, deriveKey, deriveNonceKey, deriveAuthKey, encrypt, encryptDet, decrypt } from '../shared/crypto.js';
 import { APP_NAME } from '../shared/constants.js';
 // ── Config loading ──────────────────────────────────────────────────────────
 // Precedence: CLI flags > env vars > credentials.json > defaults
@@ -125,6 +125,12 @@ const HOST_PRIV_KEY_JOSE = await importPKCS8(HOST_PRIV_KEY, 'ES256');
 // E2E=0 is a debug flag that skips key derivation (equivalent to no password).
 let encKey = null;
 let nonceKey = null;
+// authKey is always derived (even when E2E=0) because it backs the login
+// challenge — the auth flow runs regardless of whether message-body e2e is on.
+let authKey = null;
+const authKeyReady = deriveAuthKey(CLIENT_PASSWORD, CLIENT_USERNAME)
+  .then(k => { authKey = k; })
+  .catch(e => { process.stderr.write('auth key derivation failed: ' + e.message + '\n'); });
 const encKeyReady = E2E_ENABLED
   ? Promise.all([
       deriveKey(CLIENT_PASSWORD, CLIENT_USERNAME),
@@ -667,7 +673,8 @@ rpc.register('auth_verify', async (msg) => {
     throw new Error('invalid or expired challenge');
   }
   pendingChallenges.delete(nonce);
-  const ok = await hmacVerify(CLIENT_PASSWORD, nonce, response);
+  await authKeyReady;
+  const ok = await hmacVerify(authKey, nonce, response);
   if (!ok) throw new Error('authentication failed');
   const token = await new SignJWT({ username })
     .setProtectedHeader({ alg: 'ES256' })

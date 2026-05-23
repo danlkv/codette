@@ -2,7 +2,7 @@
 <!-- Copyright 2026 Danylo Lykov -->
 
 <script>
-  import { hmacSign } from '../utils/crypto.js';
+  import { hmacSign, deriveAuthKey } from '../utils/crypto.js';
   import { wtrace } from '../utils/trace.js';
 
   let { onLogin, onCancel } = $props();
@@ -23,7 +23,11 @@
       if (!chalRes.ok) { hostDown = true; return; }
       const { nonce } = await chalRes.json();
 
-      const response = await hmacSign(password, nonce);
+      // Run the password through PBKDF2 (200k iters) before HMAC so the value
+      // we POST to the relay server is not a raw HMAC-of-password — that would
+      // be brute-forceable at full HMAC speed by anyone who saw the request.
+      const authKey = await deriveAuthKey(password, username);
+      const response = await hmacSign(authKey, nonce);
 
       wtrace('client', 'server', 'auth_verify');
       const verRes = await post('/api/auth/verify', { username, nonce, response });

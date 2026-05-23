@@ -32,36 +32,47 @@ const dec = new TextDecoder();
 
 // ── Key derivation ────────────────────────────────────────────────────────────
 
-/**
- * Derive a non-extractable AES-GCM-256 key from password + username.
- * Uses PBKDF2 with SHA-256, 200 000 iterations.
- */
-export async function deriveKey(password, username) {
-  const raw = enc.encode(password);
-  const salt = enc.encode('codette-e2e-v1:' + username);
-  const base = await crypto.subtle.importKey('raw', raw, 'PBKDF2', false, ['deriveKey']);
+// PBKDF2 parameters live in exactly one place — all derived keys share the
+// same iteration count and hash. Distinct salt labels keep the derived keys
+// independent (encryption vs nonce-HMAC vs auth-HMAC).
+const PBKDF2_ITERATIONS = 200_000;
+
+async function _pbkdf2Derive(password, saltLabel, algorithm, usages) {
+  const base = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
   return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt, iterations: 200_000, hash: 'SHA-256' },
-    base,
+    { name: 'PBKDF2', salt: enc.encode(saltLabel), iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
+    base, algorithm, false, usages,
+  );
+}
+
+/** Non-extractable AES-GCM-256 key for e2e message encryption. */
+export function deriveKey(password, username) {
+  return _pbkdf2Derive(
+    password, 'codette-e2e-v1:' + username,
     { name: 'AES-GCM', length: 256 },
-    false,
     ['encrypt', 'decrypt'],
   );
 }
 
-/**
- * Derive a non-extractable HMAC-SHA-256 key for deterministic nonce generation.
- * Same password + username, different salt.
- */
-export async function deriveNonceKey(password, username) {
-  const raw = enc.encode(password);
-  const salt = enc.encode('codette-e2e-nonce-v1:' + username);
-  const base = await crypto.subtle.importKey('raw', raw, 'PBKDF2', false, ['deriveKey']);
-  return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt, iterations: 200_000, hash: 'SHA-256' },
-    base,
+/** Non-extractable HMAC-SHA-256 key for deterministic nonce generation. */
+export function deriveNonceKey(password, username) {
+  return _pbkdf2Derive(
+    password, 'codette-e2e-nonce-v1:' + username,
     { name: 'HMAC', hash: 'SHA-256', length: 256 },
-    false,
+    ['sign'],
+  );
+}
+
+/**
+ * Non-extractable HMAC-SHA-256 key for the login challenge/response.
+ * Pre-hashing the password through PBKDF2 means the value sent to
+ * `/api/auth/verify` cannot be brute-forced faster than the same 200 000-iter
+ * cost as the e2e key. MUST be used to key hmacSign().
+ */
+export function deriveAuthKey(password, username) {
+  return _pbkdf2Derive(
+    password, 'codette-auth-v1:' + username,
+    { name: 'HMAC', hash: 'SHA-256', length: 256 },
     ['sign'],
   );
 }
@@ -129,15 +140,12 @@ export function unpackParam(param) {
 // ── HMAC ──────────────────────────────────────────────────────────────────────
 
 /**
- * Compute HMAC-SHA256(key=password, data=nonce).
+ * Compute HMAC-SHA-256(authKey, nonce).
+ * `authKey` MUST be a CryptoKey produced by deriveAuthKey() — passing the raw
+ * password would leak a value brute-forceable at HMAC speed.
  * @returns {string}  base64
  */
-export async function hmacSign(password, nonce) {
-  const k = await crypto.subtle.importKey(
-    'raw', enc.encode(password),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false, ['sign'],
-  );
-  const sig = await crypto.subtle.sign('HMAC', k, enc.encode(nonce));
+export async function hmacSign(authKey, nonce) {
+  const sig = await crypto.subtle.sign('HMAC', authKey, enc.encode(nonce));
   return b64e(sig);
 }
