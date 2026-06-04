@@ -19,13 +19,22 @@ ask() {
   echo "${val:-$2}"
 }
 
-HOST_KEY=$(openssl rand -hex 32)
+COOKIE_SECRET=$(openssl rand -hex 32)
 DEFAULT_HOSTNAME=$(hostname -f 2>/dev/null || echo "localhost")
 SERVER_HOSTNAME=$(ask "Server hostname" "$DEFAULT_HOSTNAME")
 
+# Derive a sensible PUBLIC_URL default
+if [ "$SERVER_HOSTNAME" = "localhost" ] || [ "$SERVER_HOSTNAME" = "127.0.0.1" ]; then
+  DEFAULT_PUBLIC_URL="http://$SERVER_HOSTNAME:3000"
+else
+  DEFAULT_PUBLIC_URL="https://$SERVER_HOSTNAME"
+fi
+PUBLIC_URL=$(ask "Public URL (OAuth issuer)" "$DEFAULT_PUBLIC_URL")
+
 cat > "$ENV_FILE" <<EOF
-HOST_KEY=$HOST_KEY
+COOKIE_SECRET=$COOKIE_SECRET
 SERVER_HOSTNAME=$SERVER_HOSTNAME
+PUBLIC_URL=$PUBLIC_URL
 EOF
 
 echo ""
@@ -35,5 +44,6 @@ echo "Start the server:"
 echo "  docker compose up -d                      # no TLS (localhost only)"
 echo "  docker compose --profile tls up -d        # with TLS via Caddy"
 echo ""
-echo "Then install the host on any machine:"
+echo "Then on each host machine:"
 echo "  curl -fsSL https://$SERVER_HOSTNAME/install.sh | sh"
+echo "  codette login"

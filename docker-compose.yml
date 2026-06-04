@@ -4,8 +4,9 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     environment:
-      HOST_KEY: ${HOST_KEY:-}
-      HOST_TOKEN_TTL: ${HOST_TOKEN_TTL:-0}
+      COOKIE_SECRET: ${COOKIE_SECRET}
+      PUBLIC_URL: ${PUBLIC_URL:-https://${SERVER_HOSTNAME}}
+      SERVER_HOSTNAME: ${SERVER_HOSTNAME}
       PORT: "3000"
     volumes:
       - server-data:/data
