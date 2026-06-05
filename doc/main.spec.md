@@ -122,7 +122,7 @@ agent the syntax. See `inline-file.spec.md`.
 
 ### Install
 
-Server serves a shell script at `GET /install.sh` with `HOST_KEY` and `SERVER_URL` baked in.
+Server serves a shell script at `GET /install.sh` with `SERVER_URL` baked in. The script delivers the binary only — no credentials are interpolated.
 
 ```
 curl -fsSL https://your-server:3000/install.sh | sh
@@ -131,23 +131,27 @@ curl -fsSL https://your-server:3000/install.sh | sh
 The script:
 1. Clones the GitHub repo into `~/.local/share/codette/`
 2. Runs `npm install --prefix ~/.local/share/codette/host`
-3. Prompts for username and password (enter to accept defaults):
-   ```
-   Username [dan]:
-   Password [a3kR4mXq2p]:
-   ```
-   Username defaults to `$(whoami)`. Password defaults to a random 10-char alphanumeric.
-4. Writes `~/.config/codette/credentials.json` (mode 0600):
+3. Writes `~/.config/codette/config.json` (mode 0644):
    ```json
-   { "server": "wss://your-server:3000", "hostKey": "...", "username": "dan", "password": "a3kR4mXq2p" }
+   { "server": "wss://your-server:3000" }
    ```
-5. Symlinks `~/.local/bin/codette` → `~/.local/share/codette/host/index.js`
-6. If `~/.local/bin` is not in `$PATH`, prints:
+4. Symlinks `~/.local/bin/codette` → `~/.local/share/codette/host/index.js`
+5. If `~/.local/bin` is not in `$PATH`, prints:
    ```
    Add to your shell profile:
      export PATH="$HOME/.local/bin:$PATH"
    ```
-7. Prints `Run:  codette`
+6. Prints `Run:  codette login`
+
+### Activation (`codette login`)
+
+The host CLI obtains credentials via OAuth 2.0 Authorization Code + PKCE. See `auth.spec.md` (Host registration via OAuth) for the full flow. Summary:
+
+1. `codette login` opens a browser at `/oauth/auth` and listens on a free `localhost:<port>`.
+2. User clicks **Try free for N days** on the consent page.
+3. Browser returns to a server-rendered intermediate page that posts the auth code to `localhost:<port>` (or, if codette is on a remote machine, displays the code for copy-paste into the CLI prompt).
+4. CLI exchanges the code for `{access_token, refresh_token}` and persists them to `~/.config/codette/credentials.json` (mode 0600).
+5. CLI starts the host process. The `access_token` is sent as `?token=…` on the `/host` WebSocket connection.
 
 ### Startup
 
@@ -160,14 +164,16 @@ Connected to https://your-server:3000
 
 ### Config precedence
 
-CLI flags → `~/.config/codette/credentials.json` → env vars → defaults.
+CLI flags → `~/.config/codette/credentials.json` (secrets, 0600) → `~/.config/codette/config.json` (non-secret, 0644) → env vars → defaults.
 
-| Setting | Config key | Env var | CLI flag | Default |
-|---------|-----------|---------|----------|---------|
-| Server URL | `server` | `CODETTE_SERVER_URL` | `--server`, `-s` | `ws://localhost:3000` |
-| Host key | `hostKey` | `CODETTE_HOST_KEY` | — | _required (no default)_ |
-| Username | `username` | `CODETTE_USERNAME` | `--username`, `-u` | `$(whoami)` |
-| Password | `password` | `CODETTE_PASSWORD` | `--password`, `-p` | `changeme` |
+| Setting | Config file / key | Env var | CLI flag | Default |
+|---------|-------------------|---------|----------|---------|
+| Server URL | `config.json: server` | `CODETTE_SERVER_URL` | `--server`, `-s` | `ws://localhost:3000` |
+| Refresh token | `credentials.json: refresh_token` | — | — | _obtained via `codette login`_ |
+| Username | (chosen at OAuth claim time) | `CODETTE_USERNAME` | `--username`, `-u` | `$(whoami)` |
+| Password | `credentials.json: password` | `CODETTE_PASSWORD` | `--password`, `-p` | _user-chosen at login_ |
+
+Hosts authenticate to `/host` WS by sending a fresh `access_token` (obtained by exchanging the persisted `refresh_token` at startup) as the `?token=` query parameter.
 
 ### CLI
 

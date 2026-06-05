@@ -1,3 +1,23 @@
+## Host registration via OAuth (CLI login)
+
+The host CLI registers with the server via OAuth 2.0 Authorization Code + PKCE. OAuth gates the CLI's right to connect to `/host` WS and own a host slot at the server (accounting domain). The browser authenticates to the host via the HMAC challenge/verify flow (chat domain, described below) — a separate auth surface.
+
+**Flow:**
+
+1. User runs `curl -fsSL https://your-server/install.sh | sh`. Install script downloads the binary only — no secrets are interpolated. Last line prints `Run:  codette login`.
+2. `codette login` generates PKCE (`code_verifier` + SHA-256 `code_challenge`) and a random `state`, binds a free `localhost:<port>`, and opens the browser at `GET /oauth/auth?response_type=code&client_id=codette-cli&redirect_uri=http://localhost:<port>/callback&code_challenge=…&code_challenge_method=S256&scope=openid+offline_access&prompt=consent&state=…`. The CLI requests `scope=openid offline_access` and `prompt=consent` so the user explicitly grants persistent access and the server always issues a `refresh_token`.
+3. The server renders a consent page with a single button: **Try free for N days**. (Sign-in-with-Google and similar IdP options are not implemented in v1.) Submitting POSTs `/oauth/interaction/<uid>/trial` with the OAuth state forwarded.
+4. The trial handler validates CSRF + OAuth state, checks the per-IP claim limit (5 per 15 days by default), mints a one-shot `code` bound to the `code_challenge` and `redirect_uri`, and redirects the browser to an intermediate page `GET /auth/success?code=…`.
+5. The intermediate page attempts `fetch('http://localhost:<port>/callback?code=…', { mode: 'no-cors' })`. If the local CLI listener responds, the page updates to "Authenticated." If the fetch fails (CLI is running on a remote machine), the page falls back to displaying the code with a copy button so the user can paste it into the CLI prompt.
+6. The CLI's local listener receives the code (or stdin paste resolves first — both paths race), then POSTs `/oauth/token` with `grant_type=authorization_code`, the `code`, the `code_verifier`, and `redirect_uri`. The server validates PKCE, marks the code consumed, and returns `{access_token, refresh_token, expires_in, token_type}`.
+7. The CLI persists `{server, refresh_token, username, password}` in `~/.config/codette/credentials.json` (mode 0600). `username` and `password` are the browser-side chat-domain credentials (used for the browser↔host HMAC auth flow, separate from OAuth); they are chosen by the user during `codette login` and stored alongside the OAuth `refresh_token` for convenience. On each subsequent startup the CLI exchanges `refresh_token` for a fresh `access_token`. The `access_token` is the credential the CLI sends as `?token=…` when opening the `/host` WebSocket.
+
+**Lifetime:** issued tokens carry a standard `exp` claim N days from issuance (default 7); the refresh token expires at the same time. After expiry, the refresh-token grant fails; the host process logs the error and exits. Server-side credentials and any slots they own are reaped per the retention policy.
+
+**Rate limiting:** the `/oauth/interaction/<uid>/trial` handler limits successful claims per IP (default 5 / 15 days). The window and count are configurable via env. Failed attempts (bad CSRF, expired code) are not counted against the limit but are independently rate-limited via the existing `authRateLimit` middleware (10 / min).
+
+**Server-resident OAuth implementation:** the OAuth Authorization Server is implemented using [`node-oidc-provider`](https://github.com/panva/node-oidc-provider). The library handles spec compliance for `/oauth/auth` (authorization endpoint), `/oauth/token`, the device flow (unused for now), token signing (ES256 with a server-owned `oauth_keypair`), JWKS publication, refresh, revocation, and code lifecycle. The provider is mounted at `/oauth`; oidc-provider's default path for the authorization endpoint is `/auth`, making the full path `/oauth/auth`. The consent page (single trial button) is the only custom UI; everything else is library-provided.
+
 ## Authentication via device pairing
 
 Three credentials work in concert.
