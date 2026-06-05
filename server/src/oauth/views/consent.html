@@ -61,7 +61,14 @@
     text-align: center;
     color: var(--text-muted);
     font-size: .82rem;
-    line-height: 1.5;
+    line-height: 1.6;
+  }
+  .uname {
+    color: var(--accent-light);
+    background: var(--bg-elevated);
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
   }
   form { display: flex; flex-direction: column; gap: 10px; }
   button {
@@ -80,7 +87,7 @@
 <body>
   <div class="card">
     <div class="brand">codette</div>
-    <p class="lede">Sign in to continue. No account required — you can use codette for <strong>7</strong> days without registration.</p>
+    <p class="lede">Sign in as <span class="uname">__USERNAME__</span>.<br>No account required for 7 days.</p>
     <form method="POST" action="/oauth/interaction/__UID__/trial">
       <input type="hidden" name="csrf" value="__CSRF__">
       <button type="submit">Try without registration for 7 days</button>

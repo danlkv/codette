@@ -11,6 +11,7 @@ import { readFileSync, existsSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { RpcClient } from './rpc.js';
 import { unpackParam } from '../../shared/crypto.js';
+import { isValidUsername, isUsernameClaimed, lookupUsernameBySub } from './oauth/usernames.js';
 import { buildProvider } from './oauth/provider.js';
 import { makeValidateHostToken } from './oauth/host-auth.js';
 import cookieParser from 'cookie-parser';
@@ -65,6 +66,15 @@ const SUCCESS_HTML = readFileSync(
 
 app.get('/auth/success', (req, res) => {
   res.type('html').send(SUCCESS_HTML);
+});
+
+// Pre-flight check for username availability (CLI calls this before opening
+// the browser). Advisory only — the binding race is resolved server-side
+// in /oauth/interaction/:uid/trial via claimUsername (TOCTOU-safe there).
+app.get('/auth/username-available/:name', (req, res) => {
+  const name = String(req.params.name || '').toLowerCase();
+  if (!isValidUsername(name)) return res.json({ available: false, reason: 'invalid' });
+  res.json({ available: !isUsernameClaimed(name) });
 });
 
 // ── REST request logging ──────────────────────────────────────────────────────
@@ -384,13 +394,20 @@ wss.on('connection', async (ws, req) => {
     if (!validated) { ws.close(1008, 'Unauthorized'); return; }
     const clientUsername = url.searchParams.get('clientUsername');
     if (!clientUsername) { ws.close(1008, 'clientUsername required'); return; }
+
+    // Enforce the username binding made at OAuth consent time. The token is
+    // bound to exactly one username; rejecting any other clientUsername here
+    // closes the squatting hole (any valid token used to occupy any free name).
+    const boundUsername = lookupUsernameBySub(validated.sub);
+    if (!boundUsername) { ws.close(1008, 'Token is not bound to any username'); return; }
+    if (boundUsername !== clientUsername) {
+      ws.close(1008, `Token is bound to ${boundUsername}, not ${clientUsername}`);
+      return;
+    }
     if (hosts.has(clientUsername)) { ws.close(1008, 'Host already connected for this username'); return; }
 
     const host = new HostContext(clientUsername, ws);
     host.sub = validated.sub;
-    // TODO(post-mvp): bind clientUsername to validated.sub at OAuth claim time
-    // to prevent username impersonation across trial tokens. Currently any valid
-    // access_token can claim any unused username slot.
     hosts.set(clientUsername, host);
     console.log(`[server] host connected: ${clientUsername} (${hosts.size} total)`);
     wtrace('host', 'server', 'connect', { username: clientUsername });

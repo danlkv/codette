@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url';
 import { randomBytes } from 'crypto';
 import express from 'express';
 import { claimIfAllowed, revokeTrialClaim } from './trial.js';
+import { isValidUsername, isUsernameClaimed, claimUsername } from './usernames.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONSENT_HTML = readFileSync(join(__dirname, 'views', 'consent.html'), 'utf8');
@@ -56,11 +57,27 @@ export function mountInteractions(app, provider) {
         hint: RESTART_HINT,
       });
     }
+    const username = details.params.login_hint;
+    if (!isValidUsername(username)) {
+      return sendError(res, 400, {
+        title: 'Username missing or invalid',
+        message: 'No valid username was provided to bind this sign-in to.',
+        hint: 'Re-run <kbd>codette login</kbd>. Usernames must be lowercase, start with a letter, and be 2–32 chars (letters, digits, _, -).',
+      });
+    }
+    if (isUsernameClaimed(username)) {
+      return sendError(res, 409, {
+        title: 'Username already taken',
+        message: `<span class="uname-inline">${esc(username)}</span> is already claimed by another sign-in.`,
+        hint: 'Re-run <kbd>codette login</kbd> with a different username.',
+      });
+    }
     const csrf = randomBytes(16).toString('hex');
     res.cookie(CSRF_COOKIE, csrf, { httpOnly: true, sameSite: 'lax', secure: req.secure });
     const html = CONSENT_HTML
       .replace(/__UID__/g, details.uid)
-      .replace(/__CSRF__/g, csrf);
+      .replace(/__CSRF__/g, csrf)
+      .replace(/__USERNAME__/g, esc(username));
     res.type('html').send(html);
   });
 
@@ -86,8 +103,42 @@ export function mountInteractions(app, provider) {
       });
     }
 
+    // Re-read login_hint from the interaction (don't trust the form). Server-side
+    // re-validates uniqueness — pre-flight check at /auth/username-available is
+    // advisory only; this is the race-safe boundary.
+    let details;
+    try {
+      details = await provider.interactionDetails(req, res);
+    } catch {
+      revokeTrialClaim(req.ip);
+      return sendError(res, 400, {
+        title: 'Sign-in session expired',
+        message: 'This sign-in link is no longer valid (expired or already used).',
+        hint: RESTART_HINT,
+      });
+    }
+    const username = details.params.login_hint;
+    if (!isValidUsername(username)) {
+      revokeTrialClaim(req.ip);
+      return sendError(res, 400, {
+        title: 'Username missing or invalid',
+        message: 'No valid username was provided to bind this sign-in to.',
+        hint: RESTART_HINT,
+      });
+    }
+
     // Trial user identity: random sub; no profile.
     const sub = randomBytes(16).toString('hex');
+
+    const claim = claimUsername(username, sub);
+    if (claim === 'taken') {
+      revokeTrialClaim(req.ip);
+      return sendError(res, 409, {
+        title: 'Username already taken',
+        message: `<span class="uname-inline">${esc(username)}</span> was claimed by another sign-in while you were on this page.`,
+        hint: 'Re-run <kbd>codette login</kbd> with a different username.',
+      });
+    }
 
     try {
       const grant = new provider.Grant({ accountId: sub, clientId: 'codette-cli' });

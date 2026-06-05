@@ -5,6 +5,7 @@
 
 import Provider from 'oidc-provider';
 import { FileAdapter } from './storage.js';
+import { lookupUsernameBySub } from './usernames.js';
 import { generateKeyPairSync, createPrivateKey } from 'crypto';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
@@ -82,7 +83,7 @@ export async function buildProvider(issuer) {
     },
     findAccount: async (ctx, sub) => ({
       accountId: sub,
-      claims: async () => ({ sub }),
+      claims: async () => ({ sub, preferred_username: lookupUsernameBySub(sub) }),
     }),
   });
 
