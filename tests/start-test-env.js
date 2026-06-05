@@ -12,8 +12,9 @@
 import { spawn } from 'child_process';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { mkdirSync, symlinkSync, lstatSync, openSync, readFileSync, rmSync } from 'fs';
+import { mkdirSync, symlinkSync, openSync, readFileSync, rmSync } from 'fs';
 import { homedir } from 'os';
+import { mintAccessToken } from './oauth-flow.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -21,17 +22,17 @@ const root = join(__dirname, '..');
 const PORT     = process.env.TEST_PORT || '3111';
 const USERNAME = process.env.TEST_USERNAME || 'testuser';
 const PASSWORD = process.env.TEST_PASSWORD || 'testpass';
-// Server refuses to start with the placeholder HOST_KEY; use a fixed test
-// value so tests are deterministic but the server's safety check still works.
-const HOST_KEY = process.env.HOST_KEY || 'test-host-key-do-not-use-in-prod';
 
 // ── Isolated data dir (like run_dev.sh) ──────────────────────────────────────
 const dataDir = join(root, '.dev-data', USERNAME);
 const claudeDir = join(dataDir, '.claude');
+const oauthDataDir = join(dataDir, 'oauth');
+const cookieSecret = 'test-cookie-secret-' + USERNAME;
 
 // Clean slate: remove old session data but preserve credentials symlink
 rmSync(dataDir, { recursive: true, force: true });
 mkdirSync(claudeDir, { recursive: true });
+mkdirSync(oauthDataDir, { recursive: true });
 
 const credSrc = join(homedir(), '.claude', '.credentials.json');
 const credDst = join(claudeDir, '.credentials.json');
@@ -60,7 +61,14 @@ const hostLogFd   = openSync('/tmp/e2e-host.log', 'w');
 // ── Start server ──────────────────────────────────────────────────────────────
 server = spawn('node', ['server/src/index.js'], {
   cwd: root,
-  env: { ...process.env, PORT, HOST_KEY },
+  env: {
+    ...process.env,
+    PORT,
+    OAUTH_DATA_DIR: oauthDataDir,
+    COOKIE_SECRET: cookieSecret,
+    PUBLIC_URL: `http://localhost:${PORT}`,
+    SERVER_HOSTNAME: `localhost:${PORT}`,
+  },
   stdio: ['ignore', serverLogFd, serverLogFd],
 });
 
@@ -92,6 +100,18 @@ try {
   process.exit(1);
 }
 
+// Mint an access token via the headless OAuth dance so the host can connect
+// without needing a saved refresh_token on disk.
+let tokens;
+try {
+  tokens = await mintAccessToken({ serverBase: `http://localhost:${PORT}`, username: USERNAME });
+  console.log(`[test-env] OAuth dance succeeded; got access_token (len=${tokens.access_token.length})`);
+} catch (e) {
+  console.error(`[test-env] OAuth dance failed: ${e.message}`);
+  cleanup();
+  process.exit(1);
+}
+
 const hostEnv = {
   ...process.env,
   SERVER_URL: `ws://localhost:${PORT}`,
@@ -99,11 +119,11 @@ const hostEnv = {
   CLIENT_PASSWORD: PASSWORD,
   CODETTE_DATA_HOME: dataDir,
   CLAUDE_CONFIG_DIR: claudeDir,
-  HOST_KEY,
+  CODETTE_ACCESS_TOKEN: tokens.access_token,
 };
 delete hostEnv.CLAUDECODE;  // allow Claude Code to spawn inside test env
 
-const hostArgs = ['host/index.js'];
+const hostArgs = ['host/index.js', '--server', `ws://localhost:${PORT}`, '--username', USERNAME];
 if (process.env.TEST_BACKEND) hostArgs.push('--backend', process.env.TEST_BACKEND);
 
 host = spawn('node', hostArgs, {

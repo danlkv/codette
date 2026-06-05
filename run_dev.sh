@@ -4,14 +4,24 @@
 
 set -e
 
+# Modes:
+#   ./run_dev.sh                # server + alice + bob hosts (default)
+#   ./run_dev.sh --server-only  # just the server (no host spawns); used by
+#                               # run_dev_login.sh which manages its own host.
+SERVER_ONLY=${SERVER_ONLY:-0}
+for arg in "$@"; do
+  case "$arg" in --server-only) SERVER_ONLY=1 ;; esac
+done
+
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
-# Local-dev defaults. HOST_KEY is regenerated per run and shared via env so
-# alice/bob can use the master-shortcut without going through install.sh.
-export HOST_KEY="${HOST_KEY:-$(openssl rand -hex 32 2>/dev/null || node -e 'console.log(require("crypto").randomBytes(32).toString("hex"))')}"
+# Local-dev defaults.
 export SERVER_URL="ws://localhost:3000"
 export SERVER_HOSTNAME="localhost:3000"
 export PORT=3000
+export OAUTH_DATA_DIR="$ROOT/.dev-data/oauth"
+export COOKIE_SECRET="dev-secret"
+export PUBLIC_URL="http://localhost:$PORT"
 
 SERVER_LOG=/tmp/e2e-server.log
 HOST1_LOG=/tmp/e2e-host1.log
@@ -40,9 +50,18 @@ sleep 0.3
 echo "==> Building client (dev mode)..."
 (cd "$ROOT/client" && npx vite build --mode development)
 
+mkdir -p "$ROOT/.dev-data/oauth"
+
 echo "==> Starting server on :$PORT  ($SERVER_LOG)"
-(cd "$ROOT/server" && node src/index.js) >"$SERVER_LOG" 2>&1 &
+(cd "$ROOT/server" && OAUTH_DATA_DIR="$OAUTH_DATA_DIR" COOKIE_SECRET="$COOKIE_SECRET" PUBLIC_URL="$PUBLIC_URL" node src/index.js) >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
+
+if [ "$SERVER_ONLY" = "1" ]; then
+  printf '%s\n' "$SERVER_PID" > "$PIDFILE"
+  echo "==> server-only mode; skipping host spawns. Ctrl+C to stop. (pid: $SERVER_PID)"
+  tail -f "$SERVER_LOG"
+  exit 0
+fi
 
 mkdir -p "$ROOT/.dev-data/alice/.claude" "$ROOT/.dev-data/bob/.claude"
 # Symlink Claude credentials so dev hosts can spawn Claude
@@ -50,12 +69,29 @@ for d in "$ROOT/.dev-data/alice/.claude" "$ROOT/.dev-data/bob/.claude"; do
   [ -L "$d/.credentials.json" ] || ln -sf ~/.claude/.credentials.json "$d/.credentials.json"
 done
 
+# Mint OAuth tokens programmatically (no browser needed — mintAccessToken uses the
+# headless PKCE flow in tests/oauth-flow.js against the local server).
+echo "==> Minting OAuth tokens for alice and bob..."
+sleep 2  # let server bind
+TOKEN_ALICE=$(node -e "
+import('./tests/oauth-flow.js').then(async ({ mintAccessToken }) => {
+  const t = await mintAccessToken({ serverBase: 'http://localhost:$PORT', username: 'alice' });
+  process.stdout.write(t.access_token);
+}).catch(e => { console.error(e.message); process.exit(1); });
+")
+TOKEN_BOB=$(node -e "
+import('./tests/oauth-flow.js').then(async ({ mintAccessToken }) => {
+  const t = await mintAccessToken({ serverBase: 'http://localhost:$PORT', username: 'bob' });
+  process.stdout.write(t.access_token);
+}).catch(e => { console.error(e.message); process.exit(1); });
+")
+
 echo "==> Starting host1: alice ($HOST1_LOG)"
-(cd "$ROOT/host" && CODETTE_DATA_HOME="$ROOT/.dev-data/alice" CLAUDE_CONFIG_DIR="$ROOT/.dev-data/alice/.claude" node index.js --server "$SERVER_URL" --username alice --password pass1 --no-dir-privacy --permission-mode default) >"$HOST1_LOG" 2>&1 &
+(cd "$ROOT/host" && CODETTE_DATA_HOME="$ROOT/.dev-data/alice" CLAUDE_CONFIG_DIR="$ROOT/.dev-data/alice/.claude" CODETTE_ACCESS_TOKEN="$TOKEN_ALICE" node index.js --server "$SERVER_URL" --username alice --password pass1 --no-dir-privacy --permission-mode default) >"$HOST1_LOG" 2>&1 &
 HOST1_PID=$!
 
 echo "==> Starting host2: bob ($HOST2_LOG)"
-(cd "$ROOT/host" && CODETTE_DATA_HOME="$ROOT/.dev-data/bob" CLAUDE_CONFIG_DIR="$ROOT/.dev-data/bob/.claude" node index.js --server "$SERVER_URL" --username bob --password pass2) >"$HOST2_LOG" 2>&1 &
+(cd "$ROOT/host" && CODETTE_DATA_HOME="$ROOT/.dev-data/bob" CLAUDE_CONFIG_DIR="$ROOT/.dev-data/bob/.claude" CODETTE_ACCESS_TOKEN="$TOKEN_BOB" node index.js --server "$SERVER_URL" --username bob --password pass2) >"$HOST2_LOG" 2>&1 &
 HOST2_PID=$!
 
 printf '%s\n' "$SERVER_PID" "$HOST1_PID" "$HOST2_PID" > "$PIDFILE"

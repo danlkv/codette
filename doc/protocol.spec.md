@@ -42,7 +42,7 @@ claude --dangerously-skip-permissions \
 
 ---
 
-## Layer 2 — Host ↔ Server (WebSocket `/host?key=HOST_KEY`)
+## Layer 2 — Host ↔ Server (WebSocket `/host?token=<access_token>`)
 
 One persistent connection. Host reconnects on drop.
 
@@ -85,14 +85,18 @@ JWT in `Authorization: Bearer <token>` header (obtained via challenge/verify flo
 
 | method | path | body / query | response | notes |
 |--------|------|------|----------|-------|
-| `POST` | `/api/auth/challenge` | `{username}` | `{nonce}` | no auth; server forwards to host RPC |
-| `POST` | `/api/auth/verify` | `{username, nonce, response}` | `{token}` | HMAC-SHA256 response; sets `username` cookie; no capabilities — e2e is implicit from password |
-| `GET` | `/api/sessions` | — | `{sessions: Session[], hostCwd: string}` | cached session list from host; clients should prefer WS `list_sessions` for fresh data |
-| `GET` | `/api/sessions/:id/history` | `?offset=N` / `?limit=N` / `?offset=N&limit=M` | `{lines: string[], totalLines: number, incremental: bool}` | raw JSONL lines; `?limit=N` → last N lines; `?offset=N&limit=M` → lines [N, N+M); `?offset=N` → lines [N, end). Server dedup key: `sessionId:offset:limit` |
-| `DELETE` | `/api/sessions/:id` | `?enc=<packed>` | 204 | broadcasts new `session_list` from host over WS. Under e2e the client sends `?enc=base64url(nonce ‖ ciphertext)` (encrypting `'{}'`); server `unpackParam`s and forwards `{nonce, ciphertext}` to the host alongside the plaintext `sessionId` routing field |
-| `PUT` | `/api/sessions/:id/name` | `{enc}` or `{name}` | `{ok}` | rename a session. Under e2e the body is `{enc: base64url(nonce ‖ ciphertext)}` encrypting `{name}`; without e2e the plaintext `{name}` form is accepted for debug |
-| `GET` | `/api/logs` | `?fmt=text` | JSON array or plain text | `x-host-key` auth |
-| `GET` | `/*` | — | `index.html` | SPA fallback |
+| `GET`    | `/oauth/auth`            | OAuth params (`response_type`, `client_id`, `redirect_uri`, `code_challenge`, `code_challenge_method=S256`, `scope`, `prompt`, `state`) | HTML consent page | CLI→server registration (accounting domain). Single button: "Try free for N days". oidc-provider default path `/auth` under the `/oauth` mount. |
+| `POST`   | `/oauth/interaction/:uid/trial` | OAuth interaction UID (path) | 302 → `/auth/success?code=…` | Mints one-shot auth code; rate-limited per IP (5/15d default) |
+| `POST`   | `/oauth/token`           | `grant_type=authorization_code`, `code`, `code_verifier`, `redirect_uri`, `client_id` | `{access_token, refresh_token, expires_in, token_type}` | PKCE-validated. Also handles `grant_type=refresh_token` |
+| `GET`    | `/auth/success`          | `?code=…` | HTML intermediate page | Posts code to `localhost:<port>/callback` via JS; falls back to copy-paste if unreachable |
+| `POST`   | `/api/auth/challenge`        | `{username}` | `{nonce}` | no auth; server forwards to host RPC. Browser→host auth (chat domain) |
+| `POST`   | `/api/auth/verify`           | `{username, nonce, response}` | `{token}` | HMAC-SHA256 response; sets `username` cookie; no capabilities — e2e is implicit from password. Browser→host auth (chat domain) |
+| `GET`    | `/api/sessions`              | — | `{sessions: Session[], hostCwd: string}` | cached session list from host; clients should prefer WS `list_sessions` for fresh data |
+| `GET`    | `/api/sessions/:id/history` | `?offset=N` / `?limit=N` / `?offset=N&limit=M` | `{lines: string[], totalLines: number, incremental: bool}` | raw JSONL lines; `?limit=N` → last N lines; `?offset=N&limit=M` → lines [N, N+M); `?offset=N` → lines [N, end). Server dedup key: `sessionId:offset:limit` |
+| `DELETE` | `/api/sessions/:id`          | `?enc=<packed>` | 204 | broadcasts new `session_list` from host over WS. Under e2e the client sends `?enc=base64url(nonce ‖ ciphertext)` (encrypting `'{}'`); server `unpackParam`s and forwards `{nonce, ciphertext}` to the host alongside the plaintext `sessionId` routing field |
+| `PUT`    | `/api/sessions/:id/name`     | `{enc}` or `{name}` | `{ok}` | rename a session. Under e2e the body is `{enc: base64url(nonce ‖ ciphertext)}` encrypting `{name}`; without e2e the plaintext `{name}` form is accepted for debug |
+| `GET`    | `/api/logs`                  | `?fmt=text` | JSON array or plain text | `x-host-key` auth |
+| `GET`    | `/*`                         | — | `index.html` | SPA fallback |
 
 ### WebSocket `/ws?token=JWT`
 

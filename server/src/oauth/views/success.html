@@ -1,0 +1,215 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 Danylo Lykov -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>codette — sign in</title>
+<style>
+  :root {
+    --bg-primary:   #0d0d0d;
+    --bg-secondary: #111111;
+    --bg-elevated:  #1c1c1c;
+    --border:       #2a2a2a;
+    --text:         #e0e0e0;
+    --text-muted:   #888;
+    --accent:       #cc5500;
+    --accent-light: #e06020;
+    --status-ok:    #4f4;
+    --code-color:   #e8c97a;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg-primary:   #f5f5f5;
+      --bg-secondary: #ffffff;
+      --bg-elevated:  #e8e8e8;
+      --border:       #d0d0d0;
+      --text:         #1a1a1a;
+      --text-muted:   #666;
+      --status-ok:    #009500;
+      --code-color:   #8b6914;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+    font-size: 14px;
+    background: var(--bg-primary);
+    color: var(--text);
+    min-height: 100svh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .card {
+    width: 520px;
+    max-width: 100%;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .brand {
+    color: var(--accent);
+    font-size: 1rem;
+    font-weight: 600;
+    text-align: center;
+    letter-spacing: .05em;
+  }
+  #status {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: .85rem;
+    line-height: 1.5;
+  }
+  #status .ok { color: var(--status-ok); }
+  .paste-help {
+    color: var(--text-muted);
+    font-size: .82rem;
+    line-height: 1.6;
+  }
+  .paste-help kbd {
+    display: inline-block;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font: inherit;
+    font-size: .78rem;
+    color: var(--code-color);
+  }
+  .paste-help ol { margin: 8px 0 0; padding-left: 18px; }
+  .paste-help li { margin-bottom: 3px; }
+  .paste-help .note {
+    margin-top: 10px;
+    font-size: .78rem;
+    color: var(--text-muted);
+    opacity: .8;
+  }
+  .code-row {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+  }
+  .code {
+    flex: 1;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: .85rem;
+    color: var(--code-color);
+    word-break: break-all;
+    user-select: all;
+    cursor: text;
+    line-height: 1.4;
+  }
+  button {
+    background: none;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    padding: 0 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font: inherit;
+    transition: color .15s, border-color .15s;
+    white-space: nowrap;
+  }
+  button:hover { color: var(--accent-light); border-color: var(--accent-light); }
+  button.copied { color: var(--status-ok); border-color: var(--status-ok); }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">codette</div>
+    <p id="status">Trying to reach codette on your machine…</p>
+    <div id="paste" hidden>
+      <div class="paste-help">
+        Codette isn't running on this machine — likely because you're signing in from a different computer than the one running <kbd>codette login</kbd>.
+        <ol>
+          <li>Copy the code below.</li>
+          <li>Switch to the terminal running <kbd>codette login</kbd>.</li>
+          <li>Paste at the <kbd>Or paste the code here:</kbd> prompt.</li>
+        </ol>
+        <div class="note">The code is valid for 10 minutes and can be used once.</div>
+      </div>
+      <div class="code-row">
+        <div class="code" id="code"></div>
+        <button type="button" id="copy">Copy</button>
+      </div>
+    </div>
+  </div>
+<script>
+(function () {
+  const params = new URLSearchParams(location.search);
+  const code = params.get('code');
+  const state = params.get('state') || '';
+  let port = null;
+  try { port = JSON.parse(atob(state.replace(/-/g, '+').replace(/_/g, '/'))).port; } catch {}
+
+  const $status = document.getElementById('status');
+  const $paste  = document.getElementById('paste');
+  const $code   = document.getElementById('code');
+  const $copy   = document.getElementById('copy');
+
+  if (!code) {
+    $status.innerText = 'No authorization code received. Please try again.';
+    return;
+  }
+
+  $code.innerText = code;
+
+  // Single source of truth for the "Copied" flash; timer is debounced so a
+  // second click cleanly restarts the 1.5s window instead of having the
+  // previous timer fire mid-flash and reset early.
+  let copied = false;
+  let copyTimer = null;
+  function renderCopied() {
+    $copy.innerText = copied ? 'Copied' : 'Copy';
+    $copy.classList.toggle('copied', copied);
+  }
+  function setCopied(v) { copied = v; renderCopied(); }
+  $copy.addEventListener('click', () => {
+    navigator.clipboard.writeText(code);
+    setCopied(true);
+    clearTimeout(copyTimer);
+    copyTimer = setTimeout(() => setCopied(false), 1500);
+  });
+
+  function showPaste(msg) {
+    $status.innerText = msg || 'Sign-in code generated.';
+    $paste.hidden = false;
+  }
+
+  if (!port) { showPaste(); return; }
+
+  fetch(`http://localhost:${port}/callback?code=${encodeURIComponent(code)}`, {
+    mode: 'no-cors', cache: 'no-store',
+  }).then(() => {
+    $paste.hidden = true;
+    let remaining = 3;
+    const render = () => {
+      $status.innerHTML = `<span class="ok">✓ Authenticated.</span> Redirecting to chat in ${remaining}s…`;
+    };
+    render();
+    const tick = setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) { clearInterval(tick); location.href = '/'; }
+      else render();
+    }, 1000);
+  }).catch(() => {
+    showPaste('Sign-in code generated.');
+  });
+
+  setTimeout(() => {
+    if ($status.innerText.includes('Trying')) showPaste();
+  }, 2500);
+})();
+</script>
+</body>
+</html>

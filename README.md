@@ -37,15 +37,8 @@ cd server && npm install && node src/index.js
 **Host** (run on the machine where Claude runs):
 
 ```sh
-./install.sh   # interactive setup, writes run.sh, optionally installs systemd service
-./run.sh
-```
-
-Or manually:
-
-```sh
-cd host && npm install
-CLIENT_USERNAME=you CLIENT_PASSWORD=pass HOST_KEY=secret SERVER_URL=wss://yourserver node index.js
+curl -fsSL https://yourserver/install.sh | sh
+codette login
 ```
 
 **Client** — the server serves the pre-built client from `client/dist/`. To rebuild:
@@ -69,12 +62,18 @@ Multiple clients can connect to the same host. Multiple hosts (different usernam
 | `SERVER_URL` | `ws://localhost:3000` | Server WebSocket URL (host → server) |
 | `CLIENT_USERNAME` | `whoami` | Username for web login |
 | `CLIENT_PASSWORD` | `changeme` | Password for web login |
-| `HOST_KEY` (server) | _(none)_ | Optional master-shortcut secret. If set, any host presenting it authenticates without going through `/install.sh`. Unset = only per-IP tokens accepted. |
-| `CODETTE_HOST_KEY` (host) | _(none)_ | Token the host presents to the server. Normally written into `credentials.json` by `install.sh`. Required on the host side. |
+| `OAUTH_DATA_DIR` | `/data/oauth` | Where OAuth state and signing keys are persisted |
+| `COOKIE_SECRET` | _(required for non-localhost issuers)_ | Signs interaction/session cookies |
+| `PUBLIC_URL` | `http://localhost:${PORT}` | Issuer URL; access tokens are bound to this value |
+| `SERVER_HOSTNAME` | _(required for /install.sh)_ | Public hostname used by installer scripts |
 | `PORT` | `3000` | Server listen port |
-| `CODETTE_DATA_HOME` | platform default | Override data directory (host keys, session names) |
+| `TRIAL_MAX_CLAIMS` | `5` | Max OAuth trial claims per IP per window |
+| `TRIAL_WINDOW_MS` | `1296000000` (15 days) | Rolling window for trial claim rate limiting |
+| `CODETTE_DATA_HOME` (host) | platform default | Override host data directory (credentials, session names) |
 | `CODETTE_TRACE` | off | Set to `1` for protocol-level trace logging |
 | `E2E` | on | Set to `0` to disable e2e encryption (debug only) |
+
+The host no longer requires a pre-shared key. After running `codette login`, the host obtains OAuth credentials (a `refresh_token` persisted in `credentials.json`) and exchanges them for an `access_token` on each startup.
 
 Change every default before exposing the server to the public internet.
 
