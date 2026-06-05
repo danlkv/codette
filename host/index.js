@@ -167,14 +167,12 @@ if (process.argv.includes('--version') || process.argv.includes('-v')) {
 
 // ── Subcommands ──────────────────────────────────────────────────────────────
 if (process.argv[2] === 'login') {
-  // Ctrl+C while we're awaiting a prompt should exit cleanly, not produce
-  // Node's "Detected unsettled top-level await" warning.
-  process.on('SIGINT',  () => { process.stderr.write('\n'); process.exit(130); });
   process.on('SIGTERM', () => process.exit(143));
-  const { runLogin } = await import('./login.js');
+  const { runLogin, PromptAborted } = await import('./login.js');
   try {
     await runLogin({ serverUrl: SERVER_URL });
   } catch (e) {
+    if (e instanceof PromptAborted) process.exit(130);
     process.stderr.write(`codette: login failed: ${e.message}\n`);
     process.exit(1);
   }

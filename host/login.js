@@ -65,32 +65,57 @@ function listenForCode(port) {
 
 // Queue-based prompt helper: a single readline interface pre-buffers lines so
 // sequential asks work correctly even when stdin is piped (non-TTY).
+// Sentinel thrown from ask() when the user hits Ctrl+C. The dispatch in
+// host/index.js catches this and exits with code 130 — settling the await
+// avoids Node's "unsettled top-level await" warning.
+class PromptAborted extends Error {
+  constructor() { super('Aborted by user'); this.name = 'PromptAborted'; }
+}
+
 function makePrompt() {
   const lines = [];
   const waiters = [];
+  let aborted = false;
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
   rl.on('line', (line) => {
     if (waiters.length > 0) {
-      waiters.shift()(line);
+      waiters.shift().resolve(line);
     } else {
       lines.push(line);
     }
   });
 
-  const ask = (question, fallback) => new Promise(resolve => {
+  // readline intercepts SIGINT while active. Reject the pending ask() so the
+  // awaited promise settles cleanly — then the caller's try/catch handles
+  // exit, no top-level-unsettled warning.
+  rl.on('SIGINT', () => {
+    process.stdout.write('\n');
+    aborted = true;
+    const err = new PromptAborted();
+    while (waiters.length) waiters.shift().reject(err);
+    rl.close();
+  });
+
+  const ask = (question, fallback) => new Promise((resolve, reject) => {
+    if (aborted) return reject(new PromptAborted());
     process.stdout.write(`${question}${fallback ? ` [${fallback}]` : ''}: `);
     if (lines.length > 0) {
       const answer = lines.shift();
       resolve(answer.trim() || fallback || '');
     } else {
-      waiters.push((answer) => resolve(answer.trim() || fallback || ''));
+      waiters.push({
+        resolve: (line) => resolve(line.trim() || fallback || ''),
+        reject,
+      });
     }
   });
 
   const close = () => rl.close();
   return { ask, close };
 }
+
+export { PromptAborted };
 
 async function exchangeCode({ serverHttp, code, verifier, redirectUri }) {
   const res = await fetch(`${serverHttp}/oauth/token`, {
