@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>codette — sign in</title>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 520px; margin: 4rem auto; padding: 0 1rem; }
+    button { font-size: 16px; padding: 12px 20px; cursor: pointer; border: 1.5px solid #222; border-radius: 6px; background: #fff; }
+    button:hover { background: #f4f4f4; }
+    .muted { color: #555; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>Sign in to codette</h1>
+  <p class="muted">No account required — your trial includes <strong>7</strong> days of access.</p>
+  <form method="POST" action="/oauth/interaction/__UID__/trial">
+    <input type="hidden" name="csrf" value="__CSRF__">
+    <button type="submit">Try free for 7 days</button>
+  </form>
+</body>
+</html>

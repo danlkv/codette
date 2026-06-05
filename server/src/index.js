@@ -7,73 +7,25 @@ import { jwtVerify, importSPKI } from 'jose';
 import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { execFileSync } from 'child_process';
-import { randomBytes } from 'crypto';
 import { RpcClient } from './rpc.js';
 import { unpackParam } from '../../shared/crypto.js';
+import { buildProvider } from './oauth/provider.js';
+import { makeValidateHostToken } from './oauth/host-auth.js';
+import cookieParser from 'cookie-parser';
+import { mountInteractions } from './oauth/interaction.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Optional master-shortcut. Unset = only per-IP tokens accepted.
-const HOST_KEY = process.env.HOST_KEY;
-const HOST_TOKEN_TTL = parseInt(process.env.HOST_TOKEN_TTL || '0', 10); // 0 = never expires
-if (HOST_TOKEN_TTL === 0) {
-  console.warn('[server] HOST_TOKEN_TTL=0 (host tokens never expire). Set a finite value (e.g. 2592000 = 30 days) in .env.');
-}
-
 const PORT       = parseInt(process.env.PORT || '3000', 10);
-
-// ── Host token store ─────────────────────────────────────────────────────────
-// Tokens are persisted in /data/host-tokens.json (Docker volume).
-// Each entry is keyed by IP: { token, created, expires, label? }
-const TOKEN_FILE = '/data/host-tokens.json';
-
-function loadTokens() {
-  try { return existsSync(TOKEN_FILE) ? JSON.parse(readFileSync(TOKEN_FILE, 'utf8')) : {}; } catch { return {}; }
-}
-
-function saveTokens(tokens) {
-  mkdirSync('/data', { recursive: true });
-  writeFileSync(TOKEN_FILE, JSON.stringify(tokens, null, 2));
-}
-
-function validateToken(token) {
-  if (HOST_KEY && token === HOST_KEY) return true; // master shortcut, when configured
-  const tokens = loadTokens();
-  const entry = Object.values(tokens).find(e => e.token === token);
-  if (!entry) return false;
-  if (entry.expires > 0 && Date.now() > entry.expires) return false;
-  return true;
-}
-
-function getOrCreateTokenForIp(ip) {
-  const tokens = loadTokens();
-  const existing = tokens[ip];
-  if (existing) {
-    if (existing.expires > 0 && Date.now() > existing.expires) {
-      return { error: 'Token expired for this address' };
-    }
-    return { token: existing.token };
-  }
-  // Issue new token
-  const token = randomBytes(16).toString('hex');
-  const now = Date.now();
-  tokens[ip] = {
-    token,
-    created: now,
-    expires: HOST_TOKEN_TTL > 0 ? now + HOST_TOKEN_TTL * 1000 : 0,
-  };
-  saveTokens(tokens);
-  return { token };
-}
-
 
 // ── Per-host state ────────────────────────────────────────────────────────────
 class HostContext {
   constructor(clientUsername, ws) {
     this.clientUsername = clientUsername;
     this.ws = ws;
+    this.sub = null;                   // set from OAuth validated.sub at connect
     this.pubkey = null;               // set when host sends host_pubkey
     this.sessionCache = [];
     this.hostCwd = null;
@@ -98,6 +50,22 @@ const clients = new Map();  // username → Set<WebSocket>
 const app = express();
 app.set('trust proxy', true);
 app.use(express.json());
+
+const ISSUER = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
+const oidc = await buildProvider(ISSUER);
+const validateHostToken = makeValidateHostToken(oidc);
+app.use(cookieParser());
+mountInteractions(app, oidc);
+app.use('/oauth', oidc.callback());
+
+const SUCCESS_HTML = readFileSync(
+  path.join(__dirname, 'oauth/views/success.html'),
+  'utf8'
+);
+
+app.get('/auth/success', (req, res) => {
+  res.type('html').send(SUCCESS_HTML);
+});
 
 // ── REST request logging ──────────────────────────────────────────────────────
 // Query params that are bearer-credential-shaped and must never appear in logs.
@@ -371,15 +339,11 @@ app.get('/install.sh', (req, res) => {
     return res.status(503).type('text/plain')
       .send('# SERVER_HOSTNAME not configured on server. Set it in .env before serving installs.\n');
   }
-  const ip = req.ip;
-  const { token, error } = getOrCreateTokenForIp(ip);
-  if (error) return res.status(403).type('text/plain').send(`# Error: ${error}\n`);
   const isLocal = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(hostname);
   const wsProto = isLocal ? 'ws' : 'wss';
   const serverUrl = `${wsProto}://${hostname}`;
   let script = readFileSync(installShPath, 'utf8');
   script = script.replace('SERVER_URL="${CODETTE_SERVER_URL:-}"', `SERVER_URL="${serverUrl}"`);
-  script = script.replace('HOST_KEY="${CODETTE_HOST_KEY:-}"', `HOST_KEY="${token}"`);
   res.type('text/plain').send(script);
 });
 
@@ -415,12 +379,18 @@ wss.on('connection', async (ws, req) => {
 
   // ── Host connection ────────────────────────────────────────────────────────
   if (url.pathname === '/host') {
-    if (!validateToken(url.searchParams.get('token'))) { ws.close(1008, 'Unauthorized'); return; }
+    const tokenStr = url.searchParams.get('token');
+    const validated = await validateHostToken(tokenStr);
+    if (!validated) { ws.close(1008, 'Unauthorized'); return; }
     const clientUsername = url.searchParams.get('clientUsername');
     if (!clientUsername) { ws.close(1008, 'clientUsername required'); return; }
     if (hosts.has(clientUsername)) { ws.close(1008, 'Host already connected for this username'); return; }
 
     const host = new HostContext(clientUsername, ws);
+    host.sub = validated.sub;
+    // TODO(post-mvp): bind clientUsername to validated.sub at OAuth claim time
+    // to prevent username impersonation across trial tokens. Currently any valid
+    // access_token can claim any unused username slot.
     hosts.set(clientUsername, host);
     console.log(`[server] host connected: ${clientUsername} (${hosts.size} total)`);
     wtrace('host', 'server', 'connect', { username: clientUsername });

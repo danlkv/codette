@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>codette — sign in</title>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 520px; margin: 4rem auto; padding: 0 1rem; }
+    .code { font-family: ui-monospace, Menlo, monospace; font-size: 16px; padding: 10px 14px;
+            background: #f4f4f4; border-radius: 6px; user-select: all; word-break: break-all; }
+    .ok { color: #1a7f37; }
+    button { padding: 8px 16px; cursor: pointer; }
+  </style>
+</head>
+<body>
+<h1>Sign in to codette</h1>
+<p id="status">Trying to reach codette on your machine…</p>
+<div id="paste" hidden>
+  <p>Codette isn't running locally. Paste this code into your terminal:</p>
+  <div class="code" id="code"></div>
+  <button onclick="navigator.clipboard.writeText(document.getElementById('code').innerText)">Copy</button>
+</div>
+<script>
+(function () {
+  const params = new URLSearchParams(location.search);
+  const code = params.get('code');
+  const state = params.get('state') || '';
+  let port = null;
+  try { port = JSON.parse(atob(state.replace(/-/g, '+').replace(/_/g, '/'))).port; } catch {}
+
+  if (!code) {
+    document.getElementById('status').innerText = 'No authorization code received. Please try again.';
+    return;
+  }
+
+  document.getElementById('code').innerText = code;
+
+  function showPaste(msg) {
+    document.getElementById('status').innerText = msg || 'Paste this code into your terminal:';
+    document.getElementById('paste').hidden = false;
+  }
+
+  if (!port) { showPaste(); return; }
+
+  fetch(`http://localhost:${port}/callback?code=${encodeURIComponent(code)}`, {
+    mode: 'no-cors', cache: 'no-store',
+  }).then(() => {
+    document.getElementById('status').innerHTML = '<span class="ok">✓ Authenticated.</span> You can close this window.';
+    document.getElementById('paste').hidden = true;
+  }).catch(() => {
+    showPaste("Codette isn't running locally.");
+  });
+
+  setTimeout(() => {
+    if (document.getElementById('status').innerText.includes('Trying')) showPaste();
+  }, 2500);
+})();
+</script>
+</body>
+</html>
