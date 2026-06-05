@@ -6,12 +6,18 @@
 
 import { test, expect } from '@playwright/test';
 import { createServer } from 'http';
+import { randomBytes } from 'crypto';
 import { b64url, generatePKCE } from './oauth-flow.js';
 
 const TEST_PORT = process.env.TEST_PORT || '3111';
 const SERVER_BASE = `http://localhost:${TEST_PORT}`;
 
 test('OAuth trial flow: browser click → access_token in callback', async ({ page }) => {
+  // Unique username per run — server-side binding records persist across the
+  // test suite's lifetime (within the per-run OAUTH_DATA_DIR isolation in
+  // start-test-env.js), so we can't reuse a name.
+  const username = 'e2e-' + randomBytes(4).toString('hex');
+
   // Start a localhost listener (the "CLI" in this test)
   const cliPort = 39000 + Math.floor(Math.random() * 1000);
   const codePromise = new Promise((resolve) => {
@@ -40,10 +46,12 @@ test('OAuth trial flow: browser click → access_token in callback', async ({ pa
     state,
     scope: 'openid offline_access',
     prompt: 'consent',
+    login_hint: username,
   });
 
   await page.goto(authUrl);
   await expect(page.locator('.brand', { hasText: 'codette' })).toBeVisible();
+  await expect(page.locator('.uname', { hasText: username })).toBeVisible();
   await page.locator('button', { hasText: /without registration/ }).click();
 
   // After click: browser lands on /auth/success which JS-fetches the localhost callback

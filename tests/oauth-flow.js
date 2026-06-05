@@ -46,9 +46,11 @@ function makeJar() {
 
 /**
  * Run a full headless OAuth dance against the given server.
- * Returns { access_token, refresh_token, expires_in, token_type }.
+ * `username` (default: a unique random name) is bound to the issued token.
+ * Returns { access_token, refresh_token, expires_in, token_type, username }.
  */
-export async function mintAccessToken({ serverBase, port = 0 }) {
+export async function mintAccessToken({ serverBase, port = 0, username }) {
+  if (!username) username = 'test-' + randomBytes(6).toString('hex');
   const { verifier, challenge } = generatePKCE();
   const state = b64url(JSON.stringify({ port, nonce: randomBytes(8).toString('hex') }));
   const redirectUri = new URL('/auth/success', serverBase).href;
@@ -73,6 +75,7 @@ export async function mintAccessToken({ serverBase, port = 0 }) {
     state,
     scope: 'openid offline_access',
     prompt: 'consent',
+    login_hint: username,
   });
   let res = await fetchWithJar(authUrl);
   if (res.status !== 303 && res.status !== 302) {
@@ -122,5 +125,6 @@ export async function mintAccessToken({ serverBase, port = 0 }) {
     }),
   });
   if (!tokenRes.ok) throw new Error(`token exchange failed: ${tokenRes.status} ${await tokenRes.text()}`);
-  return await tokenRes.json();
+  const tokens = await tokenRes.json();
+  return { ...tokens, username };
 }

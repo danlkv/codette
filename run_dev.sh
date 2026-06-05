@@ -57,13 +57,13 @@ echo "==> Minting OAuth tokens for alice and bob..."
 sleep 2  # let server bind
 TOKEN_ALICE=$(node -e "
 import('./tests/oauth-flow.js').then(async ({ mintAccessToken }) => {
-  const t = await mintAccessToken({ serverBase: 'http://localhost:$PORT' });
+  const t = await mintAccessToken({ serverBase: 'http://localhost:$PORT', username: 'alice' });
   process.stdout.write(t.access_token);
 }).catch(e => { console.error(e.message); process.exit(1); });
 ")
 TOKEN_BOB=$(node -e "
 import('./tests/oauth-flow.js').then(async ({ mintAccessToken }) => {
-  const t = await mintAccessToken({ serverBase: 'http://localhost:$PORT' });
+  const t = await mintAccessToken({ serverBase: 'http://localhost:$PORT', username: 'bob' });
   process.stdout.write(t.access_token);
 }).catch(e => { console.error(e.message); process.exit(1); });
 ")

@@ -130,7 +130,41 @@ export async function runLogin({ serverUrl }) {
   } catch {}
 
   const prompter = makePrompt();
-  const username = await prompter.ask('Username', existing.username || defaultUsername());
+
+  // Loop until the user picks a username the server reports as available.
+  // Server-side claim at /oauth/interaction/:uid/trial is the race-safe
+  // boundary; this pre-flight just keeps the bad outcome (browser opens, user
+  // clicks, "username taken" error page) from happening when it was already
+  // knowable in the terminal. Fail-soft on non-JSON responses (older server
+  // without the endpoint, etc.) — let consent-time check be the authority.
+  async function checkAvailability(name) {
+    let resp;
+    try {
+      resp = await fetch(`${serverHttp}/auth/username-available/${encodeURIComponent(name)}`);
+    } catch (e) {
+      throw new Error(`Could not reach the server (${serverHttp}): ${e.message}`);
+    }
+    const body = await resp.text();
+    try {
+      return JSON.parse(body);
+    } catch {
+      // Endpoint doesn't exist on this server (we got HTML/etc). Skip check.
+      console.log("  (server does not support availability check — skipping)");
+      return { available: true, _skipped: true };
+    }
+  }
+  let username;
+  while (true) {
+    username = await prompter.ask('Username', existing.username || defaultUsername());
+    if (!/^[a-z][a-z0-9_-]{1,31}$/.test(username)) {
+      console.log("  Invalid: lowercase, start with a letter, 2–32 chars from [a-z0-9_-]");
+      continue;
+    }
+    const { available, reason } = await checkAvailability(username);
+    if (available) break;
+    console.log(reason === 'invalid' ? '  Invalid username.' : `  '${username}' is already taken.`);
+  }
+
   const password = await prompter.ask('Password', existing.password || generatePassword());
 
   // OAuth dance
@@ -149,6 +183,7 @@ export async function runLogin({ serverUrl }) {
     state,
     scope: 'openid offline_access',
     prompt: 'consent',
+    login_hint: username,
   });
 
   console.log('\nOpen: ' + authUrl + '\n');

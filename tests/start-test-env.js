@@ -104,7 +104,7 @@ try {
 // without needing a saved refresh_token on disk.
 let tokens;
 try {
-  tokens = await mintAccessToken({ serverBase: `http://localhost:${PORT}` });
+  tokens = await mintAccessToken({ serverBase: `http://localhost:${PORT}`, username: USERNAME });
   console.log(`[test-env] OAuth dance succeeded; got access_token (len=${tokens.access_token.length})`);
 } catch (e) {
   console.error(`[test-env] OAuth dance failed: ${e.message}`);
