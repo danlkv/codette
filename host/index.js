@@ -16,14 +16,22 @@ import { makeInlineFilePrompt, HTML_RENDER_PROMPT } from '../shared/prompts.js';
 import { hmacVerify, deriveKey, deriveNonceKey, deriveAuthKey, encrypt, encryptDet, decrypt } from '../shared/crypto.js';
 import { APP_NAME } from '../shared/constants.js';
 // ── Config loading ──────────────────────────────────────────────────────────
-// Precedence: CLI flags > env vars > credentials.json > defaults
+// Precedence: CLI flags > credentials.json > config.json > env vars > defaults
 
-const CREDS_PATH = join(homedir(), '.config', 'codette', 'credentials.json');
+const CREDS_PATH  = join(homedir(), '.config', 'codette', 'credentials.json');
+const CONFIG_PATH = join(homedir(), '.config', 'codette', 'config.json');
 
 function loadCredentials() {
   try { if (existsSync(CREDS_PATH)) return JSON.parse(readFileSync(CREDS_PATH, 'utf8')); } catch {}
   return {};
 }
+
+function loadConfig() {
+  try { if (existsSync(CONFIG_PATH)) return JSON.parse(readFileSync(CONFIG_PATH, 'utf8')); } catch {}
+  return {};
+}
+
+const _config = loadConfig();
 
 function parseCliFlags() {
   const flags = {};
@@ -50,18 +58,19 @@ const _passwordFromCreds = !_cli.password
   && !!_creds.password;
 
 const SERVER_URL = _cli.server
+  || _creds.server
+  || _config.server
   || process.env.CODETTE_SERVER_URL || process.env.SERVER_URL
-  || _creds.server || 'ws://localhost:3000';
+  || 'ws://localhost:3000';
 const CLIENT_USERNAME = _cli.username
   || process.env.CODETTE_USERNAME || process.env.CLIENT_USERNAME
   || _creds.username || execSync('whoami').toString().trim();
 const CLIENT_PASSWORD = _cli.password
   || process.env.CODETTE_PASSWORD || process.env.CLIENT_PASSWORD
   || _creds.password || 'changeme';
-// Token presented on /host WS. Normally written by install.sh into
-// credentials.json. Required — fail-fast happens after early-exit subcommands.
-const HOST_TOKEN = process.env.CODETTE_HOST_KEY || process.env.HOST_KEY
-  || _creds.hostKey || null;
+// HOST_TOKEN is resolved at startup via getAccessToken() (called after
+// subcommand dispatch). Declaration here is a placeholder; the real value is
+// assigned below after the login/update early-exit blocks.
 const CLAUDE_DIR       = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
 const E2E_ENABLED      = process.env.E2E !== '0';
 // Client-originated types that must arrive encrypted under e2e. Server-initiated
@@ -153,6 +162,18 @@ if (process.argv.includes('--version') || process.argv.includes('-v')) {
 }
 
 // ── Subcommands ──────────────────────────────────────────────────────────────
+if (process.argv[2] === 'login') {
+  const { runLogin } = await import('./login.js');
+  // Server URL precedence: CLI > credentials > config > env > default
+  try {
+    await runLogin({ serverUrl: SERVER_URL });
+  } catch (e) {
+    process.stderr.write(`codette: login failed: ${e.message}\n`);
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
 if (process.argv[2] === 'update') {
   const installDir = join(homedir(), '.local', 'share', 'codette');
   const httpUrl = SERVER_URL.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
@@ -183,7 +204,8 @@ const NO_DIR_PRIVACY = process.argv.includes('--no-dir-privacy');
 
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
   process.stdout.write(`Usage: codette [options]
-       codette update          Pull latest source + reinstall dependencies
+       codette login            OAuth-authenticate with the server
+       codette update           Pull latest source + reinstall dependencies
 
 Options:
   -s, --server <url>    Server WebSocket URL
@@ -195,23 +217,54 @@ Options:
   -v, --version         Print version
   -h, --help            Show this help
 
-Config precedence: CLI flags > env vars > ~/.config/codette/credentials.json > defaults
+Config precedence: CLI flags > credentials.json > config.json > env vars > defaults
 
 Environment variables:
   CODETTE_SERVER_URL    WebSocket server URL          (default: ws://localhost:3000)
   CODETTE_USERNAME      Username shown in chat        (default: whoami)
   CODETTE_PASSWORD      Password for web login        (default: changeme)
-  CODETTE_HOST_KEY      Token issued by the server    (required; install.sh writes it)
+  CODETTE_ACCESS_TOKEN  OAuth access token (bypasses refresh; for testing)
 
-Legacy env vars also supported: SERVER_URL, CLIENT_USERNAME, CLIENT_PASSWORD, HOST_KEY
+Legacy env vars also supported: SERVER_URL, CLIENT_USERNAME, CLIENT_PASSWORD
 `);
   process.exit(0);
 }
 
+// ── OAuth access token ────────────────────────────────────────────────────────
+async function getAccessToken() {
+  // Test-env shortcut: skip refresh, use provided token directly
+  if (process.env.CODETTE_ACCESS_TOKEN) return process.env.CODETTE_ACCESS_TOKEN;
+
+  if (!_creds.refresh_token) return null;
+
+  const serverHttp = SERVER_URL.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
+  const res = await fetch(`${serverHttp}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: _creds.refresh_token,
+      client_id: 'codette-cli',
+    }),
+  });
+  if (!res.ok) {
+    process.stderr.write(`codette: token refresh failed (${res.status}). Run \`codette login\` again.\n`);
+    return null;
+  }
+  const tokens = await res.json();
+
+  // Persist the new refresh token if it rotated
+  if (tokens.refresh_token && tokens.refresh_token !== _creds.refresh_token) {
+    const merged = { ..._creds, refresh_token: tokens.refresh_token };
+    writeFileSync(CREDS_PATH, JSON.stringify(merged, null, 2), { mode: 0o600 });
+  }
+  return tokens.access_token;
+}
+
+const HOST_TOKEN = await getAccessToken();
 if (!HOST_TOKEN) {
-  process.stderr.write('codette: no host token configured.\n');
-  process.stderr.write('  Run the installer:  curl -fsSL https://<your-server>/install.sh | sh\n');
-  process.stderr.write('  Or set CODETTE_HOST_KEY in the environment.\n');
+  process.stderr.write('codette: not authenticated.\n');
+  process.stderr.write('  Run:  codette login\n');
   process.exit(1);
 }
 
