@@ -4,6 +4,15 @@
 
 set -e
 
+# Modes:
+#   ./run_dev.sh                # server + alice + bob hosts (default)
+#   ./run_dev.sh --server-only  # just the server (no host spawns); used by
+#                               # run_dev_login.sh which manages its own host.
+SERVER_ONLY=${SERVER_ONLY:-0}
+for arg in "$@"; do
+  case "$arg" in --server-only) SERVER_ONLY=1 ;; esac
+done
+
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
 # Local-dev defaults.
@@ -41,11 +50,20 @@ sleep 0.3
 echo "==> Building client (dev mode)..."
 (cd "$ROOT/client" && npx vite build --mode development)
 
+mkdir -p "$ROOT/.dev-data/oauth"
+
 echo "==> Starting server on :$PORT  ($SERVER_LOG)"
 (cd "$ROOT/server" && OAUTH_DATA_DIR="$OAUTH_DATA_DIR" COOKIE_SECRET="$COOKIE_SECRET" PUBLIC_URL="$PUBLIC_URL" node src/index.js) >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
-mkdir -p "$ROOT/.dev-data/alice/.claude" "$ROOT/.dev-data/bob/.claude" "$ROOT/.dev-data/oauth"
+if [ "$SERVER_ONLY" = "1" ]; then
+  printf '%s\n' "$SERVER_PID" > "$PIDFILE"
+  echo "==> server-only mode; skipping host spawns. Ctrl+C to stop. (pid: $SERVER_PID)"
+  tail -f "$SERVER_LOG"
+  exit 0
+fi
+
+mkdir -p "$ROOT/.dev-data/alice/.claude" "$ROOT/.dev-data/bob/.claude"
 # Symlink Claude credentials so dev hosts can spawn Claude
 for d in "$ROOT/.dev-data/alice/.claude" "$ROOT/.dev-data/bob/.claude"; do
   [ -L "$d/.credentials.json" ] || ln -sf ~/.claude/.credentials.json "$d/.credentials.json"
