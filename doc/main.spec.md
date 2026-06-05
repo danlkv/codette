@@ -164,7 +164,7 @@ Connected to https://your-server:3000
 
 ### Config precedence
 
-CLI flags → `~/.config/codette/credentials.json` (secrets, 0600) → `~/.config/codette/config.json` (non-secret, 0644) → env vars → defaults.
+CLI flags → env vars → `~/.config/codette/credentials.json` (secrets, 0600) → `~/.config/codette/config.json` (non-secret, 0644) → defaults. Env beats persisted state so debug overrides like `CODETTE_SERVER_URL=ws://localhost:3000` work against an installation that already has a saved server URL.
 
 | Setting | Config file / key | Env var | CLI flag | Default |
 |---------|-------------------|---------|----------|---------|

@@ -57,10 +57,14 @@ const _passwordFromCreds = !_cli.password
   && !process.env.CLIENT_PASSWORD
   && !!_creds.password;
 
+// Precedence: CLI > env > credentials.json > config.json > default.
+// Standard Unix convention — env vars override persisted state so debug
+// overrides (e.g. CODETTE_SERVER_URL=ws://localhost:3000) actually work
+// against an installation that already has a saved server URL.
 const SERVER_URL = _cli.server
+  || process.env.CODETTE_SERVER_URL || process.env.SERVER_URL
   || _creds.server
   || _config.server
-  || process.env.CODETTE_SERVER_URL || process.env.SERVER_URL
   || 'ws://localhost:3000';
 const CLIENT_USERNAME = _cli.username
   || process.env.CODETTE_USERNAME || process.env.CLIENT_USERNAME
@@ -163,8 +167,11 @@ if (process.argv.includes('--version') || process.argv.includes('-v')) {
 
 // ── Subcommands ──────────────────────────────────────────────────────────────
 if (process.argv[2] === 'login') {
+  // Ctrl+C while we're awaiting a prompt should exit cleanly, not produce
+  // Node's "Detected unsettled top-level await" warning.
+  process.on('SIGINT',  () => { process.stderr.write('\n'); process.exit(130); });
+  process.on('SIGTERM', () => process.exit(143));
   const { runLogin } = await import('./login.js');
-  // Server URL precedence: CLI > credentials > config > env > default
   try {
     await runLogin({ serverUrl: SERVER_URL });
   } catch (e) {

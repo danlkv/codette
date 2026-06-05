@@ -119,6 +119,7 @@ function generatePassword() {
 
 export async function runLogin({ serverUrl }) {
   const serverHttp = serverUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
+  console.log(`Server: ${serverUrl}`);
 
   // Browser↔host chat-domain credentials. These are unrelated to OAuth and
   // are the credentials the user enters in the browser when signing in.
