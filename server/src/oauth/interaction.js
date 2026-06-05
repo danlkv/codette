@@ -45,7 +45,7 @@ export function mountInteractions(app, provider) {
     } catch (e) {
       return sendError(res, 400, {
         title: 'Sign-in session expired',
-        message: 'This sign-in link is no longer valid. Interaction sessions expire after 10 minutes or once they have been used.',
+        message: 'This sign-in link is no longer valid (expired or already used).',
         hint: RESTART_HINT,
       });
     }

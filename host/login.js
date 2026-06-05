@@ -129,7 +129,6 @@ export async function runLogin({ serverUrl }) {
     if (existsSync(credsPath)) existing = JSON.parse(readFileSync(credsPath, 'utf8'));
   } catch {}
 
-  console.log('\nSet up browser login credentials (you\'ll type these once when visiting the codette server):\n');
   const prompter = makePrompt();
   const username = await prompter.ask('Username', existing.username || defaultUsername());
   const password = await prompter.ask('Password', existing.password || generatePassword());
@@ -152,14 +151,20 @@ export async function runLogin({ serverUrl }) {
     prompt: 'consent',
   });
 
-  console.log('\nOpen this link to sign in:\n');
-  console.log('  ' + authUrl + '\n');
+  console.log('\nOpen: ' + authUrl + '\n');
   openBrowser(authUrl);
 
-  // Race localhost listener against paste prompt (same shared rl interface)
+  // Race localhost listener against paste prompt (same shared rl interface).
+  // Empty input (accidental Enter) silently re-prompts.
+  async function pastePromptLoop() {
+    while (true) {
+      const input = await prompter.ask('Enter the code here (Ctrl+C to cancel)', '');
+      if (input) return input;
+    }
+  }
   const code = await Promise.race([
     listenForCode(port).catch(() => new Promise(() => {})),   // never resolves on error → paste wins
-    prompter.ask('Or paste the code here', ''),
+    pastePromptLoop(),
   ]);
   prompter.close();
   if (!code) throw new Error('no code received');
@@ -178,5 +183,5 @@ export async function runLogin({ serverUrl }) {
     { mode: 0o600 }
   );
 
-  console.log('\n✓ Authenticated. Run `codette` to start the host.\n');
+  console.log('\n✓ Authenticated. Run `codette` to start the host.');
 }
