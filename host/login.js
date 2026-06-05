@@ -149,7 +149,8 @@ export async function runLogin({ serverUrl }) {
       return JSON.parse(body);
     } catch {
       // Endpoint doesn't exist on this server (we got HTML/etc). Skip check.
-      console.log("  (server does not support availability check — skipping)");
+      const preview = body.slice(0, 60).replace(/\s+/g, ' ');
+      console.log(`  (skipping availability check — HTTP ${resp.status} ${resp.headers.get('content-type') || ''}: ${preview}…)`);
       return { available: true, _skipped: true };
     }
   }
