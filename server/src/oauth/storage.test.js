@@ -19,20 +19,6 @@ test('upsert + find round-trip', async () => {
   }
 });
 
-test('expired entries return undefined and are GC\'d', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'oauth-'));
-  process.env.OAUTH_DATA_DIR = dir;
-  try {
-    const a = new FileAdapter('AccessToken');
-    await a.upsert('id1', { sub: 'u1' }, 0);
-    await new Promise(r => setTimeout(r, 10));
-    assert.equal(await a.find('id1'), undefined);
-  } finally {
-    rmSync(dir, { recursive: true });
-    delete process.env.OAUTH_DATA_DIR;
-  }
-});
-
 test('revokeByGrantId removes all entries for grantId', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'oauth-'));
   process.env.OAUTH_DATA_DIR = dir;

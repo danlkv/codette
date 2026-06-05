@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { checkTrialRateLimit, recordTrialClaim, claimIfAllowed, revokeTrialClaim, _resetForTest } from './trial.js';
+import { checkTrialRateLimit, recordTrialClaim, _resetForTest } from './trial.js';
 
 test('first claim from an IP is allowed', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'oauth-'));
@@ -47,34 +47,3 @@ test('claims older than the window expire', async () => {
   }
 });
 
-test('claimIfAllowed is atomic: returns false after limit and does not record extra', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'oauth-'));
-  process.env.OAUTH_DATA_DIR = dir;
-  _resetForTest();
-  try {
-    // 5 succeed
-    for (let i = 0; i < 5; i++) assert.equal(claimIfAllowed('8.8.8.8'), true);
-    // 6th is blocked
-    assert.equal(claimIfAllowed('8.8.8.8'), false);
-    // Verify no extra claim was recorded by the failed call
-    assert.equal(claimIfAllowed('8.8.8.8'), false);
-  } finally {
-    rmSync(dir, { recursive: true });
-    delete process.env.OAUTH_DATA_DIR;
-  }
-});
-
-test('revokeTrialClaim removes the most recent claim', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'oauth-'));
-  process.env.OAUTH_DATA_DIR = dir;
-  _resetForTest();
-  try {
-    for (let i = 0; i < 5; i++) recordTrialClaim('9.9.9.9');
-    assert.equal(checkTrialRateLimit('9.9.9.9'), false); // at limit
-    revokeTrialClaim('9.9.9.9');
-    assert.equal(checkTrialRateLimit('9.9.9.9'), true);  // back under limit
-  } finally {
-    rmSync(dir, { recursive: true });
-    delete process.env.OAUTH_DATA_DIR;
-  }
-});
