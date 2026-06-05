@@ -148,7 +148,8 @@ export async function runLogin({ serverUrl }) {
     code_challenge: challenge,
     code_challenge_method: 'S256',
     state,
-    scope: 'openid',
+    scope: 'openid offline_access',
+    prompt: 'consent',
   });
 
   console.log('\nOpen this link to sign in:\n');

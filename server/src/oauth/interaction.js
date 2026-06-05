@@ -56,7 +56,7 @@ export function mountInteractions(app, provider) {
 
     try {
       const grant = new provider.Grant({ accountId: sub, clientId: 'codette-cli' });
-      grant.addOIDCScope('openid');
+      grant.addOIDCScope('openid offline_access');
       const grantId = await grant.save();
 
       return await provider.interactionFinished(req, res, {
