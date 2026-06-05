@@ -69,11 +69,13 @@ export async function buildProvider(issuer) {
     // up directly via the adapter; no JWT verification on this path.
     jwks: { keys: [privJwk] },
     ttl: {
-      AccessToken: 7 * 24 * 60 * 60,
-      RefreshToken: 7 * 24 * 60 * 60,
-      AuthorizationCode: 10 * 60,
-      Session: 24 * 60 * 60,
-      Interaction: 10 * 60,
+      AccessToken:       7 * 24 * 60 * 60,   // 7 days
+      RefreshToken:      7 * 24 * 60 * 60,   // 7 days
+      AuthorizationCode: 10 * 60,            // 10 minutes
+      Session:           24 * 60 * 60,       // 24 hours
+      Interaction:       10 * 60,            // 10 minutes
+      Grant:             7 * 24 * 60 * 60,   // 7 days (matches refresh-token lifetime)
+      IdToken:           60 * 60,            // 1 hour (issued alongside AccessToken)
     },
     cookies: {
       keys: [cookieSecret || 'dev-cookie-secret-change-me'],

@@ -148,7 +148,7 @@ The script:
 The host CLI obtains credentials via OAuth 2.0 Authorization Code + PKCE. See `auth.spec.md` (Host registration via OAuth) for the full flow. Summary:
 
 1. `codette login` opens a browser at `/oauth/auth` and listens on a free `localhost:<port>`.
-2. User clicks **Try free for N days** on the consent page.
+2. User clicks **Try without registration for N days** on the consent page.
 3. Browser returns to a server-rendered intermediate page that posts the auth code to `localhost:<port>` (or, if codette is on a remote machine, displays the code for copy-paste into the CLI prompt).
 4. CLI exchanges the code for `{access_token, refresh_token}` and persists them to `~/.config/codette/credentials.json` (mode 0600).
 5. CLI starts the host process. The `access_token` is sent as `?token=…` on the `/host` WebSocket connection.

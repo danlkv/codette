@@ -16,6 +16,8 @@
     --text-muted:   #888;
     --accent:       #cc5500;
     --accent-light: #e06020;
+    --error:        #e06c75;
+    --code-color:   #e8c97a;
   }
   @media (prefers-color-scheme: light) {
     :root {
@@ -25,6 +27,8 @@
       --border:       #d0d0d0;
       --text:         #1a1a1a;
       --text-muted:   #666;
+      --error:        #c0392b;
+      --code-color:   #8b6914;
     }
   }
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -48,7 +52,7 @@
     padding: 28px 28px;
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 16px;
   }
   .brand {
     color: var(--accent);
@@ -57,34 +61,43 @@
     text-align: center;
     letter-spacing: .05em;
   }
-  .lede {
+  .title {
+    color: var(--error);
+    font-size: .95rem;
     text-align: center;
+    font-weight: 600;
+  }
+  .message {
+    color: var(--text);
+    font-size: .85rem;
+    line-height: 1.55;
+    text-align: center;
+  }
+  .hint {
     color: var(--text-muted);
     font-size: .82rem;
-    line-height: 1.5;
+    line-height: 1.6;
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
   }
-  form { display: flex; flex-direction: column; gap: 10px; }
-  button {
-    background: none;
-    border: 1px solid var(--accent);
-    color: var(--accent);
-    padding: 10px;
-    border-radius: 6px;
-    cursor: pointer;
+  .hint kbd {
+    display: inline-block;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
     font: inherit;
-    transition: color .15s, border-color .15s;
+    font-size: .78rem;
+    color: var(--code-color);
   }
-  button:hover { color: var(--accent-light); border-color: var(--accent-light); }
 </style>
 </head>
 <body>
   <div class="card">
     <div class="brand">codette</div>
-    <p class="lede">Sign in to continue. No account required — you can use codette for <strong>7</strong> days without registration.</p>
-    <form method="POST" action="/oauth/interaction/__UID__/trial">
-      <input type="hidden" name="csrf" value="__CSRF__">
-      <button type="submit">Try without registration for 7 days</button>
-    </form>
+    <p class="title">__TITLE__</p>
+    <p class="message">__MESSAGE__</p>
+    <div class="hint">__HINT__</div>
   </div>
 </body>
 </html>

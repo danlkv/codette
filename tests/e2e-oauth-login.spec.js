@@ -43,11 +43,11 @@ test('OAuth trial flow: browser click → access_token in callback', async ({ pa
   });
 
   await page.goto(authUrl);
-  await expect(page.locator('h1', { hasText: 'Sign in to codette' })).toBeVisible();
-  await page.locator('button', { hasText: /Try free/ }).click();
+  await expect(page.locator('.brand', { hasText: 'codette' })).toBeVisible();
+  await page.locator('button', { hasText: /without registration/ }).click();
 
   // After click: browser lands on /auth/success which JS-fetches the localhost callback
-  await expect(page.locator('h1', { hasText: 'Sign in to codette' })).toBeVisible();
+  await expect(page.locator('.brand', { hasText: 'codette' })).toBeVisible();
 
   // Localhost listener should receive the code
   const code = await Promise.race([
