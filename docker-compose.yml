@@ -4,9 +4,10 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     environment:
-      HOST_KEY: ${HOST_KEY:-}
-      HOST_TOKEN_TTL: ${HOST_TOKEN_TTL:-0}
       PORT: "3000"
+      SERVER_HOSTNAME: ${SERVER_HOSTNAME}
+      PUBLIC_URL: ${PUBLIC_URL:-https://${SERVER_HOSTNAME}}
+      X2_DATA_DIR: /data/x2
     volumes:
       - server-data:/data
     restart: unless-stopped

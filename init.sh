@@ -19,17 +19,20 @@ ask() {
   echo "${val:-$2}"
 }
 
-HOST_KEY=$(openssl rand -hex 32)
 DEFAULT_HOSTNAME=$(hostname -f 2>/dev/null || echo "localhost")
 SERVER_HOSTNAME=$(ask "Server hostname" "$DEFAULT_HOSTNAME")
+PUBLIC_URL="https://$SERVER_HOSTNAME"
 
 cat > "$ENV_FILE" <<EOF
-HOST_KEY=$HOST_KEY
 SERVER_HOSTNAME=$SERVER_HOSTNAME
+PUBLIC_URL=$PUBLIC_URL
 EOF
 
 echo ""
 echo "Wrote $ENV_FILE"
+echo ""
+echo "The server will auto-generate its id_token signing key on first run"
+echo "(stored in /data/x2 inside the container)."
 echo ""
 echo "Start the server:"
 echo "  docker compose up -d                      # no TLS (localhost only)"
