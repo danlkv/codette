@@ -4,6 +4,7 @@
   "license": "Apache-2.0",
   "type": "module",
   "dependencies": {
+    "cookie-parser": "^1.4.7",
     "express": "^5.0.0",
     "jose": "^6.0.0",
     "ws": "^8.20.1"
