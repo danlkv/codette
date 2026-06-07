@@ -7,67 +7,25 @@ import { jwtVerify, importSPKI } from 'jose';
 import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { execFileSync } from 'child_process';
-import { randomBytes } from 'crypto';
+import cookieParser from 'cookie-parser';
 import { RpcClient } from './rpc.js';
 import { unpackParam } from '../../shared/crypto.js';
+import { mountRegisterRoutes } from './x2/register.js';
+import { lookupByPubkey } from './x2/owners.js';
+import { verifyHandshakeProof } from './x2/ws-auth.js';
+import { makeJtiCache } from './x2/jti-cache.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Optional master-shortcut. Unset = only per-IP tokens accepted.
-const HOST_KEY = process.env.HOST_KEY;
-const HOST_TOKEN_TTL = parseInt(process.env.HOST_TOKEN_TTL || '0', 10); // 0 = never expires
-if (HOST_TOKEN_TTL === 0) {
-  console.warn('[server] HOST_TOKEN_TTL=0 (host tokens never expire). Set a finite value (e.g. 2592000 = 30 days) in .env.');
-}
+const PORT = parseInt(process.env.PORT || '3000', 10);
 
-const PORT       = parseInt(process.env.PORT || '3000', 10);
+// Server issuer URL (used as iss in id_tokens and as expected audience root)
+const SERVER_ISSUER = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
 
-// ── Host token store ─────────────────────────────────────────────────────────
-// Tokens are persisted in /data/host-tokens.json (Docker volume).
-// Each entry is keyed by IP: { token, created, expires, label? }
-const TOKEN_FILE = '/data/host-tokens.json';
-
-function loadTokens() {
-  try { return existsSync(TOKEN_FILE) ? JSON.parse(readFileSync(TOKEN_FILE, 'utf8')) : {}; } catch { return {}; }
-}
-
-function saveTokens(tokens) {
-  mkdirSync('/data', { recursive: true });
-  writeFileSync(TOKEN_FILE, JSON.stringify(tokens, null, 2));
-}
-
-function validateToken(token) {
-  if (HOST_KEY && token === HOST_KEY) return true; // master shortcut, when configured
-  const tokens = loadTokens();
-  const entry = Object.values(tokens).find(e => e.token === token);
-  if (!entry) return false;
-  if (entry.expires > 0 && Date.now() > entry.expires) return false;
-  return true;
-}
-
-function getOrCreateTokenForIp(ip) {
-  const tokens = loadTokens();
-  const existing = tokens[ip];
-  if (existing) {
-    if (existing.expires > 0 && Date.now() > existing.expires) {
-      return { error: 'Token expired for this address' };
-    }
-    return { token: existing.token };
-  }
-  // Issue new token
-  const token = randomBytes(16).toString('hex');
-  const now = Date.now();
-  tokens[ip] = {
-    token,
-    created: now,
-    expires: HOST_TOKEN_TTL > 0 ? now + HOST_TOKEN_TTL * 1000 : 0,
-  };
-  saveTokens(tokens);
-  return { token };
-}
-
+// JTI cache for WS handshake proofs (separate from registration jti cache)
+const wsJtiCache = makeJtiCache();
 
 // ── Per-host state ────────────────────────────────────────────────────────────
 class HostContext {
@@ -98,10 +56,14 @@ const clients = new Map();  // username → Set<WebSocket>
 const app = express();
 app.set('trust proxy', true);
 app.use(express.json());
+app.use(cookieParser());
+
+// ── X2 registration routes ────────────────────────────────────────────────────
+mountRegisterRoutes(app, SERVER_ISSUER);
 
 // ── REST request logging ──────────────────────────────────────────────────────
 // Query params that are bearer-credential-shaped and must never appear in logs.
-const REDACTED_QS_KEYS = new Set(['token', 'access_token', 'auth']);
+const REDACTED_QS_KEYS = new Set(['token', 'access_token', 'auth', 'host_proof', 'id_token']);
 app.use((req, res, next) => {
   res.on('finish', () => {
     if (req.path.startsWith('/api/')) {
@@ -162,9 +124,6 @@ function requireHost(req, res, next) {
 }
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
-// Limiters key on req.ip. Under `trust proxy: true`, that value reflects
-// X-Forwarded-For — pin trust proxy to a specific upstream before relying
-// on these limits.
 function makeRateLimit(label, windowMs, max) {
   const attempts = new Map(); // ip → { count, resetAt }
   setInterval(() => {
@@ -191,21 +150,16 @@ function makeRateLimit(label, windowMs, max) {
   };
 }
 
-// Tiered limits. apiLimiter is a broad flood guard; expensiveLimiter wraps
-// host-RPC handlers (history/file/fs/git) that force the host to do work;
-// installLimiter and tarballLimiter protect unauthenticated endpoints that
-// issue credentials or shell out per request.
-const authRateLimit    = makeRateLimit('auth',      60_000, 10);
 const apiLimiter       = makeRateLimit('api',       60_000, 600);
 const expensiveLimiter = makeRateLimit('expensive', 60_000, 60);
-const installLimiter   = makeRateLimit('install',   60_000, 5);
 const tarballLimiter   = makeRateLimit('tarball',   60_000, 5);
 
 app.use('/api', apiLimiter);
-app.use('/install.sh', installLimiter);
 app.use('/host.tar.gz', tarballLimiter);
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
+const authRateLimit = makeRateLimit('auth', 60_000, 10);
+
 app.post('/api/auth/challenge', authRateLimit, (req, res) => {
   const { username } = req.body || {};
   wtrace('client', 'server', 'auth_challenge');
@@ -229,7 +183,6 @@ app.post('/api/auth/verify', authRateLimit, (req, res) => {
       wtrace('host', 'server', 'auth_verify');
       if (res.headersSent) return;
       if (err) return res.status(401).json({ error: err.message });
-      // username cookie is a non-credential routing hint; Secure when over TLS.
       const secure = req.secure ? '; Secure' : '';
       res.setHeader('Set-Cookie', `username=${encodeURIComponent(username)}; Path=/; SameSite=Strict${secure}`);
       res.json(result);
@@ -363,23 +316,17 @@ app.delete('/api/sessions/:id', requireJwt, requireHost, (req, res) => {
 
 // ── Install script ───────────────────────────────────────────────────────────
 const installShPath = path.resolve(__dirname, '../../install.sh');
-// Hostname is read from env, never from request headers — the value is
-// interpolated into a shell script every installer pipes to `sh`.
 app.get('/install.sh', (req, res) => {
   const hostname = process.env.SERVER_HOSTNAME;
   if (!hostname) {
     return res.status(503).type('text/plain')
       .send('# SERVER_HOSTNAME not configured on server. Set it in .env before serving installs.\n');
   }
-  const ip = req.ip;
-  const { token, error } = getOrCreateTokenForIp(ip);
-  if (error) return res.status(403).type('text/plain').send(`# Error: ${error}\n`);
   const isLocal = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(hostname);
   const wsProto = isLocal ? 'ws' : 'wss';
   const serverUrl = `${wsProto}://${hostname}`;
   let script = readFileSync(installShPath, 'utf8');
   script = script.replace('SERVER_URL="${CODETTE_SERVER_URL:-}"', `SERVER_URL="${serverUrl}"`);
-  script = script.replace('HOST_KEY="${CODETTE_HOST_KEY:-}"', `HOST_KEY="${token}"`);
   res.type('text/plain').send(script);
 });
 
@@ -391,7 +338,7 @@ if (existsSync(hostDir)) {
     readFileSync(path.join(hostDir, 'package.json'), 'utf8')
   ).version;
   app.get('/version', (_req, res) => res.json({ host: hostPkgVersion }));
-  app.get('/host.tar.gz', (_req, res) => {
+  app.get('/host.tar.gz', tarballLimiter, (_req, res) => {
     try {
       const tar = execFileSync('tar', [
         'czf', '-', '-C', appRoot, 'host', 'shared',
@@ -415,18 +362,39 @@ wss.on('connection', async (ws, req) => {
 
   // ── Host connection ────────────────────────────────────────────────────────
   if (url.pathname === '/host') {
-    if (!validateToken(url.searchParams.get('token'))) { ws.close(1008, 'Unauthorized'); return; }
+    const proof = url.searchParams.get('proof');
     const clientUsername = url.searchParams.get('clientUsername');
-    if (!clientUsername) { ws.close(1008, 'clientUsername required'); return; }
-    if (hosts.has(clientUsername)) { ws.close(1008, 'Host already connected for this username'); return; }
 
-    const host = new HostContext(clientUsername, ws);
-    hosts.set(clientUsername, host);
-    console.log(`[server] host connected: ${clientUsername} (${hosts.size} total)`);
-    wtrace('host', 'server', 'connect', { username: clientUsername });
+    // Validate via X2 handshake proof
+    const validated = await verifyHandshakeProof({
+      proofJwt:      proof,
+      lookupByPubkey,
+      expectedAud:   SERVER_ISSUER + '/host',
+      jtiCache:      wsJtiCache,
+    });
 
-    // Don't request sessions here — wait for a client to connect and send
-    // capabilities first, so the host can latch e2e before responding.
+    if (!validated) {
+      ws.close(1008, 'Unauthorized');
+      return;
+    }
+    if (!clientUsername) {
+      ws.close(1008, 'clientUsername required');
+      return;
+    }
+    if (clientUsername !== validated.username) {
+      ws.close(1008, 'clientUsername mismatch');
+      return;
+    }
+    if (hosts.has(validated.username)) {
+      ws.close(1008, 'Host already connected for this username');
+      return;
+    }
+
+    const host = new HostContext(validated.username, ws);
+    hosts.set(validated.username, host);
+    console.log(`[server] host connected: ${validated.username} (${hosts.size} total)`);
+    wtrace('host', 'server', 'connect', { username: validated.username });
+
     host.broadcast({ type: 'host_status', connected: true });
 
     ws.on('message', (data) => {
@@ -438,17 +406,14 @@ wss.on('connection', async (ws, req) => {
       if (ev?.type === 'host_pubkey') {
         wtrace('host', 'server', 'host_pubkey');
         host.pubkey = ev.pubkey;
-        // Eagerly import as a Promise — verify sites just `await host.pubkeyKey`.
-        // A rejected import will surface as a verification failure (caught downstream).
         host.pubkeyKey = importSPKI(ev.pubkey, 'ES256');
-        host.pubkeyKey.catch(e => console.error(`[server] host pubkey import failed (${clientUsername}):`, e.message));
-        console.log(`[server] host pubkey registered: ${clientUsername}`);
+        host.pubkeyKey.catch(e => console.error(`[server] host pubkey import failed (${validated.username}):`, e.message));
+        console.log(`[server] host pubkey registered: ${validated.username}`);
         return;
       }
 
       if (ev?.type === 'claude_line') {
         wtrace('host', 'server', 'claude_line');
-        // Pass through opaquely — may contain {sessionId, line} or {nonce, ciphertext}
         host.broadcast(ev);
         wtrace('server', 'client', 'claude_line', { sessionId: ev.sessionId?.slice(0, 8) ?? null });
         return;
@@ -469,7 +434,6 @@ wss.on('connection', async (ws, req) => {
       if (ev?.type === 'session_list') {
         wtrace('host', 'server', 'session_list');
         if (ev.ciphertext) {
-          // E2e: cache encrypted blob for REST endpoint
           host.sessionListResponse = { nonce: ev.nonce, ciphertext: ev.ciphertext };
         } else {
           host.sessionCache = ev.sessions || [];
@@ -478,7 +442,6 @@ wss.on('connection', async (ws, req) => {
         }
         host.broadcast(ev);
         wtrace('server', 'client', 'session_list', { sessionId: null });
-        // Resolve pending deletes from cache (plaintext only; under e2e, delete waits for next plaintext session_list)
         if (!ev.ciphertext) {
           const remainingIds = new Set(host.sessionCache.map(s => s.id));
           for (const [sessionId, res] of host.pendingDelete) {
@@ -493,18 +456,16 @@ wss.on('connection', async (ws, req) => {
     });
 
     ws.on('close', () => {
-      hosts.delete(clientUsername);
+      hosts.delete(validated.username);
       host.rpc.flush();
-      console.log(`[server] host disconnected: ${clientUsername} (${hosts.size} remaining)`);
-      wtrace('host', 'server', 'disconnect', { username: clientUsername });
+      console.log(`[server] host disconnected: ${validated.username} (${hosts.size} remaining)`);
+      wtrace('host', 'server', 'disconnect', { username: validated.username });
       host.broadcast({ type: 'host_status', connected: false });
     });
-    ws.on('error', (e) => console.error(`[server] host error (${clientUsername}):`, e.message));
+    ws.on('error', (e) => console.error(`[server] host error (${validated.username}):`, e.message));
 
   // ── Client connection ──────────────────────────────────────────────────────
   } else if (url.pathname === '/ws') {
-    // Same trust model as requireJwt: cookie/query `username` is untrusted,
-    // JWT is host-issued, payload.username must match.
     const token = url.searchParams.get('token');
     const username = getCookie(req, 'username') ?? url.searchParams.get('username');
     const host = hosts.get(username);
