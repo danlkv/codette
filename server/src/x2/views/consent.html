@@ -1,0 +1,98 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 Danylo Lykov -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>codette — register</title>
+<style>
+  :root {
+    --bg-primary:   #0d0d0d;
+    --bg-secondary: #111111;
+    --bg-elevated:  #1c1c1c;
+    --border:       #2a2a2a;
+    --text:         #e0e0e0;
+    --text-muted:   #888;
+    --accent:       #cc5500;
+    --accent-light: #e06020;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg-primary:   #f5f5f5;
+      --bg-secondary: #ffffff;
+      --bg-elevated:  #e8e8e8;
+      --border:       #d0d0d0;
+      --text:         #1a1a1a;
+      --text-muted:   #666;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+    font-size: 14px;
+    background: var(--bg-primary);
+    color: var(--text);
+    min-height: 100svh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .card {
+    width: 520px;
+    max-width: 100%;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .brand {
+    color: var(--accent);
+    font-size: 1rem;
+    font-weight: 600;
+    text-align: center;
+    letter-spacing: .05em;
+  }
+  .lede {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: .82rem;
+    line-height: 1.6;
+  }
+  .uname {
+    color: var(--accent-light);
+    background: var(--bg-elevated);
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  form { display: flex; flex-direction: column; gap: 10px; }
+  button {
+    background: none;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    padding: 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font: inherit;
+    transition: color .15s, border-color .15s;
+  }
+  button:hover { color: var(--accent-light); border-color: var(--accent-light); }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">codette</div>
+    <p class="lede">Register host as <span class="uname">__USERNAME__</span>.</p>
+    <form method="POST" action="/register/finish-trial">
+      <input type="hidden" name="state" value="__STATE__">
+      <input type="hidden" name="csrf" value="__CSRF__">
+      <button type="submit">Try without registration</button>
+    </form>
+  </div>
+</body>
+</html>
