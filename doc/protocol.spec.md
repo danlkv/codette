@@ -42,7 +42,19 @@ claude --dangerously-skip-permissions \
 
 ---
 
-## Layer 2 — Host ↔ Server (WebSocket `/host?key=HOST_KEY`)
+## Layer 2 — Host ↔ Server (WebSocket `/host?proof=JWT&clientUsername=NAME`)
+
+### Registration REST API
+
+| method | path | query / body | response | notes |
+|--------|------|------|----------|-------|
+| `GET` | `/register/start` | `state`, `username`, `jwk` (b64url JSON), `host_proof` (JWT), `idp` | HTML (consent page) or 302 (external IdP) | validates host_proof, stores pending state |
+| `POST` | `/register/finish-trial` | form: `csrf`, `state` | 302 → `/register/callback` | CSRF check + rate limit; self-issues trial id_token |
+| `GET` | `/register/callback` | `state`, `id_token` | HTML (done page) | verifies id_token, claims binding |
+| `GET` | `/register/status` | `state` | `{status: 'pending'\|'claimed'\|'expired'\|'error'}` | CLI polls this; returns immediately |
+| `GET` | `/auth/username-available/:name` | — | `{available: bool, reason?: 'invalid'\|'taken'}` | pre-flight check; advisory only |
+
+
 
 One persistent connection. Host reconnects on drop.
 

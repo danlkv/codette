@@ -122,7 +122,7 @@ agent the syntax. See `inline-file.spec.md`.
 
 ### Install
 
-Server serves a shell script at `GET /install.sh` with `HOST_KEY` and `SERVER_URL` baked in.
+Server serves a shell script at `GET /install.sh` with `SERVER_URL` baked in.
 
 ```
 curl -fsSL https://your-server:3000/install.sh | sh
@@ -131,41 +131,54 @@ curl -fsSL https://your-server:3000/install.sh | sh
 The script:
 1. Clones the GitHub repo into `~/.local/share/codette/`
 2. Runs `npm install --prefix ~/.local/share/codette/host`
-3. Prompts for username and password (enter to accept defaults):
-   ```
-   Username [dan]:
-   Password [a3kR4mXq2p]:
-   ```
-   Username defaults to `$(whoami)`. Password defaults to a random 10-char alphanumeric.
-4. Writes `~/.config/codette/credentials.json` (mode 0600):
+3. Writes `~/.config/codette/config.json` with the server URL.
+4. Symlinks `~/.local/bin/codette` → `~/.local/share/codette/host/index.js`
+5. If `~/.local/bin` is not in `$PATH`, prints the `export PATH=…` line.
+6. Prints `Run: codette login`
+
+### Activation (one-time, per username)
+
+After install, run:
+
+```
+codette login
+```
+
+The CLI will:
+1. Prompt for a username (defaults to `$(whoami)`; checks availability on the server).
+2. Prompt for a browser password (used for the chat-domain HMAC auth flow — unrelated to X2 registration).
+3. Open a browser tab at the server's consent page.
+4. Wait for the user to click "Try without registration".
+5. Poll the server until registration is confirmed.
+6. Write `~/.config/codette/credentials.json` (mode 0600):
    ```json
-   { "server": "wss://your-server:3000", "hostKey": "...", "username": "dan", "password": "a3kR4mXq2p" }
+   { "server": "wss://your-server:3000", "username": "dan", "password": "a3kR4mXq2p" }
    ```
-5. Symlinks `~/.local/bin/codette` → `~/.local/share/codette/host/index.js`
-6. If `~/.local/bin` is not in `$PATH`, prints:
-   ```
-   Add to your shell profile:
-     export PATH="$HOME/.local/bin:$PATH"
-   ```
-7. Prints `Run:  codette`
+7. Print `✓ Registered. Run codette to start the host.`
+
+No `hostKey` or `refresh_token` is stored — the host's keypair (`host-key.pem`) is the identity.
 
 ### Startup
 
-On connect the host prints the server URL and credentials so the user can log in:
 ```
-Connected to https://your-server:3000
-  Username: dan
-  Password: a3kR4mXq2p
+codette
+```
+
+The host signs a fresh handshake JWT with `host-key.pem` and connects to the server.
+
+On connect it prints the server URL and credentials so the user can log in via the browser:
+```
+Claude Web Host  wss://your-server:3000
+  Serving clients as: dan
 ```
 
 ### Config precedence
 
-CLI flags → `~/.config/codette/credentials.json` → env vars → defaults.
+CLI flags → `~/.config/codette/credentials.json` → `~/.config/codette/config.json` → env vars → defaults.
 
 | Setting | Config key | Env var | CLI flag | Default |
 |---------|-----------|---------|----------|---------|
 | Server URL | `server` | `CODETTE_SERVER_URL` | `--server`, `-s` | `ws://localhost:3000` |
-| Host key | `hostKey` | `CODETTE_HOST_KEY` | — | _required (no default)_ |
 | Username | `username` | `CODETTE_USERNAME` | `--username`, `-u` | `$(whoami)` |
 | Password | `password` | `CODETTE_PASSWORD` | `--password`, `-p` | `changeme` |
 

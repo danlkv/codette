@@ -1,3 +1,55 @@
+## Host registration via self-signed identity (CLI login)
+
+The host CLI owns a long-lived EC P-256 keypair (`host-key.pem`, also used for chat-domain JWT signing). In X2, this keypair IS the host's identity — for both chat-domain (existing) and server-host authentication (new). There are no bearer tokens, no OIDC provider, no PKCE, no refresh tokens.
+
+### Registration (browser-required, one-time per username)
+
+1. CLI computes the JWK representation of its public key and the RFC 7638 JWK thumbprint (`jkt`).
+2. CLI generates a state nonce and signs a `host_proof` JWT:
+   `{ iss: jkt, aud: <server>/register, username, iat, exp: now+5min, jti }`
+3. CLI pre-flight checks username availability at `GET /auth/username-available/:name`.
+4. CLI opens browser at `GET /register/start?state=…&username=…&jwk=…&host_proof=…&idp=trial`.
+5. Server validates the `host_proof` signature against the supplied JWK, stores
+   `pending[state] = {username, jwk, jkt, idp, expires: now+5min}`.
+6. For `idp=trial`: server sets a CSRF cookie and renders a consent page.
+7. User clicks "Try without registration". Browser POSTs `state`+`csrf` to `/register/finish-trial`.
+8. Server verifies CSRF, checks per-IP rate limit (`TRIAL_MAX_CLAIMS/TRIAL_WINDOW_MS`),
+   self-issues a trial `id_token`:
+   `{ iss: <self>, sub: jkt, aud: <server>/register/callback, username, iat, exp: now+5min, iss_idp: 'self' }`,
+   and redirects browser to `/register/callback?state=…&id_token=…`.
+9. `/register/callback`: server verifies id_token, asserts sub===jkt, username match, and calls
+   `claimBinding(username, jkt, jwk, {idp, idp_sub})` — atomically writes `username-owners.json`.
+   Renders a "Registered — close this tab" page.
+10. CLI polls `GET /register/status?state=…` every 500 ms until status is `"claimed"` or 5-min timeout.
+    On success, writes `credentials.json { server, username, password }` (password is for the
+    chat-domain HMAC browser-auth flow, unchanged from v1).
+
+**No tokens property:** the host never receives an access_token or refresh_token from the server.
+The registration flow only establishes the `(username ↔ jkt)` binding.
+
+**IdP-extensibility:** `idp=trial` has the server act as its own IdP (self-issues the id_token).
+Other `idp=` values (google, github, …) will redirect the browser to that IdP instead; the
+`/register/callback` handler is IdP-agnostic — it verifies the id_token against the IdP's JWKS.
+
+### Connect (every WS connect)
+
+1. CLI signs a fresh handshake JWT: `{ iss: jkt, aud: <server>/host, iat, exp: now+60s, jti }`.
+2. CLI opens WS: `wss://server/host?proof=<JWT>&clientUsername=<>`.
+3. Server WS handler:
+   - Decodes JWT without verifying, extracts `iss` (the `jkt`).
+   - Looks up `byPubkey[jkt]` → `{username, jwk}`.
+   - Verifies JWT signature against stored JWK.
+   - Checks `iat` freshness (within 5 min), `exp` not past, `jti` not seen recently.
+   - Checks `iat >= SERVER_START_TIME` (kill-switch: invalidates all handshakes on server restart).
+   - Confirms `clientUsername === username` (sanity).
+   - Enforces single-host slot: rejects if `hosts.has(username)`.
+   - Accepts and places the connection in the hosts map.
+
+**Replay defenses:** jti dedup (in-memory Map with TTL eviction), iat freshness window,
+iat-killswitch on server restart.
+
+---
+
 ## Authentication via device pairing
 
 Three credentials work in concert.
