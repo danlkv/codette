@@ -20,7 +20,8 @@ let cachedJkt = null;
 export async function loadKeyMaterial(keyFilePath) {
   if (cachedKey) return { key: cachedKey, jwk: cachedJwk, jkt: cachedJkt };
   const pem = readFileSync(keyFilePath, 'utf8');
-  cachedKey = await importPKCS8(pem, 'ES256');
+  // extractable: true is required to call exportJWK on the imported key
+  cachedKey = await importPKCS8(pem, 'ES256', { extractable: true });
   cachedJwk = await exportJWK(cachedKey);
   // exportJWK on a private key includes d,x,y,crv,kty — strip private fields
   // to produce the public-only JWK that will be shared with the server.
@@ -42,7 +43,7 @@ export async function signHostProof({ keyFilePath, aud, username }) {
     .setAudience(aud)
     .setIssuedAt()
     .setExpirationTime('5m')
-    .setJwtId(randomBytes(16).toString('hex'))
+    .setJti(randomBytes(16).toString('hex'))
     .sign(key);
   return { jwt, jwk, jkt };
 }
@@ -59,7 +60,7 @@ export async function signHandshakeProof({ keyFilePath, aud }) {
     .setAudience(aud)
     .setIssuedAt()
     .setExpirationTime('1m')
-    .setJwtId(randomBytes(16).toString('hex'))
+    .setJti(randomBytes(16).toString('hex'))
     .sign(key);
 }
 

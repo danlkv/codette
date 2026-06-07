@@ -20,7 +20,7 @@ export async function issueSelfTrialIdToken({ jkt, username, serverIssuer }) {
     .setAudience(serverIssuer + '/register/callback')
     .setIssuedAt()
     .setExpirationTime('5m')
-    .setJwtId(randomBytes(16).toString('hex'))
+    .setJti(randomBytes(16).toString('hex'))
     .sign(privateKey);
 }
 

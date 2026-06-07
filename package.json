@@ -10,5 +10,9 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.52.0"
+  },
+  "dependencies": {
+    "jose": "^6.2.3",
+    "ws": "^8.21.0"
   }
 }

@@ -64,7 +64,7 @@ export async function generateTestKeypair() {
   writeFileSync(keyFilePath, kp.privateKey, { mode: 0o600 });
 
   // Compute JWK + jkt (public key only)
-  const privateKeyJose = await importPKCS8(kp.privateKey, 'ES256');
+  const privateKeyJose = await importPKCS8(kp.privateKey, 'ES256', { extractable: true });
   const fullJwk = await exportJWK(privateKeyJose);
   const { d: _d, ...jwk } = fullJwk;
   const jkt = await calculateJwkThumbprint(jwk, 'sha256');
@@ -98,7 +98,7 @@ export async function headlessRegister({ serverBase, username, keyFilePath, jwk,
     .setAudience(serverHttp + '/register')
     .setIssuedAt()
     .setExpirationTime('5m')
-    .setJwtId(randomBytes(16).toString('hex'))
+    .setJti(randomBytes(16).toString('hex'))
     .sign(privateKeyJose);
 
   const jwkB64 = b64url(Buffer.from(JSON.stringify(jwk)));

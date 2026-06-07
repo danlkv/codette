@@ -37,7 +37,7 @@ test('X2 registration: browser consent click → /register/status claimed', asyn
     .setAudience(`${SERVER_BASE}/register`)
     .setIssuedAt()
     .setExpirationTime('5m')
-    .setJwtId(randomBytes(16).toString('hex'))
+    .setJti(randomBytes(16).toString('hex'))
     .sign(privateKeyJose);
 
   const jwkB64 = b64url(Buffer.from(JSON.stringify(jwk)));
