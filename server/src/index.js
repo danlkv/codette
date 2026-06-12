@@ -101,21 +101,32 @@ function getCookie(req, name) {
 }
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
-// `username` (cookie/query) is untrusted — it only selects which host's pubkey
-// to verify against. The JWT is the trust anchor: host-issued, signed by that
-// host's private key. We require payload.username to match to prevent any
-// registered host from minting JWTs for other users.
+// The JWT is the trust anchor: host-issued, signed by that host's private key.
+// We peek at the unverified payload only to look up which host's pubkey to
+// verify against, then verify the signature. The cookie/query channel that
+// previously carried `username` is no longer required — REST and WS both
+// derive the routing identity from the JWT itself.
+function unsafeDecodeJwtUsername(token) {
+  try {
+    const [, payloadB64] = String(token).split('.');
+    if (!payloadB64) return null;
+    const json = Buffer.from(payloadB64, 'base64url').toString('utf8');
+    return JSON.parse(json).username ?? null;
+  } catch { return null; }
+}
+
 async function requireJwt(req, res, next) {
   const auth = req.headers.authorization || '';
   if (!auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
   const token = auth.slice(7);
-  const username = getCookie(req, 'username') ?? req.query.username;
-  const host = hosts.get(username);
+  const claimedUsername = unsafeDecodeJwtUsername(token);
+  if (!claimedUsername) return res.status(401).json({ error: 'Unauthorized' });
+  const host = hosts.get(claimedUsername);
   if (!host?.pubkeyKey) return res.status(503).json({ error: 'Host not connected' });
+  // verifyChatJwt enforces aud + iss + signature. payload.username equals
+  // claimedUsername by construction (both come from the same JWT).
   const payload = await verifyChatJwt(token, host);
-  if (!payload || payload.username !== username) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  if (!payload) return res.status(401).json({ error: 'Unauthorized' });
   req.user = payload;
   next();
 }
@@ -471,12 +482,15 @@ wss.on('connection', async (ws, req) => {
 
   // ── Client connection ──────────────────────────────────────────────────────
   } else if (url.pathname === '/ws') {
+    // Same trust model as requireJwt: peek at the JWT payload to look up the
+    // host's pubkey, then verify via verifyChatJwt (aud + iss + signature).
+    // No cookie/query dependency.
     const token = url.searchParams.get('token');
-    const username = getCookie(req, 'username') ?? url.searchParams.get('username');
-    const host = hosts.get(username);
-    if (!host?.pubkeyKey) { ws.close(1008, 'Unauthorized'); return; }
+    const claimedUsername = unsafeDecodeJwtUsername(token);
+    const host = claimedUsername ? hosts.get(claimedUsername) : null;
+    if (!claimedUsername || !host?.pubkeyKey) { ws.close(1008, 'Unauthorized'); return; }
     const user = await verifyChatJwt(token, host);
-    if (!user || user.username !== username) { ws.close(1008, 'Unauthorized'); return; }
+    if (!user) { ws.close(1008, 'Unauthorized'); return; }
 
     const { username: verifiedUsername } = user;
     if (!clients.has(verifiedUsername)) clients.set(verifiedUsername, new Set());
