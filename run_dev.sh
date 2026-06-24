@@ -4,6 +4,15 @@
 
 set -e
 
+# Modes:
+#   ./run_dev.sh                # server + alice + bob hosts (default)
+#   ./run_dev.sh --server-only  # just the server (no host spawns); used by
+#                               # run_dev_login.sh which manages its own host.
+SERVER_ONLY=${SERVER_ONLY:-0}
+for arg in "$@"; do
+  case "$arg" in --server-only) SERVER_ONLY=1 ;; esac
+done
+
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
 export SERVER_URL="ws://localhost:3000"
@@ -61,6 +70,13 @@ for i in $(seq 1 20); do
   sleep 0.3
   if curl -sf "http://localhost:$PORT/" >/dev/null 2>&1; then break; fi
 done
+
+if [ "$SERVER_ONLY" = "1" ]; then
+  printf '%s\n' "$SERVER_PID" > "$PIDFILE"
+  echo "==> server-only mode; skipping host spawns. Ctrl+C to stop. (pid: $SERVER_PID)"
+  tail -f "$SERVER_LOG"
+  exit 0
+fi
 
 # ── Register alice and bob via headless helper ─────────────────────────────────
 echo "==> Registering alice and bob..."
