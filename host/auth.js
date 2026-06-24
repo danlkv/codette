@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Danylo Lykov
 //
-// host-enrollment host-side key management and proof signing.
+// Host-side key management for the host-enrollment flow.
 // Uses the same host-key.pem as the chat-domain JWT signer.
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';

@@ -41,7 +41,7 @@ export async function loadOrGenerateIdTokenKey() {
     privPem = kp.privateKey;
     pubPem  = kp.publicKey;
     writeFileSync(keyFile(), privPem, { mode: 0o600 });
-    console.log('[host-enrollment/keys] generated new id_token signing key at', keyFile());
+    console.log('[user-auth/keys] generated new id_token signing key at', keyFile());
   }
 
   _privateKey = await importPKCS8(privPem, 'ES256');

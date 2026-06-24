@@ -67,9 +67,8 @@ export async function verifyHostProof({ proofJwt, jwk, expectedAud, expectedUser
   }
 
   // 7. jti dedup
-  if (!payload.jti) throw new Error('host_proof: missing jti');
   if (jtiCache.has(payload.jti)) throw new Error('host_proof: jti already seen (replay)');
-  jtiCache.mark(payload.jti, payload.exp ?? nowSec + 600);
+  jtiCache.mark(payload.jti, payload.exp);
 
   return { jkt, username: payload.username };
 }
