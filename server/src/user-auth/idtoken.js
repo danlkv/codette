@@ -6,6 +6,7 @@
 import { SignJWT, jwtVerify } from 'jose';
 import { randomBytes } from 'crypto';
 import { loadOrGenerateIdTokenKey } from './keys.js';
+import { GOOGLE_OIDC_ISSUER, verifyGoogleOidcIdToken } from './google-oidc.js';
 
 export async function issueSelfTrialIdToken({ jkt, serverIssuer }) {
   const { privateKey } = await loadOrGenerateIdTokenKey();
@@ -21,14 +22,15 @@ export async function issueSelfTrialIdToken({ jkt, serverIssuer }) {
 }
 
 /**
- * Verify an id_token issued by any configured IdP.
+ * Verify an id_token. Routes by `iss` to a configured IdP branch.
  *
- * For v1, only the self-IdP branch (trial) is implemented.
- * Future: dispatch by iss against a configured IdP allow-list (Google etc.).
- *
+ * @param {object} opts
+ *   idToken       — the JWT string
+ *   serverIssuer  — used for self-IdP iss/aud
+ *   nonce         — expected nonce (Google branch only)
  * @returns { sub, idp, claims }
  */
-export async function verifyIdToken({ idToken, expectedAud, serverIssuer }) {
+export async function verifyIdToken({ idToken, serverIssuer, nonce }) {
   const [, payloadB64] = idToken.split('.');
   let iss;
   try {
@@ -40,12 +42,17 @@ export async function verifyIdToken({ idToken, expectedAud, serverIssuer }) {
   if (iss === serverIssuer) {
     const { publicKey } = await loadOrGenerateIdTokenKey();
     const { payload } = await jwtVerify(idToken, publicKey, {
-      audience:       expectedAud,
+      audience:       serverIssuer + '/register/callback',
       algorithms:     ['ES256'],
       issuer:         serverIssuer,
       requiredClaims: ['exp', 'iat', 'sub'],
     });
-    return { sub: payload.sub, idp: 'self', claims: payload };
+    return { sub: payload.sub, idp: serverIssuer, claims: payload };
+  }
+
+  if (iss === GOOGLE_OIDC_ISSUER) {
+    const { sub, claims } = await verifyGoogleOidcIdToken(idToken, nonce);
+    return { sub, idp: GOOGLE_OIDC_ISSUER, claims };
   }
 
   throw new Error(`id_token: unsupported issuer "${iss}"`);

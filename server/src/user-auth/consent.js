@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Danylo Lykov
 //
-// Trial consent endpoint. Issues a self-signed id_token after CSRF + rate-limit
-// checks, then redirects to host-enrollment's /register/callback.
+// Picker page + trial-IdP completion endpoint.
 
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
@@ -10,30 +9,41 @@ import path from 'path';
 import express from 'express';
 import { issueSelfTrialIdToken } from './idtoken.js';
 import { issueCsrfCookie, verifyCsrf } from './csrf.js';
-import { claimIfAllowed, revokeTrialClaim } from './trial.js';
+import { claimIfAllowed, revoke } from './claim-limits.js';
+import { buildGoogleOidcAuthorizeUrl, isGoogleOidcEnabled } from './google-oidc.js';
 import { escapeHtml } from '../util/render.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONSENT_HTML = readFileSync(path.join(__dirname, 'views/consent.html'), 'utf8');
 
-export function renderTrialConsent(res, { req, name, state }) {
+export function renderPicker(res, { req, name, state, nonce, serverIssuer }) {
   const csrf = issueCsrfCookie(res, req.secure);
+  const googleBlock = isGoogleOidcEnabled()
+    ? `<a class="btn-primary" href="${escapeHtml(
+        buildGoogleOidcAuthorizeUrl({
+          state,
+          nonce,
+          redirectUri: serverIssuer + '/register/callback',
+        })
+      )}">Sign in with Google</a>`
+    : '';
+  const trialLabel = isGoogleOidcEnabled() ? 'Try without an account' : 'Continue';
   return res.type('html').send(
     CONSENT_HTML
-      .replace('__USERNAME__', escapeHtml(name))
-      .replace('__STATE__', escapeHtml(state))
-      .replace('__CSRF__', escapeHtml(csrf))
+      .replace('__USERNAME__',     escapeHtml(name))
+      .replace('__STATE__',        escapeHtml(state))
+      .replace('__CSRF__',         escapeHtml(csrf))
+      .replace('__GOOGLE_BLOCK__', googleBlock)
+      .replace('__TRIAL_LABEL__',  escapeHtml(trialLabel))
   );
 }
 
 /**
- * Mount the trial consent endpoint.
- *
  * @param {import('express').Application} app
  * @param {object} opts
  *   serverIssuer  — e.g. "https://your-server.example.com"
- *   pendingStore  — Map<state, {username, jkt, jwk, idp, expires, ip}>
- *   renderError   — fn({title, message, hint}) → html (provided by host-enrollment)
+ *   pendingStore  — Map<state, {username, jkt, jwk, nonce, expires, ip, claimedKeys}>
+ *   renderError   — fn({title, message, hint}) → html
  */
 export function mountConsentRoute(app, { serverIssuer, pendingStore, renderError }) {
   app.post('/register/finish-trial', express.urlencoded({ extended: false }), async (req, res) => {
@@ -64,28 +74,23 @@ export function mountConsentRoute(app, { serverIssuer, pendingStore, renderError
       });
     }
 
-    if (entry.idp !== 'trial') {
-      return renderError(res, {
-        title:   'IdP mismatch',
-        message: 'This endpoint is only for trial registrations.',
-        hint:    '',
-      });
-    }
-
     const ip = req.ip;
-    if (!claimIfAllowed(ip)) {
+    const keys = [`ip:${ip}`, `idp:${serverIssuer}:${entry.jkt}`];
+    if (!claimIfAllowed(keys)) {
       return renderError(res, {
         title:   'Rate limit exceeded',
-        message: 'Too many trial registrations from this IP address.',
+        message: 'Too many trial registrations from this address.',
         hint:    'Wait before trying again.',
       });
     }
+    entry.claimedKeys = keys;
 
     let idToken;
     try {
       idToken = await issueSelfTrialIdToken({ jkt: entry.jkt, serverIssuer });
     } catch (e) {
-      revokeTrialClaim(ip);
+      revoke(keys);
+      entry.claimedKeys = null;
       return renderError(res, {
         title:   'Token issuance failed',
         message: e.message,

@@ -139,7 +139,6 @@ export async function runLogin({ serverUrl, keyFilePath }) {
     username,
     jwk:        jwkB64,
     host_proof: hostProof,
-    idp:        'trial',
   });
 
   console.log('\nOpen: ' + registerUrl + '\n');

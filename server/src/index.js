@@ -13,7 +13,7 @@ import cookieParser from 'cookie-parser';
 import { RpcClient } from './rpc.js';
 import { unpackParam } from '../../shared/crypto.js';
 import { mountHostEnrollmentRoutes, pendingStore } from './host-enrollment/register.js';
-import { verifyIdToken, mountConsentRoute } from './user-auth/index.js';
+import { verifyIdToken, mountConsentRoute, exchangeGoogleOidcCode } from './user-auth/index.js';
 import { renderError } from './util/render.js';
 import { lookupByPubkey } from './host-enrollment/owners.js';
 import { verifyHandshakeProof } from './host-enrollment/ws-auth.js';
@@ -62,7 +62,11 @@ app.use(express.json());
 app.use(cookieParser());
 
 // ── host-enrollment registration routes ───────────────────────────────────────
-mountHostEnrollmentRoutes(app, { serverIssuer: SERVER_ISSUER, verifyIdToken });
+mountHostEnrollmentRoutes(app, {
+  serverIssuer:    SERVER_ISSUER,
+  verifyIdToken,
+  exchangeOidcCode: exchangeGoogleOidcCode,
+});
 mountConsentRoute(app, { serverIssuer: SERVER_ISSUER, pendingStore, renderError });
 
 // ── REST request logging ──────────────────────────────────────────────────────

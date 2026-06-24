@@ -113,9 +113,9 @@ export async function headlessRegister({ serverBase, username, keyFilePath, jwk,
     return res;
   };
 
-  // 1. GET /register/start → consent page + CSRF cookie
+  // 1. GET /register/start → picker page + CSRF cookie
   const startUrl = `${serverHttp}/register/start?` + new URLSearchParams({
-    state, username, jwk: jwkB64, host_proof: hostProof, idp: 'trial',
+    state, username, jwk: jwkB64, host_proof: hostProof,
   });
   let res = await fetchWithJar(startUrl);
   if (!res.ok) {

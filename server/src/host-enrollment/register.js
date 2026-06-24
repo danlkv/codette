@@ -10,12 +10,13 @@
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import { randomBytes } from 'crypto';
 import { importJWK } from 'jose';
 import { verifyHostProof } from './proof.js';
 import { isValidUsername, isUsernameClaimed, claimBinding } from './owners.js';
 import { makeJtiCache } from './jti-cache.js';
-import { revokeTrialClaim } from '../user-auth/trial.js';
-import { renderTrialConsent } from '../user-auth/index.js';
+import { claimIfAllowed, revoke } from '../user-auth/claim-limits.js';
+import { renderPicker } from '../user-auth/index.js';
 import { renderError, escapeHtml } from '../util/render.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -23,7 +24,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Pre-load HTML template at module startup
 const DONE_HTML = readFileSync(path.join(__dirname, 'views/done.html'), 'utf8');
 
-// Pending registrations: state → { username, jwk, jkt, idp, expires, ip }
+// Pending registrations: state → { username, jwk, jkt, nonce, expires, ip, claimedKeys? }
 const pending = new Map();
 export const pendingStore = pending;
 
@@ -45,27 +46,26 @@ setInterval(() => {
 }, 60_000).unref?.();
 
 /**
- * Mount host-enrollment registration routes on an Express app.
  * @param {import('express').Application} app
  * @param {object} opts
- *   serverIssuer  — e.g. "https://your-server.example.com"
- *   verifyIdToken — fn({idToken, expectedAud, serverIssuer}) → {sub, idp, claims}
+ *   serverIssuer    — base URL used as iss for self-IdP and to build redirect_uri
+ *   verifyIdToken   — fn({idToken, serverIssuer, nonce}) → {sub, idp, claims}
+ *   exchangeOidcCode — fn(code, redirectUri) → Promise<idToken>
  */
-export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken }) {
+export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken, exchangeOidcCode }) {
 
   // ── GET /register/start ─────────────────────────────────────────────────────
   app.get('/register/start', async (req, res) => {
-    const { state, username, jwk: jwkB64, host_proof, idp } = req.query;
+    const { state, username, jwk: jwkB64, host_proof } = req.query;
 
-    if (!state || !username || !jwkB64 || !host_proof || !idp) {
+    if (!state || !username || !jwkB64 || !host_proof) {
       return renderError(res, {
         title:   'Missing parameters',
-        message: 'state, username, jwk, host_proof, and idp are all required.',
+        message: 'state, username, jwk, and host_proof are all required.',
         hint:    'Run <kbd>codette login</kbd> to start again.',
       });
     }
 
-    // Decode JWK
     let jwk;
     try {
       jwk = JSON.parse(Buffer.from(jwkB64, 'base64url').toString());
@@ -77,7 +77,6 @@ export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken }) 
       });
     }
 
-    // Validate JWK is importable
     try {
       await importJWK(jwk, 'ES256');
     } catch (e) {
@@ -88,7 +87,6 @@ export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken }) 
       });
     }
 
-    // Verify host_proof
     let jkt;
     try {
       ({ jkt } = await verifyHostProof({
@@ -106,7 +104,6 @@ export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken }) 
       });
     }
 
-    // Username validation
     const name = String(username).toLowerCase();
     if (!isValidUsername(name)) {
       return renderError(res, {
@@ -123,38 +120,29 @@ export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken }) 
       });
     }
 
-    // Store pending
+    const nonce = randomBytes(16).toString('hex');
     pending.set(state, {
       username: name,
       jwk,
       jkt,
-      idp: String(idp),
-      expires: Date.now() + 5 * 60 * 1000,
-      ip: req.ip,
+      nonce,
+      expires:     Date.now() + 5 * 60 * 1000,
+      ip:          req.ip,
+      claimedKeys: null,
     });
     statusMap.set(state, 'pending');
 
-    // Branch by idp
-    if (idp === 'trial') {
-      return renderTrialConsent(res, { req, name, state });
-    }
-
-    // TODO: external IdP redirect
-    return renderError(res, {
-      title:   'IdP not supported',
-      message: `idp="${escapeHtml(idp)}" is not implemented yet.`,
-      hint:    'Use <kbd>idp=trial</kbd> or wait for a future release.',
-    });
+    return renderPicker(res, { req, name, state, nonce, serverIssuer });
   });
 
   // ── GET /register/callback ───────────────────────────────────────────────────
   app.get('/register/callback', async (req, res) => {
-    const { state, id_token } = req.query;
+    const { state, id_token, code } = req.query;
 
-    if (!state || !id_token) {
+    if (!state || (!id_token && !code)) {
       return renderError(res, {
         title:   'Missing parameters',
-        message: 'state and id_token are required.',
+        message: 'state and either id_token or code are required.',
         hint:    'Run <kbd>codette login</kbd> to start again.',
       });
     }
@@ -169,12 +157,34 @@ export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken }) 
       });
     }
 
+    // Code-flow IdPs land here without an id_token; exchange first.
+    let idToken = id_token;
+    if (!idToken && code) {
+      if (!exchangeOidcCode) {
+        return renderError(res, {
+          title:   'OIDC code flow not configured',
+          message: 'The server received an OIDC authorization code but no IdP is wired to exchange it.',
+          hint:    'Run <kbd>codette login</kbd> to start again.',
+        });
+      }
+      try {
+        idToken = await exchangeOidcCode(code, serverIssuer + '/register/callback');
+      } catch (e) {
+        statusMap.set(state, 'error');
+        return renderError(res, {
+          title:   'OIDC code exchange failed',
+          message: e.message,
+          hint:    'Run <kbd>codette login</kbd> to start again.',
+        });
+      }
+    }
+
     let sub, idp;
     try {
       ({ sub, idp } = await verifyIdToken({
-        idToken:     id_token,
-        expectedAud: serverIssuer + '/register/callback',
+        idToken,
         serverIssuer,
+        nonce: entry.nonce,
       }));
     } catch (e) {
       statusMap.set(state, 'error');
@@ -185,11 +195,25 @@ export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken }) 
       });
     }
 
-    // Atomic binding claim
+    // External-IdP code flow rate-limits per IdP identity at this point.
+    // (Trial path already rate-limited at /register/finish-trial.)
+    if (code) {
+      const keys = [`idp:${idp}:${sub}`];
+      if (!claimIfAllowed(keys)) {
+        statusMap.set(state, 'error');
+        return renderError(res, {
+          title:   'Rate limit exceeded',
+          message: 'Too many registrations from this account.',
+          hint:    'Wait before trying again.',
+        });
+      }
+      entry.claimedKeys = (entry.claimedKeys || []).concat(keys);
+    }
+
     const result = claimBinding(entry.username, entry.jkt, entry.jwk, { idp, idp_sub: sub });
 
     if (result === 'name-taken') {
-      if (entry.idp === 'trial') revokeTrialClaim(entry.ip);
+      revoke(entry.claimedKeys);
       statusMap.set(state, 'error');
       pending.delete(state);
       return renderError(res, {
@@ -199,7 +223,7 @@ export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken }) 
       });
     }
     if (result === 'pubkey-taken') {
-      if (entry.idp === 'trial') revokeTrialClaim(entry.ip);
+      revoke(entry.claimedKeys);
       statusMap.set(state, 'error');
       pending.delete(state);
       return renderError(res, {
@@ -209,7 +233,6 @@ export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken }) 
       });
     }
 
-    // Success
     pending.delete(state);
     statusMap.set(state, 'claimed');
 
@@ -223,10 +246,9 @@ export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken }) 
     const { state } = req.query;
     if (!state) return res.status(400).json({ status: 'error', reason: 'missing state' });
 
-    const entry   = pending.get(state);
-    const status  = statusMap.get(state);
+    const entry  = pending.get(state);
+    const status = statusMap.get(state);
 
-    // Expired but still in pending map
     if (entry && Date.now() > entry.expires) {
       pending.delete(state);
       statusMap.set(state, 'expired');
@@ -235,7 +257,6 @@ export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken }) 
 
     if (status) return res.json({ status });
 
-    // Unknown state
     return res.json({ status: 'expired' });
   });
 

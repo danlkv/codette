@@ -42,16 +42,16 @@ test('host-enrollment registration: browser consent click → /register/status c
 
   const jwkB64 = b64url(Buffer.from(JSON.stringify(jwk)));
   const startUrl = `${SERVER_BASE}/register/start?` + new URLSearchParams({
-    state, username, jwk: jwkB64, host_proof: hostProof, idp: 'trial',
+    state, username, jwk: jwkB64, host_proof: hostProof,
   });
 
-  // Navigate to consent page
+  // Navigate to picker page
   await page.goto(startUrl);
   await expect(page.locator('.brand', { hasText: 'codette' })).toBeVisible();
   await expect(page.locator('.uname', { hasText: username })).toBeVisible();
 
-  // Click the consent button
-  await page.locator('button', { hasText: /without registration/ }).click();
+  // Click the trial-button (Google button hidden when GOOGLE_OIDC_CLIENT_ID is unset)
+  await page.locator('button', { hasText: /Continue|Try without/ }).click();
 
   // Should land on done page
   await expect(page.locator('.brand', { hasText: 'codette' })).toBeVisible();
