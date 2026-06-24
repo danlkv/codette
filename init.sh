@@ -28,6 +28,19 @@ SERVER_HOSTNAME=$SERVER_HOSTNAME
 PUBLIC_URL=$PUBLIC_URL
 EOF
 
+printf 'Google OIDC client_id (empty = disable Google sign-in): '
+read -r GOOGLE_OIDC_CLIENT_ID
+if [ -n "$GOOGLE_OIDC_CLIENT_ID" ]; then
+  printf 'Google OIDC client_secret: '
+  read -r GOOGLE_OIDC_CLIENT_SECRET
+  cat >> "$ENV_FILE" <<EOF
+GOOGLE_OIDC_CLIENT_ID=$GOOGLE_OIDC_CLIENT_ID
+GOOGLE_OIDC_CLIENT_SECRET=$GOOGLE_OIDC_CLIENT_SECRET
+EOF
+  echo ""
+  echo "Register this redirect URI in Google Console: $PUBLIC_URL/register/callback"
+fi
+
 echo ""
 echo "Wrote $ENV_FILE"
 echo ""

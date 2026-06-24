@@ -8,6 +8,8 @@ services:
       SERVER_HOSTNAME: ${SERVER_HOSTNAME}
       PUBLIC_URL: ${PUBLIC_URL:-https://${SERVER_HOSTNAME}}
       CODETTE_DATA_DIR: /data/codette
+      GOOGLE_OIDC_CLIENT_ID: ${GOOGLE_OIDC_CLIENT_ID:-}
+      GOOGLE_OIDC_CLIENT_SECRET: ${GOOGLE_OIDC_CLIENT_SECRET:-}
     volumes:
       - server-data:/data
     restart: unless-stopped
