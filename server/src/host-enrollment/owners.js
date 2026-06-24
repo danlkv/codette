@@ -47,10 +47,6 @@ export function isUsernameClaimed(name) {
   return !!load().byName[name];
 }
 
-export function isPubkeyClaimed(fp) {
-  return !!load().byPubkey[String(fp)];
-}
-
 export function lookupByName(name) {
   return load().byName[String(name)] || null;
 }
@@ -61,14 +57,13 @@ export function lookupByPubkey(fp) {
 
 /**
  * Atomically claim a (username, pubkey) binding.
+ * Caller MUST have already validated `name` via isValidUsername.
  * Returns:
  *   'claimed'     — newly bound
  *   'name-taken'  — username already bound to a different pubkey
  *   'pubkey-taken'— pubkey already bound to a different username
- *   'invalid'     — username fails validation
  */
 export function claimBinding(name, fp, jwk, { idp, idp_sub }) {
-  if (!isValidUsername(name)) return 'invalid';
   const data = load();
   if (data.byName[name])         return 'name-taken';
   if (data.byPubkey[String(fp)]) return 'pubkey-taken';
