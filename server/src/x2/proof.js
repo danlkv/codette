@@ -40,27 +40,26 @@ export async function verifyHostProof({ proofJwt, jwk, expectedAud, expectedUser
     throw new Error('host_proof: thumbprint computation failed: ' + e.message);
   }
 
-  // 3. Verify JWT signature + claims
+  // 3. Verify JWT signature + claims (require exp + iat + jti)
   let payload;
   try {
     ({ payload } = await jwtVerify(proofJwt, key, {
-      audience:   expectedAud,
-      algorithms: ['ES256'],
+      audience:       expectedAud,
+      algorithms:     ['ES256'],
+      requiredClaims: ['exp', 'iat', 'jti'],
     }));
   } catch (e) {
     throw new Error('host_proof: jwt verification failed: ' + e.message);
   }
 
-  // 4. username claim must match
   if (payload.username !== expectedUsername) {
     throw new Error('host_proof: username mismatch');
   }
 
-  // 5. iat freshness (within 5 min of now)
+  // iat skew: 30s future, 60s past
   const nowSec = Math.floor(Date.now() / 1000);
-  if (!payload.iat || Math.abs(nowSec - payload.iat) > 300) {
-    throw new Error('host_proof: iat out of range');
-  }
+  if (payload.iat > nowSec + 30) throw new Error('host_proof: iat too far in the future');
+  if (payload.iat < nowSec - 60) throw new Error('host_proof: iat too far in the past');
 
   // 6. iss must equal the JWK thumbprint (proves key ownership)
   if (payload.iss !== jkt) {

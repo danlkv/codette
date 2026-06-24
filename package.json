@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "test": "npx playwright test --config tests/playwright.config.js",
-    "test:headed": "npx playwright test --config tests/playwright.config.js --headed"
+    "test:headed": "npx playwright test --config tests/playwright.config.js --headed",
+    "test:unit": "node --test 'server/src/**/*.test.js'"
   },
   "devDependencies": {
     "@playwright/test": "^1.52.0"
