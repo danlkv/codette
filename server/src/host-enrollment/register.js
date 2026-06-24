@@ -169,10 +169,6 @@ export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken }) 
       });
     }
 
-    // Verify id_token via injected verifyIdToken. The dispatcher promises
-    // { sub, idp, claims }; we use sub + idp only. sub is opaque IdP identity;
-    // username/jkt come from pending[state] (we trust what the host submitted
-    // at /register/start, which was validated then).
     let sub, idp;
     try {
       ({ sub, idp } = await verifyIdToken({

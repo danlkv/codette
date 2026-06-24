@@ -7,14 +7,6 @@ import { SignJWT, jwtVerify } from 'jose';
 import { randomBytes } from 'crypto';
 import { loadOrGenerateIdTokenKey } from './keys.js';
 
-/**
- * Issue a self-signed trial id_token for the registration flow.
- *
- * The IdP's only assertion is "this jkt finished the consent flow."
- * sub = jkt because the self-IdP's notion of identity IS the keypair —
- * there's no separate human identity behind a trial claim.
- * /register/callback treats sub opaquely; it does not assume sub == jkt.
- */
 export async function issueSelfTrialIdToken({ jkt, serverIssuer }) {
   const { privateKey } = await loadOrGenerateIdTokenKey();
   return new SignJWT({})

@@ -56,12 +56,7 @@ export function lookupByPubkey(fp) {
 }
 
 /**
- * Atomically claim a (username, pubkey) binding.
- * Caller MUST have already validated `name` via isValidUsername.
- * Returns:
- *   'claimed'     — newly bound
- *   'name-taken'  — username already bound to a different pubkey
- *   'pubkey-taken'— pubkey already bound to a different username
+ * @returns 'claimed' | 'name-taken' | 'pubkey-taken'
  */
 export function claimBinding(name, fp, jwk, { idp, idp_sub }) {
   const data = load();
