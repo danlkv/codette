@@ -25,17 +25,14 @@ export async function issueSelfTrialIdToken({ jkt, username, serverIssuer }) {
 }
 
 /**
- * Verify any id_token.
+ * Verify an id_token issued by any configured IdP.
  *
- * knownIssuers: { self: serverIssuer, ... }
+ * For v1, only the self-IdP branch (trial) is implemented.
+ * Future: dispatch by iss against a configured IdP allow-list (Google etc.).
  *
- * For v1, only the 'self' branch is implemented.
- * Future: verify against external IdP JWKS by iss.
- *
- * Returns { sub, username, iss_idp } on success; throws on failure.
+ * @returns { sub, idp, claims }
  */
-export async function verifyAnyIdToken({ idToken, expectedAud, knownIssuers }) {
-  // Decode without verifying to get iss
+export async function verifyIdToken({ idToken, expectedAud, serverIssuer }) {
   const [, payloadB64] = idToken.split('.');
   let iss;
   try {
@@ -44,22 +41,20 @@ export async function verifyAnyIdToken({ idToken, expectedAud, knownIssuers }) {
     throw new Error('id_token: malformed payload');
   }
 
-  const selfIssuer = knownIssuers?.self;
-  if (selfIssuer && iss === selfIssuer) {
+  if (iss === serverIssuer) {
     const { publicKey } = await loadOrGenerateIdTokenKey();
     const { payload } = await jwtVerify(idToken, publicKey, {
-      audience: expectedAud,
-      algorithms: ['ES256'],
-      issuer: selfIssuer,
+      audience:       expectedAud,
+      algorithms:     ['ES256'],
+      issuer:         serverIssuer,
+      requiredClaims: ['exp', 'iat', 'sub', 'jti'],
     });
     return {
-      sub:     payload.sub,
-      username: payload.username,
-      iss_idp: payload.iss_idp || 'self',
+      sub:    payload.sub,
+      idp:    payload.iss_idp || 'self',
+      claims: payload,
     };
   }
 
-  // TODO: External IdP dispatch — verify against IdP's JWKS when iss is in
-  // a configured allow-list. Not implemented in v1.
   throw new Error(`id_token: unsupported issuer "${iss}"`);
 }

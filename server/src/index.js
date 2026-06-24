@@ -12,7 +12,9 @@ import { execFileSync } from 'child_process';
 import cookieParser from 'cookie-parser';
 import { RpcClient } from './rpc.js';
 import { unpackParam } from '../../shared/crypto.js';
-import { mountRegisterRoutes } from './host-enrollment/register.js';
+import { mountHostEnrollmentRoutes, pendingStore } from './host-enrollment/register.js';
+import { verifyIdToken, mountConsentRoute } from './user-auth/index.js';
+import { renderError } from './util/render.js';
 import { lookupByPubkey } from './host-enrollment/owners.js';
 import { verifyHandshakeProof } from './host-enrollment/ws-auth.js';
 import { makeJtiCache } from './host-enrollment/jti-cache.js';
@@ -60,7 +62,8 @@ app.use(express.json());
 app.use(cookieParser());
 
 // ── host-enrollment registration routes ───────────────────────────────────────
-mountRegisterRoutes(app, SERVER_ISSUER);
+mountHostEnrollmentRoutes(app, { serverIssuer: SERVER_ISSUER, verifyIdToken });
+mountConsentRoute(app, { serverIssuer: SERVER_ISSUER, pendingStore, renderError });
 
 // ── REST request logging ──────────────────────────────────────────────────────
 // Query params that are bearer-credential-shaped and must never appear in logs.

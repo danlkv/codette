@@ -3,7 +3,6 @@
 //
 // host-enrollment registration endpoints:
 //   GET  /register/start
-//   POST /register/finish-trial
 //   GET  /register/callback
 //   GET  /register/status
 //   GET  /auth/username-available/:name
@@ -12,41 +11,21 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import { importJWK } from 'jose';
-import express from 'express';
 import { verifyHostProof } from './proof.js';
-import { issueSelfTrialIdToken, verifyAnyIdToken } from './idtoken.js';
-import { issueCsrfCookie, verifyCsrf } from './csrf.js';
-import { claimIfAllowed, revokeTrialClaim } from './trial.js';
 import { isValidUsername, isUsernameClaimed, claimBinding } from './owners.js';
 import { makeJtiCache } from './jti-cache.js';
+import { revokeTrialClaim } from '../user-auth/trial.js';
+import { renderTrialConsent } from '../user-auth/index.js';
+import { renderError, escapeHtml } from '../util/render.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Pre-load HTML templates at module startup
-const CONSENT_HTML = readFileSync(path.join(__dirname, 'views/consent.html'), 'utf8');
-const DONE_HTML    = readFileSync(path.join(__dirname, 'views/done.html'), 'utf8');
-const ERROR_HTML   = readFileSync(path.join(__dirname, 'views/error.html'), 'utf8');
-
-function renderError(res, { title, message, hint }) {
-  return res.status(400).type('html').send(
-    ERROR_HTML
-      .replace('__TITLE__', escapeHtml(title || 'Error'))
-      .replace('__MESSAGE__', escapeHtml(message || ''))
-      .replace('__HINT__', hint || '')
-  );
-}
-
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
+// Pre-load HTML template at module startup
+const DONE_HTML = readFileSync(path.join(__dirname, 'views/done.html'), 'utf8');
 
 // Pending registrations: state → { username, jwk, jkt, idp, expires, ip }
 const pending = new Map();
+export const pendingStore = pending;
 
 // Status map: state → 'pending' | 'claimed' | 'error'
 const statusMap = new Map();
@@ -66,11 +45,13 @@ setInterval(() => {
 }, 60_000).unref?.();
 
 /**
- * Mount all host-enrollment registration routes on an Express app.
+ * Mount host-enrollment registration routes on an Express app.
  * @param {import('express').Application} app
- * @param {string} serverIssuer — e.g. "https://your-server.example.com"
+ * @param {object} opts
+ *   serverIssuer  — e.g. "https://your-server.example.com"
+ *   verifyIdToken — fn({idToken, expectedAud, serverIssuer}) → {sub, idp, claims}
  */
-export function mountRegisterRoutes(app, serverIssuer) {
+export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken }) {
 
   // ── GET /register/start ─────────────────────────────────────────────────────
   app.get('/register/start', async (req, res) => {
@@ -155,13 +136,7 @@ export function mountRegisterRoutes(app, serverIssuer) {
 
     // Branch by idp
     if (idp === 'trial') {
-      const csrf = issueCsrfCookie(res, req.secure);
-      return res.type('html').send(
-        CONSENT_HTML
-          .replace('__USERNAME__', escapeHtml(name))
-          .replace('__STATE__', escapeHtml(state))
-          .replace('__CSRF__', escapeHtml(csrf))
-      );
+      return renderTrialConsent(res, { req, name, state });
     }
 
     // TODO: external IdP redirect
@@ -170,76 +145,6 @@ export function mountRegisterRoutes(app, serverIssuer) {
       message: `idp="${escapeHtml(idp)}" is not implemented yet.`,
       hint:    'Use <kbd>idp=trial</kbd> or wait for a future release.',
     });
-  });
-
-  // ── POST /register/finish-trial ──────────────────────────────────────────────
-  app.post('/register/finish-trial', express.urlencoded({ extended: false }), async (req, res) => {
-    // CSRF check
-    if (!verifyCsrf(req)) {
-      return renderError(res, {
-        title:   'CSRF validation failed',
-        message: 'Your session may have expired. Please try again.',
-        hint:    'Run <kbd>codette login</kbd> to start a fresh registration.',
-      });
-    }
-
-    const { state } = req.body || {};
-    if (!state) {
-      return renderError(res, {
-        title:   'Missing state',
-        message: 'No state parameter in the form submission.',
-        hint:    'Run <kbd>codette login</kbd> to start again.',
-      });
-    }
-
-    const entry = pending.get(state);
-    if (!entry || Date.now() > entry.expires) {
-      pending.delete(state);
-      return renderError(res, {
-        title:   'Session expired',
-        message: 'The registration session has expired.',
-        hint:    'Run <kbd>codette login</kbd> to start again.',
-      });
-    }
-
-    if (entry.idp !== 'trial') {
-      return renderError(res, {
-        title:   'IdP mismatch',
-        message: 'This endpoint is only for trial registrations.',
-        hint:    '',
-      });
-    }
-
-    // Rate limit check
-    const ip = req.ip;
-    if (!claimIfAllowed(ip)) {
-      return renderError(res, {
-        title:   'Rate limit exceeded',
-        message: 'Too many trial registrations from this IP address.',
-        hint:    'Wait before trying again.',
-      });
-    }
-
-    // Issue self id_token and redirect to callback
-    let idToken;
-    try {
-      idToken = await issueSelfTrialIdToken({
-        jkt:          entry.jkt,
-        username:     entry.username,
-        serverIssuer,
-      });
-    } catch (e) {
-      revokeTrialClaim(ip);
-      return renderError(res, {
-        title:   'Token issuance failed',
-        message: e.message,
-        hint:    'Try again in a moment.',
-      });
-    }
-
-    return res.redirect(
-      `/register/callback?state=${encodeURIComponent(state)}&id_token=${encodeURIComponent(idToken)}`
-    );
   });
 
   // ── GET /register/callback ───────────────────────────────────────────────────
@@ -264,14 +169,15 @@ export function mountRegisterRoutes(app, serverIssuer) {
       });
     }
 
-    // Verify id_token
+    // Verify id_token via injected verifyIdToken
     let tokenPayload;
     try {
-      tokenPayload = await verifyAnyIdToken({
-        idToken:      id_token,
-        expectedAud:  serverIssuer + '/register/callback',
-        knownIssuers: { self: serverIssuer },
+      const { sub, idp, claims } = await verifyIdToken({
+        idToken:     id_token,
+        expectedAud: serverIssuer + '/register/callback',
+        serverIssuer,
       });
+      tokenPayload = { sub, username: claims.username, iss_idp: idp };
     } catch (e) {
       statusMap.set(state, 'error');
       return renderError(res, {
@@ -363,4 +269,3 @@ export function mountRegisterRoutes(app, serverIssuer) {
     res.json({ available: !isUsernameClaimed(name) });
   });
 }
-
