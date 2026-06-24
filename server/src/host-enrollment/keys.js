@@ -2,7 +2,7 @@
 // Copyright 2026 Danylo Lykov
 //
 // Generate / load the server's id_token signing keypair.
-// Stored under $X2_DATA_DIR (default: /data/x2) as id-key.pem (PKCS8 private key).
+// Stored under $CODETTE_DATA_DIR (default: /data/codette) as id-key.pem (PKCS8 private key).
 // Auto-generated on first run.
 
 import { generateKeyPairSync, createPrivateKey, createPublicKey } from 'crypto';
@@ -11,7 +11,7 @@ import { join } from 'path';
 import { importPKCS8, importSPKI, exportJWK } from 'jose';
 
 function dataDir() {
-  return process.env.X2_DATA_DIR || '/data/x2';
+  return process.env.CODETTE_DATA_DIR || '/data/codette';
 }
 
 function keyFile() {
@@ -41,7 +41,7 @@ export async function loadOrGenerateIdTokenKey() {
     privPem = kp.privateKey;
     pubPem  = kp.publicKey;
     writeFileSync(keyFile(), privPem, { mode: 0o600 });
-    console.log('[x2/keys] generated new id_token signing key at', keyFile());
+    console.log('[host-enrollment/keys] generated new id_token signing key at', keyFile());
   }
 
   _privateKey = await importPKCS8(privPem, 'ES256');

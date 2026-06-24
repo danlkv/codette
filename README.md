@@ -71,7 +71,7 @@ Multiple clients can connect to the same host. Multiple hosts (different usernam
 | `PORT` | `3000` | Server listen port |
 | `SERVER_HOSTNAME` | _(required for `/install.sh`)_ | Hostname served in the install script |
 | `PUBLIC_URL` | `http://localhost:PORT` | Used as JWT issuer and audience root |
-| `X2_DATA_DIR` | `/data/x2` | Stores `id-key.pem`, `username-owners.json`, `trial-claims.json` |
+| `CODETTE_DATA_DIR` | `/data/codette` | Stores `id-key.pem`, `username-owners.json`, `trial-claims.json` |
 | `TRIAL_MAX_CLAIMS` | `5` | Max trial registrations per IP in the window |
 | `TRIAL_WINDOW_MS` | `1296000000` (15d) | Sliding window for trial rate limit |
 | `CODETTE_TRACE` | off | Set to `1` for protocol-level trace logging |

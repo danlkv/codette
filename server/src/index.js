@@ -12,10 +12,10 @@ import { execFileSync } from 'child_process';
 import cookieParser from 'cookie-parser';
 import { RpcClient } from './rpc.js';
 import { unpackParam } from '../../shared/crypto.js';
-import { mountRegisterRoutes } from './x2/register.js';
-import { lookupByPubkey } from './x2/owners.js';
-import { verifyHandshakeProof } from './x2/ws-auth.js';
-import { makeJtiCache } from './x2/jti-cache.js';
+import { mountRegisterRoutes } from './host-enrollment/register.js';
+import { lookupByPubkey } from './host-enrollment/owners.js';
+import { verifyHandshakeProof } from './host-enrollment/ws-auth.js';
+import { makeJtiCache } from './host-enrollment/jti-cache.js';
 import { verifyChatJwt } from './chat-auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -59,7 +59,7 @@ app.set('trust proxy', true);
 app.use(express.json());
 app.use(cookieParser());
 
-// ── X2 registration routes ────────────────────────────────────────────────────
+// ── host-enrollment registration routes ───────────────────────────────────────
 mountRegisterRoutes(app, SERVER_ISSUER);
 
 // ── REST request logging ──────────────────────────────────────────────────────
@@ -366,7 +366,7 @@ wss.on('connection', async (ws, req) => {
     const proof = url.searchParams.get('proof');
     const clientUsername = url.searchParams.get('clientUsername');
 
-    // Validate via X2 handshake proof
+    // Validate via host-enrollment handshake proof
     const validated = await verifyHandshakeProof({
       proofJwt:      proof,
       lookupByPubkey,

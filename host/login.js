@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Danylo Lykov
 //
-// `codette login` — X2 self-signed-identity registration.
+// `codette login` — host-enrollment self-signed-identity registration.
 // Signs a host_proof with host-key.pem, opens the browser to the consent page,
 // and polls /register/status until the binding is confirmed.
 
@@ -121,7 +121,7 @@ export async function runLogin({ serverUrl, keyFilePath }) {
     console.log(reason === 'invalid' ? '  Invalid username.' : `  '${username}' is already taken.`);
   }
 
-  // ── Browser password (for chat-domain HMAC auth — unrelated to X2 registration) ──
+  // ── Browser password (for chat-domain HMAC auth — unrelated to host-enrollment) ──
   const password = await prompter.ask('Password', existing.password || generatePassword());
   prompter.close();
 

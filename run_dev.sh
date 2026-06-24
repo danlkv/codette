@@ -14,7 +14,7 @@ export PORT=3000
 # Per-user isolated data dirs (like tests/start-test-env.js)
 ALICE_DATA="$ROOT/.dev-data/alice"
 BOB_DATA="$ROOT/.dev-data/bob"
-X2_DATA="$ROOT/.dev-data/x2"
+CODETTE_DATA="$ROOT/.dev-data/codette"
 
 SERVER_LOG=/tmp/e2e-server.log
 HOST1_LOG=/tmp/e2e-host1.log
@@ -46,14 +46,14 @@ for d in alice bob; do
   mkdir -p "$ROOT/.dev-data/$d/.claude"
   ln -sf ~/.claude/.credentials.json "$ROOT/.dev-data/$d/.claude/.credentials.json" 2>/dev/null || true
 done
-rm -rf "$X2_DATA"
-mkdir -p "$X2_DATA"
+rm -rf "$CODETTE_DATA"
+mkdir -p "$CODETTE_DATA"
 
 echo "==> Building client (dev mode)..."
 (cd "$ROOT/client" && npx vite build --mode development)
 
 echo "==> Starting server on :$PORT  ($SERVER_LOG)"
-(cd "$ROOT/server" && X2_DATA_DIR="$X2_DATA" node src/index.js) >"$SERVER_LOG" 2>&1 &
+(cd "$ROOT/server" && CODETTE_DATA_DIR="$CODETTE_DATA" node src/index.js) >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
 # Wait for server to be ready
@@ -65,7 +65,7 @@ done
 # ── Register alice and bob via headless helper ─────────────────────────────────
 echo "==> Registering alice and bob..."
 (cd "$ROOT" && node --input-type=module <<'JSEOF'
-import { headlessRegister, generateTestKeypair } from './tests/oauth-flow.js';
+import { headlessRegister, generateTestKeypair } from './tests/enrollment-flow.js';
 import { writeFileSync } from 'fs';
 const BASE = 'http://localhost:3000';
 

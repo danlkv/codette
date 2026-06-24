@@ -4,7 +4,7 @@
 
 set -e
 
-# Codette host installer (X2 edition)
+# Codette host installer
 # Server-served: curl -fsSL https://your-server/install.sh | sh
 #   (SERVER_URL is baked in by the server)
 # Local clone:   ./install.sh

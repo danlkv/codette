@@ -3,7 +3,7 @@
 //
 // Username ↔ pubkey-fingerprint binding store.
 //
-// Schema of $X2_DATA_DIR/username-owners.json:
+// Schema of $CODETTE_DATA_DIR/username-owners.json:
 // {
 //   byName:   { "alice": { fp, claimedAt, idp, idp_sub } },
 //   byPubkey: { "<fp>":  { username, jwk } }
@@ -16,7 +16,7 @@ import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'fs';
 import { join } from 'path';
 
 function dataDir() {
-  return process.env.X2_DATA_DIR || '/data/x2';
+  return process.env.CODETTE_DATA_DIR || '/data/codette';
 }
 
 function file() {

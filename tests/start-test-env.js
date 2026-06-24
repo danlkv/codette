@@ -6,7 +6,7 @@
  * Starts server + host on a test port for Playwright e2e tests.
  * Usage: TEST_PORT=3111 node tests/start-test-env.js
  *
- * Uses the headless X2 register helper to bind a test keypair before
+ * Uses the headless host-enrollment register helper to bind a test keypair before
  * starting the host — mirrors run_dev.sh but without HOST_KEY.
  */
 import { spawn } from 'child_process';
@@ -14,7 +14,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { mkdirSync, symlinkSync, openSync, readFileSync, rmSync, copyFileSync } from 'fs';
 import { homedir } from 'os';
-import { headlessRegister, generateTestKeypair } from './oauth-flow.js';
+import { headlessRegister, generateTestKeypair } from './enrollment-flow.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -26,12 +26,12 @@ const PASSWORD = process.env.TEST_PASSWORD || 'testpass';
 // ── Isolated data dir (like run_dev.sh) ──────────────────────────────────────
 const dataDir = join(root, '.dev-data', USERNAME);
 const claudeDir = join(dataDir, '.claude');
-const x2DataDir = join(dataDir, 'x2');
+const enrollmentDataDir = join(dataDir, 'codette');
 
 // Clean slate: remove old session data but preserve credentials symlink
 rmSync(dataDir, { recursive: true, force: true });
 mkdirSync(claudeDir, { recursive: true });
-mkdirSync(x2DataDir, { recursive: true });
+mkdirSync(enrollmentDataDir, { recursive: true });
 
 const credSrc = join(homedir(), '.claude', '.credentials.json');
 const credDst = join(claudeDir, '.credentials.json');
@@ -62,7 +62,7 @@ server = spawn('node', ['server/src/index.js'], {
   env: {
     ...process.env,
     PORT,
-    X2_DATA_DIR:      x2DataDir,
+    CODETTE_DATA_DIR: enrollmentDataDir,
     PUBLIC_URL:       `http://localhost:${PORT}`,
     SERVER_HOSTNAME:  `localhost:${PORT}`,
   },
@@ -98,7 +98,7 @@ try {
 }
 
 // ── Generate keypair and register with server ─────────────────────────────────
-// This populates x2DataDir/username-owners.json so the host can connect.
+// This populates enrollmentDataDir/username-owners.json so the host can connect.
 let keypair;
 try {
   keypair = await generateTestKeypair();
@@ -112,9 +112,9 @@ try {
   });
   // Copy host key to .dev-data/<username>/host-key.pem for e2e tests that need it
   copyFileSync(keypair.keyFilePath, join(dataDir, 'host-key.pem'));
-  console.log(`[test-env] X2 registration succeeded for ${USERNAME}`);
+  console.log(`[test-env] host-enrollment registration succeeded for ${USERNAME}`);
 } catch (e) {
-  console.error(`[test-env] X2 registration failed: ${e.message}`);
+  console.error(`[test-env] host-enrollment registration failed: ${e.message}`);
   cleanup();
   process.exit(1);
 }

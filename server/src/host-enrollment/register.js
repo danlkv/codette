@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Danylo Lykov
 //
-// X2 registration endpoints:
+// host-enrollment registration endpoints:
 //   GET  /register/start
 //   POST /register/finish-trial
 //   GET  /register/callback
@@ -66,7 +66,7 @@ setInterval(() => {
 }, 60_000).unref?.();
 
 /**
- * Mount all X2 registration routes on an Express app.
+ * Mount all host-enrollment registration routes on an Express app.
  * @param {import('express').Application} app
  * @param {string} serverIssuer — e.g. "https://your-server.example.com"
  */

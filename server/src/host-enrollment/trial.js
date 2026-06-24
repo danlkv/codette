@@ -2,13 +2,13 @@
 // Copyright 2026 Danylo Lykov
 //
 // Trial claim rate limiting. Tracks successful claims per IP in a sliding window.
-// Persists to $X2_DATA_DIR/trial-claims.json.
+// Persists to $CODETTE_DATA_DIR/trial-claims.json.
 
 import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'fs';
 import { join } from 'path';
 
 function file() {
-  const dir = process.env.X2_DATA_DIR || '/data/x2';
+  const dir = process.env.CODETTE_DATA_DIR || '/data/codette';
   return join(dir, 'trial-claims.json');
 }
 
@@ -17,7 +17,7 @@ function loadAll() {
 }
 
 function saveAll(data) {
-  mkdirSync(process.env.X2_DATA_DIR || '/data/x2', { recursive: true, mode: 0o700 });
+  mkdirSync(process.env.CODETTE_DATA_DIR || '/data/codette', { recursive: true, mode: 0o700 });
   const path = file();
   const tmp = path + '.tmp';
   writeFileSync(tmp, JSON.stringify(data), { mode: 0o600 });

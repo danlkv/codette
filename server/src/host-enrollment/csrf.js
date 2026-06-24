@@ -8,7 +8,7 @@
 
 import { randomBytes } from 'crypto';
 
-const COOKIE_NAME = 'x2_csrf';
+const COOKIE_NAME = 'codette_csrf';
 
 export function issueCsrfCookie(res, secure) {
   const tok = randomBytes(16).toString('hex');

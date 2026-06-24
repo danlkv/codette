@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Danylo Lykov
 //
-// E2E: X2 registration flow
+// E2E: host-enrollment registration flow
 //   1. Generate an ES256 keypair + sign host_proof
 //   2. page.goto /register/start → expect consent page
 //   3. Click "Try without registration" → expect done page
@@ -11,7 +11,7 @@
 import { test, expect } from '@playwright/test';
 import { randomBytes } from 'crypto';
 import { WebSocket } from 'ws';
-import { generateTestKeypair } from './oauth-flow.js';
+import { generateTestKeypair } from './enrollment-flow.js';
 import { signHandshakeProof } from '../host/auth.js';
 import { _resetKeyCache } from '../host/auth.js';
 import { SignJWT } from 'jose';
@@ -24,7 +24,7 @@ function b64url(buf) {
   return Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-test('X2 registration: browser consent click → /register/status claimed', async ({ page }) => {
+test('host-enrollment registration: browser consent click → /register/status claimed', async ({ page }) => {
   const username = 'e2e-' + randomBytes(4).toString('hex');
   const state = b64url(randomBytes(16));
 
@@ -69,14 +69,14 @@ test('X2 registration: browser consent click → /register/status claimed', asyn
   expect(status).toBe('claimed');
 });
 
-test('X2 WS handshake: registered host can connect via signed proof', async () => {
+test('host-enrollment WS handshake: registered host can connect via signed proof', async () => {
   const username = 'ws-' + randomBytes(4).toString('hex');
   const state = b64url(randomBytes(16));
 
   const { keyFilePath, jwk, jkt, privateKeyJose, dir } = await generateTestKeypair();
 
   // Sign host_proof and register via headless helper
-  const { headlessRegister } = await import('./oauth-flow.js');
+  const { headlessRegister } = await import('./enrollment-flow.js');
   await headlessRegister({ serverBase: SERVER_BASE, username, keyFilePath, jwk, jkt, privateKeyJose });
 
   // Sign WS handshake proof using the same key

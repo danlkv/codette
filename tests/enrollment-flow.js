@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Danylo Lykov
 //
-// Headless X2 registration helper. Used by start-test-env.js and Playwright
+// Headless host-enrollment registration helper. Used by start-test-env.js and Playwright
 // tests to bind a keypair to a username without needing a browser.
 //
 // Flow:
@@ -73,7 +73,7 @@ export async function generateTestKeypair() {
 }
 
 /**
- * Run a full headless X2 registration dance against the given server.
+ * Run a full headless host-enrollment registration dance against the given server.
  * Returns { username, keyFilePath, jkt, jwk }.
  */
 export async function headlessRegister({ serverBase, username, keyFilePath, jwk, jkt, privateKeyJose }) {
