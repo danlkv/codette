@@ -19,9 +19,32 @@ USER_DATA="$USER_HOME/.local/share/codette"
 CREDS_FILE="$USER_CONFIG/credentials.json"
 HOST_LOG=/tmp/dev-login-host.log
 
+# Auto-load Google OIDC client config if a Google-Console-style secret file is
+# present at $ROOT/.dev-data/oauth/client_secret_*.json. Exports the two env
+# vars the server reads (GOOGLE_OIDC_CLIENT_ID, GOOGLE_OIDC_CLIENT_SECRET).
+# The picker hides the Google button when these are unset.
+GOOGLE_SECRETS_FILE=""
+for D in "$ROOT/.dev-data/oauth" "$ROOT/.dev-data" "$ROOT/../../.dev-data/oauth" "$ROOT/../../.dev-data"; do
+  CAND=$(find "$D" -maxdepth 1 -name 'client_secret_*.json' ! -name '*.Zone.Identifier' 2>/dev/null | head -1)
+  if [ -n "$CAND" ]; then GOOGLE_SECRETS_FILE="$CAND"; break; fi
+done
+if [ -n "$GOOGLE_SECRETS_FILE" ]; then
+  GOOGLE_OIDC_CLIENT_ID=$(node -e "const f=JSON.parse(require('fs').readFileSync('$GOOGLE_SECRETS_FILE'));process.stdout.write((f.web||f.installed||{}).client_id||'')")
+  GOOGLE_OIDC_CLIENT_SECRET=$(node -e "const f=JSON.parse(require('fs').readFileSync('$GOOGLE_SECRETS_FILE'));process.stdout.write((f.web||f.installed||{}).client_secret||'')")
+  if [ -n "$GOOGLE_OIDC_CLIENT_ID" ] && [ -n "$GOOGLE_OIDC_CLIENT_SECRET" ]; then
+    export GOOGLE_OIDC_CLIENT_ID GOOGLE_OIDC_CLIENT_SECRET
+    echo "==> Google OIDC: enabled (client_id=${GOOGLE_OIDC_CLIENT_ID%%-*}…)"
+    echo "    Register this redirect_uri with Google Console: http://localhost:3000/register/callback"
+  else
+    echo "==> Google OIDC: secrets file found but client_id/secret missing — skipping"
+  fi
+else
+  echo "==> Google OIDC: disabled (no $ROOT/.dev-data/oauth/client_secret_*.json)"
+fi
+
 # Start the dev server via run_dev.sh, or reuse one that's already up.
 if curl -sf http://localhost:3000/ >/dev/null 2>&1; then
-  echo "==> Reusing existing server on :3000"
+  echo "==> Reusing existing server on :3000 (will not inherit GOOGLE_OIDC_* env from this script)"
   RUNDEV_PID=""
 else
   echo "==> Starting run_dev.sh --server-only"
