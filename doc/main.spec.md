@@ -147,8 +147,8 @@ codette login
 The CLI will:
 1. Prompt for a username (defaults to `$(whoami)`; checks availability on the server).
 2. Prompt for a browser password (used for the chat-domain HMAC auth flow — unrelated to host enrollment).
-3. Open a browser tab at the server's consent page.
-4. Wait for the user to click "Try without registration".
+3. Open a browser tab at the server's picker page.
+4. Wait for the user to pick an IdP — "Sign in with Google" or "Try without an account" — and complete that IdP's flow.
 5. Poll the server until registration is confirmed.
 6. Write `~/.config/codette/credentials.json` (mode 0600):
    ```json

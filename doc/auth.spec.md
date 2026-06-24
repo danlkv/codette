@@ -1,35 +1,56 @@
-## Host registration via self-signed identity (CLI login)
+## Host registration
 
-The host CLI owns a long-lived EC P-256 keypair (`host-key.pem`, also used for chat-domain JWT signing). In host enrollment, this keypair IS the host's identity — for both chat-domain (existing) and server-host authentication (new). There are no bearer tokens, no OIDC provider, no PKCE, no refresh tokens.
+The host CLI owns a long-lived EC P-256 keypair (`host-key.pem`, also used for chat-domain JWT signing). In host enrollment, this keypair IS the host's identity. There are no bearer tokens, no PKCE, no refresh tokens.
+
+Registration binds `(username ↔ jkt, jwk)` after an end-user clears identity verification at one IdP. Configured IdPs surface as buttons on the picker page rendered by `/register/start`. The bound `idp` value is the OIDC `iss` URL verbatim (self: `<serverIssuer>`; Google: `https://accounts.google.com`).
 
 ### Registration (browser-required, one-time per username)
 
+**Pre-IdP (common):**
+
 1. CLI computes the JWK representation of its public key and the RFC 7638 JWK thumbprint (`jkt`).
 2. CLI generates a state nonce and signs a `host_proof` JWT:
-   `{ iss: jkt, aud: <server>/register, username, iat, exp: now+5min, jti }`
+   `{ iss: jkt, aud: <serverIssuer>/register, username, iat, exp: now+5min, jti }`
 3. CLI pre-flight checks username availability at `GET /auth/username-available/:name`.
-4. CLI opens browser at `GET /register/start?state=…&username=…&jwk=…&host_proof=…&idp=trial`.
-5. Server validates the `host_proof` signature against the supplied JWK, stores
-   `pending[state] = {username, jwk, jkt, idp, expires: now+5min}`.
-6. For `idp=trial`: server sets a CSRF cookie and renders a consent page.
-7. User clicks "Try without registration". Browser POSTs `state`+`csrf` to `/register/finish-trial`.
-8. Server verifies CSRF, checks per-IP rate limit (`TRIAL_MAX_CLAIMS/TRIAL_WINDOW_MS`),
-   self-issues a trial `id_token`:
-   `{ iss: <self>, sub: jkt, aud: <server>/register/callback, username, iat, exp: now+5min, iss_idp: 'self' }`,
-   and redirects browser to `/register/callback?state=…&id_token=…`.
-9. `/register/callback`: server verifies id_token, asserts sub===jkt, username match, and calls
-   `claimBinding(username, jkt, jwk, {idp, idp_sub})` — atomically writes `username-owners.json`.
-   Renders a "Registered — close this tab" page.
-10. CLI polls `GET /register/status?state=…` every 500 ms until status is `"claimed"` or 5-min timeout.
-    On success, writes `credentials.json { server, username, password }` (password is for the
-    chat-domain HMAC browser-auth flow, unchanged from v1).
+4. CLI opens browser at `GET /register/start?state=…&username=…&jwk=…&host_proof=…`.
+5. Server validates the `host_proof` signature against the supplied JWK, validates the username, generates a per-flow `nonce`, and stores
+   `pending[state] = {username, jwk, jkt, nonce, expires: now+5min, ip: req.ip}`.
+6. Server renders the picker page: one entry per configured IdP. The page sets a CSRF cookie scoped to `/register/finish-trial`. Buttons:
+   - "Sign in with Google" — `<a>` to the pre-built Google authorize URL. Omitted when `GOOGLE_OIDC_CLIENT_ID` is unset.
+   - "Try without an account" — `<form method="POST" action="/register/finish-trial">` carrying `state` + `csrf`.
 
-**No tokens property:** the host never receives an access_token or refresh_token from the server.
-The registration flow only establishes the `(username ↔ jkt)` binding.
+**IdP — trial (self-IdP):**
 
-**IdP-extensibility:** `idp=trial` has the server act as its own IdP (self-issues the id_token).
-Other `idp=` values (google, github, …) will redirect the browser to that IdP instead; the
-`/register/callback` handler is IdP-agnostic — it verifies the id_token against the IdP's JWKS.
+7t. User clicks "Try without an account." Browser POSTs `state`+`csrf` to `/register/finish-trial`.
+8t. Server verifies CSRF, checks claim-limits (both `ip:<req.ip>` and `idp:<serverIssuer>:<jkt>` against `TRIAL_MAX_CLAIMS/TRIAL_WINDOW_MS`), and self-issues an id_token:
+    `{ iss: <serverIssuer>, sub: jkt, aud: <serverIssuer>/register/callback, iat, exp: now+5min, jti }`.
+9t. Server redirects browser to `/register/callback?state=…&id_token=…`.
+
+**IdP — Google OIDC:**
+
+7g. User clicks "Sign in with Google." Browser navigates to the pre-built authorize URL at `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=<GOOGLE_OIDC_CLIENT_ID>&scope=openid&redirect_uri=<serverIssuer>/register/callback&state=<state>&nonce=<pending.nonce>`.
+8g. User authenticates and consents at Google. Google redirects browser to `/register/callback?state=…&code=…`.
+9g. Server exchanges the code at Google's token endpoint using `GOOGLE_OIDC_CLIENT_SECRET` and `redirect_uri=<serverIssuer>/register/callback`, receives an id_token.
+
+**Post-IdP (common):**
+
+10. `/register/callback` dispatches `verifyIdToken` by `iss`:
+    - `iss === <serverIssuer>` → self branch; verifies signature against the server-owned id-token keypair.
+    - `iss === 'https://accounts.google.com'` → Google branch; verifies signature against Google's JWKS, asserts `aud === GOOGLE_OIDC_CLIENT_ID`, asserts `nonce === pending[state].nonce`.
+    For both branches `verifyIdToken` checks `requiredClaims: ['exp', 'iat', 'sub']` and returns `{sub, idp, claims}`.
+11. Server checks claim-limits keyed by `idp:<idp>:<sub>` against `TRIAL_MAX_CLAIMS/TRIAL_WINDOW_MS`. For self-IdP the `ip:<pending.ip>` counter was already recorded at step 8t; Google bypasses the IP counter.
+12. Server calls `claimBinding(username, jkt, jwk, {idp, idp_sub: sub})` — atomically writes `username-owners.json`. Renders a "Registered — close this tab" page.
+13. CLI polls `GET /register/status?state=…` every 500 ms until status is `"claimed"` or 5-min timeout. On success, writes `credentials.json { server, username, password }` (password is for the chat-domain HMAC browser-auth flow).
+
+**No tokens property:** the host never receives an access_token or refresh_token from the server. Registration only establishes the `(username ↔ jkt)` binding.
+
+**Adding an IdP** is a new `verifyIdToken` branch keyed by the IdP's `iss`, plus a button on the picker page. `/register/callback` and `claimBinding` are IdP-agnostic.
+
+`$CODETTE_DATA_DIR/username-owners.json` keeps the binding store: `byName[<username>] = {fp: <jkt>, claimedAt, idp: <iss>, idp_sub: <sub>}` and `byPubkey[<jkt>] = {username, jwk}`. Atomic read-modify-write per claim; `claimBinding` returns `'claimed' | 'name-taken' | 'pubkey-taken'`.
+
+`$CODETTE_DATA_DIR/claim-limits.json` keeps the sliding-window claim ledger: `{"ip:<addr>": [<ts>, …], "idp:<iss>:<sub>": [<ts>, …]}`. Self-IdP claims record both `ip:` and `idp:` keys; Google claims record only `idp:`. Cap `TRIAL_MAX_CLAIMS` (default 5), window `TRIAL_WINDOW_MS` (default 15 days). Bare `<ip>` keys from earlier ledger versions get rewritten to `ip:<ip>` on first read.
+
+Google OIDC is enabled by setting `GOOGLE_OIDC_CLIENT_ID` and `GOOGLE_OIDC_CLIENT_SECRET`; unset → Google branch disabled and button hidden.
 
 ### Connect (every WS connect)
 
@@ -65,12 +86,12 @@ Pairing flow: client sends `{username, password, "pair"}` to the server, which r
 
 Two server-side modules with one gate:
 
-- **`server/src/user-auth/`** — human identity surface. Issues / verifies id_tokens. Today: trial self-IdP (the consent button). Future: Google IdP and others slot in here as additional `verifyIdToken` branches. Owns CSRF, per-IP rate limit, consent page.
-- **`server/src/host-enrollment/`** — host (CLI/keypair) identity surface. Owns the `byName / byPubkey` binding store, the host_proof on `/register/start`, the WS-handshake proof verification on `/host`. Treats `sub` from user-auth's id_token as opaque.
+- **`server/src/user-auth/`** — human identity surface. Holds one IdP module per configured IdP (self, Google OIDC). `verifyIdToken` is the dispatcher: it routes by the id_token's `iss` to the matching IdP module, which verifies signature, audience, nonce, and required claims, and returns `{sub, idp, claims}`. Owns the picker page, CSRF, the claim-limits ledger.
+- **`server/src/host-enrollment/`** — host (CLI/keypair) identity surface. Owns the `byName / byPubkey` binding store, the host_proof on `/register/start`, the WS-handshake proof verification on `/host`. Reads only `{sub, idp}` from the dispatcher's return; treats both as opaque.
 
-Gate: `host-enrollment/register.js` calls `user-auth.verifyIdToken(...)` in `/register/callback` to obtain a verified `sub`, then claims `(username, jwk) → sub` atomically.
+Gate: `host-enrollment/register.js` accepts at `/register/callback` either an `id_token` (any IdP that completes in-browser, including self) or a `code` (OIDC code-flow IdPs); for `code` it invokes an injected `exchangeOidcCode(code, redirectUri) → id_token` provided by `user-auth`. The verified `(sub, idp)` flow through `claimBinding` atomically.
 
-Trust direction: the host is the authority for its keypair; the server is the authority for which `sub` was proven. Both must agree to land a binding.
+Trust direction: the host is the authority for its keypair; the IdP is the authority for the human's identity; the server orchestrates and stores the binding. All three agree before a binding lands.
 
 ## E2E-encrypted sessions (no WebAuthn)
 
