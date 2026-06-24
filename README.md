@@ -71,9 +71,11 @@ Multiple clients can connect to the same host. Multiple hosts (different usernam
 | `PORT` | `3000` | Server listen port |
 | `SERVER_HOSTNAME` | _(required for `/install.sh`)_ | Hostname served in the install script |
 | `PUBLIC_URL` | `http://localhost:PORT` | Used as JWT issuer and audience root |
-| `CODETTE_DATA_DIR` | `/data/codette` | Stores `id-key.pem`, `username-owners.json`, `trial-claims.json` |
-| `TRIAL_MAX_CLAIMS` | `5` | Max trial registrations per IP in the window |
-| `TRIAL_WINDOW_MS` | `1296000000` (15d) | Sliding window for trial rate limit |
+| `CODETTE_DATA_DIR` | `/data/codette` | Stores `id-key.pem`, `username-owners.json`, `claim-limits.json` |
+| `GOOGLE_OIDC_CLIENT_ID` | _(unset)_ | Google OAuth client ID. Unset hides the Google button on the picker. |
+| `GOOGLE_OIDC_CLIENT_SECRET` | _(unset)_ | Google OAuth client secret. Required with `GOOGLE_OIDC_CLIENT_ID`. |
+| `TRIAL_MAX_CLAIMS` | `5` | Max registrations per claim-limit key in the window |
+| `TRIAL_WINDOW_MS` | `1296000000` (15d) | Sliding window for the claim-limits ledger |
 | `CODETTE_TRACE` | off | Set to `1` for protocol-level trace logging |
 
 ### Host
@@ -92,11 +94,11 @@ Legacy env vars also supported on host: `SERVER_URL`, `CLIENT_USERNAME`, `CLIENT
 
 After installing, run `codette login` to register the host's identity with the server. The CLI:
 1. Prompts for username and a browser password.
-2. Opens the server's consent page in your browser.
-3. After you click "Try without registration", polls until registration is confirmed.
+2. Opens the server's picker page in your browser.
+3. After you pick an IdP — "Sign in with Google" or "Try without an account" — and complete it, polls until registration is confirmed.
 4. Writes `~/.config/codette/credentials.json`.
 
-No host tokens or OAuth credentials are involved. The host's `host-key.pem` keypair is its identity.
+The host receives no access or refresh tokens. The host's `host-key.pem` keypair is its identity; the IdP verification only authorizes the username binding.
 
 ## Related projects
 
