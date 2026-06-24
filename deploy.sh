@@ -24,8 +24,14 @@ if [ ! -f .env ]; then
   echo "==> running init.sh"
   ./init.sh
 fi
-echo "==> building and starting containers"
-docker compose up -d --build
+# Prefer the docker compose plugin; fall back to standalone docker-compose.
+if docker compose version >/dev/null 2>&1; then
+  COMPOSE="docker compose"
+else
+  COMPOSE="docker-compose"
+fi
+echo "==> building and starting containers (\$COMPOSE)"
+\$COMPOSE up -d --build
 ENDSSH
 
 echo "==> deployed to ${REMOTE}:${REMOTE_DIR}"
