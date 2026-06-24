@@ -4,31 +4,44 @@
 // X2 host-side key management and proof signing.
 // Uses the same host-key.pem as the chat-domain JWT signer.
 
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
+import { dirname } from 'path';
+import { generateKeyPairSync } from 'crypto';
 import { randomBytes } from 'crypto';
-import { SignJWT, importPKCS8, exportJWK, calculateJwkThumbprint } from 'jose';
+import { SignJWT, importPKCS8, importJWK, exportJWK, exportSPKI, calculateJwkThumbprint } from 'jose';
 
-let cachedKey = null;
-let cachedJwk = null;
-let cachedJkt = null;
+let cached = null;  // { key, jwk, jkt, pemPrivate }
 
 /**
- * Load and cache key material from host-key.pem.
- * keyFilePath: absolute path to host-key.pem
+ * Load or generate host key material. Single source of truth.
+ *   - reads PKCS8 PEM at keyFilePath if it exists
+ *   - generates a fresh ES256 keypair and writes it (mode 0600) if missing
+ *   - returns { key (jose CryptoKey), jwk (public-only), jkt }
  */
-export async function loadKeyMaterial(keyFilePath) {
-  if (cachedKey) return { key: cachedKey, jwk: cachedJwk, jkt: cachedJkt };
-  const pem = readFileSync(keyFilePath, 'utf8');
-  // extractable: true is required to call exportJWK on the imported key
-  cachedKey = await importPKCS8(pem, 'ES256', { extractable: true });
-  cachedJwk = await exportJWK(cachedKey);
-  // exportJWK on a private key includes d,x,y,crv,kty — strip private fields
-  // to produce the public-only JWK that will be shared with the server.
-  const { d: _d, ...publicJwk } = cachedJwk;
-  cachedJwk = publicJwk;
-  cachedJkt = await calculateJwkThumbprint(cachedJwk, 'sha256');
-  return { key: cachedKey, jwk: cachedJwk, jkt: cachedJkt };
+export async function loadOrGenerateKeyMaterial(keyFilePath) {
+  if (cached) return cached;
+
+  let pem;
+  if (existsSync(keyFilePath)) {
+    pem = readFileSync(keyFilePath, 'utf8');
+  } else {
+    const { privateKey } = generateKeyPairSync('ec', {
+      namedCurve: 'P-256',
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding:  { type: 'spki',  format: 'pem' },
+    });
+    mkdirSync(dirname(keyFilePath), { recursive: true, mode: 0o700 });
+    writeFileSync(keyFilePath, privateKey, { mode: 0o600 });
+    pem = privateKey;
+  }
+
+  const key = await importPKCS8(pem, 'ES256', { extractable: true });
+  const { d: _d, ...jwk } = await exportJWK(key);
+  const jkt = await calculateJwkThumbprint(jwk, 'sha256');
+  const pubkeyKey = await importJWK(jwk, 'ES256');
+  const pemPublic = await exportSPKI(pubkeyKey);
+  cached = { key, jwk, jkt, pemPrivate: pem, pemPublic };
+  return cached;
 }
 
 /**
@@ -36,13 +49,11 @@ export async function loadKeyMaterial(keyFilePath) {
  * aud is <serverHttp>/register
  */
 export async function signHostProof({ keyFilePath, aud, username }) {
-  const { key, jwk, jkt } = await loadKeyMaterial(keyFilePath);
+  const { key, jwk, jkt } = await loadOrGenerateKeyMaterial(keyFilePath);
   const jwt = await new SignJWT({ username })
     .setProtectedHeader({ alg: 'ES256' })
-    .setIssuer(jkt)
-    .setAudience(aud)
-    .setIssuedAt()
-    .setExpirationTime('5m')
+    .setIssuer(jkt).setAudience(aud)
+    .setIssuedAt().setExpirationTime('5m')
     .setJti(randomBytes(16).toString('hex'))
     .sign(key);
   return { jwt, jwk, jkt };
@@ -53,20 +64,14 @@ export async function signHostProof({ keyFilePath, aud, username }) {
  * aud is <serverHttp>/host
  */
 export async function signHandshakeProof({ keyFilePath, aud }) {
-  const { key, jkt } = await loadKeyMaterial(keyFilePath);
+  const { key, jkt } = await loadOrGenerateKeyMaterial(keyFilePath);
   return new SignJWT({})
     .setProtectedHeader({ alg: 'ES256' })
-    .setIssuer(jkt)
-    .setAudience(aud)
-    .setIssuedAt()
-    .setExpirationTime('1m')
+    .setIssuer(jkt).setAudience(aud)
+    .setIssuedAt().setExpirationTime('1m')
     .setJti(randomBytes(16).toString('hex'))
     .sign(key);
 }
 
 /** Reset cached key material (used in tests to simulate fresh key) */
-export function _resetKeyCache() {
-  cachedKey = null;
-  cachedJwk = null;
-  cachedJkt = null;
-}
+export function _resetKeyCache() { cached = null; }

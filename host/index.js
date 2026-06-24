@@ -4,18 +4,18 @@
 
 import { execSync, execFileSync } from 'child_process';
 import { createSpawnSession, createSdkSession } from './session.js';
-import { generateKeyPairSync, createPrivateKey, createPublicKey, randomBytes } from 'crypto';
+import { randomBytes } from 'crypto';
 import { WebSocket } from 'ws';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync, existsSync } from 'fs';
 import { homedir } from 'os';
 import { join, resolve, relative, isAbsolute } from 'path';
-import { SignJWT, importPKCS8 } from 'jose';
+import { SignJWT } from 'jose';
 import { ClaudeRenderer, toolSummary } from './renderer.js';
 import { RpcServer } from './rpc.js';
 import { makeInlineFilePrompt, HTML_RENDER_PROMPT } from '../shared/prompts.js';
 import { hmacVerify, deriveKey, deriveNonceKey, deriveAuthKey, encrypt, encryptDet, decrypt } from '../shared/crypto.js';
 import { APP_NAME } from '../shared/constants.js';
-import { signHandshakeProof } from './auth.js';
+import { signHandshakeProof, loadOrGenerateKeyMaterial } from './auth.js';
 
 // ── Config loading ──────────────────────────────────────────────────────────
 // Precedence: CLI flags > env vars > credentials.json > defaults
@@ -94,28 +94,8 @@ function saveName(id, name) {
 }
 
 // ── Host keypair ──────────────────────────────────────────────────────────────
-const KEY_FILE = join(DATA_DIR, 'host-key.pem');
-
-function loadOrGenerateKeypair() {
-  mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
-  try {
-    const privateKey = readFileSync(KEY_FILE, 'utf8');
-    const publicKey = createPublicKey(createPrivateKey(privateKey))
-      .export({ type: 'spki', format: 'pem' });
-    return { privateKey, publicKey };
-  } catch {
-    const kp = generateKeyPairSync('ec', {
-      namedCurve: 'P-256',
-      publicKeyEncoding:  { type: 'spki',  format: 'pem' },
-      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-    });
-    writeFileSync(KEY_FILE, kp.privateKey, { mode: 0o600 });
-    return kp;
-  }
-}
-
-const { privateKey: HOST_PRIV_KEY, publicKey: HOST_PUB_KEY } = loadOrGenerateKeypair();
-const HOST_PRIV_KEY_JOSE = await importPKCS8(HOST_PRIV_KEY, 'ES256');
+const HOST_KEY_PATH = join(DATA_DIR, 'host-key.pem');
+const { key: HOST_PRIV_KEY_JOSE, jkt: HOST_JKT, pemPublic: HOST_PUB_KEY } = await loadOrGenerateKeyMaterial(HOST_KEY_PATH);
 
 // ── E2E encryption keys ───────────────────────────────────────────────────────
 // Derived from CLIENT_PASSWORD + CLIENT_USERNAME (matches client derivation).
@@ -183,7 +163,7 @@ const NO_DIR_PRIVACY = process.argv.includes('--no-dir-privacy');
 if (process.argv[2] === 'login') {
   try {
     const { runLogin, PromptAborted } = await import('./login.js');
-    await runLogin({ serverUrl: SERVER_URL, keyFilePath: KEY_FILE });
+    await runLogin({ serverUrl: SERVER_URL, keyFilePath: HOST_KEY_PATH });
     process.exit(0);
   } catch (e) {
     if (e?.name === 'PromptAborted') { process.exit(130); }
@@ -690,6 +670,8 @@ rpc.register('auth_verify', async (msg) => {
     .setProtectedHeader({ alg: 'ES256' })
     .setIssuedAt()
     .setExpirationTime('7d')
+    .setAudience('codette-chat')  // MUST match server/src/chat-auth.js CHAT_AUD
+    .setIssuer(`host:${HOST_JKT}`)
     .sign(HOST_PRIV_KEY_JOSE);
   await encKeyReady;
   log('info', 'auth_verify ok, token issued', { username });
@@ -721,7 +703,7 @@ async function connect() {
   let proof;
   try {
     proof = await signHandshakeProof({
-      keyFilePath: KEY_FILE,
+      keyFilePath: HOST_KEY_PATH,
       aud:         serverHttp + '/host',
     });
   } catch (e) {

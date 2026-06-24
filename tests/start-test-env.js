@@ -12,7 +12,7 @@
 import { spawn } from 'child_process';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { mkdirSync, symlinkSync, openSync, readFileSync, rmSync } from 'fs';
+import { mkdirSync, symlinkSync, openSync, readFileSync, rmSync, copyFileSync } from 'fs';
 import { homedir } from 'os';
 import { headlessRegister, generateTestKeypair } from './oauth-flow.js';
 
@@ -110,6 +110,8 @@ try {
     jkt:         keypair.jkt,
     privateKeyJose: keypair.privateKeyJose,
   });
+  // Copy host key to .dev-data/<username>/host-key.pem for e2e tests that need it
+  copyFileSync(keypair.keyFilePath, join(dataDir, 'host-key.pem'));
   console.log(`[test-env] X2 registration succeeded for ${USERNAME}`);
 } catch (e) {
   console.error(`[test-env] X2 registration failed: ${e.message}`);

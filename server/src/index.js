@@ -3,7 +3,7 @@
 
 import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
-import { jwtVerify, importSPKI } from 'jose';
+import { importSPKI } from 'jose';
 import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import path from 'path';
@@ -16,6 +16,7 @@ import { mountRegisterRoutes } from './x2/register.js';
 import { lookupByPubkey } from './x2/owners.js';
 import { verifyHandshakeProof } from './x2/ws-auth.js';
 import { makeJtiCache } from './x2/jti-cache.js';
+import { verifyChatJwt } from './chat-auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -108,12 +109,12 @@ async function requireJwt(req, res, next) {
   const username = getCookie(req, 'username') ?? req.query.username;
   const host = hosts.get(username);
   if (!host?.pubkeyKey) return res.status(503).json({ error: 'Host not connected' });
-  try {
-    const { payload } = await jwtVerify(token, await host.pubkeyKey, { algorithms: ['ES256'] });
-    if (payload.username !== username) return res.status(401).json({ error: 'Unauthorized' });
-    req.user = payload;
-    next();
-  } catch { res.status(401).json({ error: 'Unauthorized' }); }
+  const payload = await verifyChatJwt(token, host);
+  if (!payload || payload.username !== username) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  req.user = payload;
+  next();
 }
 
 function requireHost(req, res, next) {
@@ -391,6 +392,7 @@ wss.on('connection', async (ws, req) => {
     }
 
     const host = new HostContext(validated.username, ws);
+    host.jkt = validated.jkt;
     hosts.set(validated.username, host);
     console.log(`[server] host connected: ${validated.username} (${hosts.size} total)`);
     wtrace('host', 'server', 'connect', { username: validated.username });
@@ -469,13 +471,9 @@ wss.on('connection', async (ws, req) => {
     const token = url.searchParams.get('token');
     const username = getCookie(req, 'username') ?? url.searchParams.get('username');
     const host = hosts.get(username);
-    let user;
-    try {
-      if (!host?.pubkeyKey) throw new Error('Host not connected');
-      const { payload } = await jwtVerify(token, await host.pubkeyKey, { algorithms: ['ES256'] });
-      if (payload.username !== username) throw new Error('Username/JWT mismatch');
-      user = payload;
-    } catch { ws.close(1008, 'Unauthorized'); return; }
+    if (!host?.pubkeyKey) { ws.close(1008, 'Unauthorized'); return; }
+    const user = await verifyChatJwt(token, host);
+    if (!user || user.username !== username) { ws.close(1008, 'Unauthorized'); return; }
 
     const { username: verifiedUsername } = user;
     if (!clients.has(verifiedUsername)) clients.set(verifiedUsername, new Set());
