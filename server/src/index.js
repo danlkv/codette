@@ -93,13 +93,6 @@ const wtrace = (src, dst, type, meta = {}) => {
   if (TRACE) process.stdout.write('TRACE ' + JSON.stringify({ ts: Date.now(), src, dst, type, ...meta }) + '\n');
 };
 
-// ── Cookie helper ─────────────────────────────────────────────────────────────
-function getCookie(req, name) {
-  const c = req.headers.cookie || '';
-  const m = c.split(';').map(s => s.trim()).find(s => s.startsWith(name + '='));
-  return m ? decodeURIComponent(m.slice(name.length + 1)) : null;
-}
-
 // ── Auth middleware ───────────────────────────────────────────────────────────
 // The JWT is the trust anchor: host-issued, signed by that host's private key.
 // We peek at the unverified payload only to look up which host's pubkey to
@@ -198,8 +191,6 @@ app.post('/api/auth/verify', authRateLimit, (req, res) => {
       wtrace('host', 'server', 'auth_verify');
       if (res.headersSent) return;
       if (err) return res.status(401).json({ error: err.message });
-      const secure = req.secure ? '; Secure' : '';
-      res.setHeader('Set-Cookie', `username=${encodeURIComponent(username)}; Path=/; SameSite=Strict${secure}`);
       res.json(result);
     },
     10000);
