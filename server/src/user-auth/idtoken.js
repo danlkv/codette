@@ -9,11 +9,15 @@ import { loadOrGenerateIdTokenKey } from './keys.js';
 
 /**
  * Issue a self-signed trial id_token for the registration flow.
- * sub = jkt (the host's public-key fingerprint).
+ *
+ * The IdP's only assertion is "this jkt finished the consent flow."
+ * sub = jkt because the self-IdP's notion of identity IS the keypair —
+ * there's no separate human identity behind a trial claim.
+ * /register/callback treats sub opaquely; it does not assume sub == jkt.
  */
-export async function issueSelfTrialIdToken({ jkt, username, serverIssuer }) {
+export async function issueSelfTrialIdToken({ jkt, serverIssuer }) {
   const { privateKey } = await loadOrGenerateIdTokenKey();
-  return new SignJWT({ username, iss_idp: 'self' })
+  return new SignJWT({})
     .setProtectedHeader({ alg: 'ES256' })
     .setIssuer(serverIssuer)
     .setSubject(jkt)
@@ -47,13 +51,9 @@ export async function verifyIdToken({ idToken, expectedAud, serverIssuer }) {
       audience:       expectedAud,
       algorithms:     ['ES256'],
       issuer:         serverIssuer,
-      requiredClaims: ['exp', 'iat', 'sub', 'jti'],
+      requiredClaims: ['exp', 'iat', 'sub'],
     });
-    return {
-      sub:    payload.sub,
-      idp:    payload.iss_idp || 'self',
-      claims: payload,
-    };
+    return { sub: payload.sub, idp: 'self', claims: payload };
   }
 
   throw new Error(`id_token: unsupported issuer "${iss}"`);

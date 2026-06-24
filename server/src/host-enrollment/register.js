@@ -169,15 +169,17 @@ export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken }) 
       });
     }
 
-    // Verify id_token via injected verifyIdToken
-    let tokenPayload;
+    // Verify id_token via injected verifyIdToken. The dispatcher promises
+    // { sub, idp, claims }; we use sub + idp only. sub is opaque IdP identity;
+    // username/jkt come from pending[state] (we trust what the host submitted
+    // at /register/start, which was validated then).
+    let sub, idp;
     try {
-      const { sub, idp, claims } = await verifyIdToken({
+      ({ sub, idp } = await verifyIdToken({
         idToken:     id_token,
         expectedAud: serverIssuer + '/register/callback',
         serverIssuer,
-      });
-      tokenPayload = { sub, username: claims.username, iss_idp: idp };
+      }));
     } catch (e) {
       statusMap.set(state, 'error');
       return renderError(res, {
@@ -187,29 +189,8 @@ export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken }) 
       });
     }
 
-    // Assert sub matches jkt and username matches
-    if (tokenPayload.sub !== entry.jkt) {
-      statusMap.set(state, 'error');
-      return renderError(res, {
-        title:   'Identity mismatch',
-        message: 'id_token subject does not match host key fingerprint.',
-        hint:    'Run <kbd>codette login</kbd> to start again.',
-      });
-    }
-    if (tokenPayload.username !== entry.username) {
-      statusMap.set(state, 'error');
-      return renderError(res, {
-        title:   'Username mismatch',
-        message: 'id_token username does not match pending registration.',
-        hint:    'Run <kbd>codette login</kbd> to start again.',
-      });
-    }
-
     // Atomic binding claim
-    const result = claimBinding(entry.username, entry.jkt, entry.jwk, {
-      idp:     tokenPayload.iss_idp,
-      idp_sub: tokenPayload.sub,
-    });
+    const result = claimBinding(entry.username, entry.jkt, entry.jwk, { idp, idp_sub: sub });
 
     if (result === 'name-taken') {
       if (entry.idp === 'trial') revokeTrialClaim(entry.ip);

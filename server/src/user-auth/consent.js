@@ -83,11 +83,7 @@ export function mountConsentRoute(app, { serverIssuer, pendingStore, renderError
 
     let idToken;
     try {
-      idToken = await issueSelfTrialIdToken({
-        jkt:          entry.jkt,
-        username:     entry.username,
-        serverIssuer,
-      });
+      idToken = await issueSelfTrialIdToken({ jkt: entry.jkt, serverIssuer });
     } catch (e) {
       revokeTrialClaim(ip);
       return renderError(res, {
