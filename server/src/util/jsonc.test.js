@@ -36,3 +36,26 @@ test('respects backslash escapes in strings', () => {
   const s = `{ "q": "say \\"hi\\" //not comment", "x": 1 }`;
   assert.deepEqual(JSON.parse(stripJsonComments(s)), { q: 'say "hi" //not comment', x: 1 });
 });
+
+test('elides trailing comma before closing array', () => {
+  const s = `{ "a": [1, 2, 3,] }`;
+  assert.deepEqual(JSON.parse(stripJsonComments(s)), { a: [1, 2, 3] });
+});
+
+test('elides trailing comma before closing object', () => {
+  const s = `{ "a": 1, "b": 2, }`;
+  assert.deepEqual(JSON.parse(stripJsonComments(s)), { a: 1, b: 2 });
+});
+
+test('elides trailing comma left after stripping commented-out array items', () => {
+  const s = `{ "providers": [
+    {"a": 1},   // first
+    // {"b": 2},   <-- the only entry was this and it's commented out
+  ] }`;
+  assert.deepEqual(JSON.parse(stripJsonComments(s)), { providers: [{ a: 1 }] });
+});
+
+test('preserves "," inside string values', () => {
+  const s = `{ "csv": "a,b,c", "trailing": "x,]" }`;
+  assert.deepEqual(JSON.parse(stripJsonComments(s)), { csv: 'a,b,c', trailing: 'x,]' });
+});
