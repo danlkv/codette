@@ -22,12 +22,12 @@
   "providers": [
 
     // Google — public sign-in.
-    // Enable: uncomment + set GOOGLE_OIDC_CLIENT_ID, GOOGLE_OIDC_CLIENT_SECRET.
-    // {
-    //   "issuer":        "https://accounts.google.com",
-    //   "client_id":     "${GOOGLE_OIDC_CLIENT_ID}",
-    //   "client_secret": "${GOOGLE_OIDC_CLIENT_SECRET}"
-    // },
+    // Disable: comment this entry out. Required env: GOOGLE_OIDC_CLIENT_ID, GOOGLE_OIDC_CLIENT_SECRET.
+    {
+      "issuer":        "https://accounts.google.com",
+      "client_id":     "${GOOGLE_OIDC_CLIENT_ID}",
+      "client_secret": "${GOOGLE_OIDC_CLIENT_SECRET}"
+    },
 
     // GitHub.
     // Enable: uncomment + set GITHUB_OIDC_CLIENT_ID, GITHUB_OIDC_CLIENT_SECRET.
