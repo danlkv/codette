@@ -48,12 +48,16 @@ export async function loadOrGenerateKeyMaterial(keyFilePath) {
  * Sign a host_proof JWT for the /register/start flow.
  * aud is <serverHttp>/register
  */
-export async function signHostProof({ keyFilePath, aud, username }) {
+export async function signHostProof({ keyFilePath, aud, username, iatSec }) {
   const { key, jwk, jkt } = await loadOrGenerateKeyMaterial(keyFilePath);
+  // iat anchors both claims; explicit so exp is iat+300 (not Date.now()+300),
+  // which matters when iatSec is sourced from the server's clock to defeat
+  // local clock skew on the signing machine.
+  const iat = iatSec || Math.floor(Date.now() / 1000);
   const jwt = await new SignJWT({ username })
     .setProtectedHeader({ alg: 'ES256' })
     .setIssuer(jkt).setAudience(aud)
-    .setIssuedAt().setExpirationTime('5m')
+    .setIssuedAt(iat).setExpirationTime(iat + 300)
     .setJti(randomBytes(16).toString('hex'))
     .sign(key);
   return { jwt, jwk, jkt };

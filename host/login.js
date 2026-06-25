@@ -84,14 +84,18 @@ async function checkAvailability(serverHttp, name) {
   } catch (e) {
     throw new Error(`Could not reach the server (${serverHttp}): ${e.message}`);
   }
+  const dateHdr = resp.headers.get('date');
+  const serverTimeSec = dateHdr ? Math.floor(new Date(dateHdr).getTime() / 1000) : null;
   const body = await resp.text();
+  let parsed;
   try {
-    return JSON.parse(body);
+    parsed = JSON.parse(body);
   } catch {
     const preview = body.slice(0, 60).replace(/\s+/g, ' ');
     console.log(`  (skipping availability check — HTTP ${resp.status}: ${preview}…)`);
-    return { available: true, _skipped: true };
+    parsed = { available: true, _skipped: true };
   }
+  return { ...parsed, serverTimeSec };
 }
 
 // ── Main registration flow ────────────────────────────────────────────────────
@@ -109,14 +113,15 @@ export async function runLogin({ serverUrl, keyFilePath }) {
   const prompter = makePrompt();
 
   // ── Choose username ──────────────────────────────────────────────────────────
-  let username;
+  let username, serverTimeSec;
   while (true) {
     username = await prompter.ask('Username', existing.username || defaultUsername());
     if (!/^[a-z][a-z0-9_-]{1,31}$/.test(username)) {
       console.log('  Invalid: lowercase, start with a letter, 2–32 chars from [a-z0-9_-]');
       continue;
     }
-    const { available, reason } = await checkAvailability(serverHttp, username);
+    const { available, reason, serverTimeSec: t } = await checkAvailability(serverHttp, username);
+    serverTimeSec = t;
     if (available) break;
     console.log(reason === 'invalid' ? '  Invalid username.' : `  '${username}' is already taken.`);
   }
@@ -126,11 +131,25 @@ export async function runLogin({ serverUrl, keyFilePath }) {
   prompter.close();
 
   // ── Sign host_proof and assemble URL ─────────────────────────────────────────
+  // Get a fresh server clock reading (HTTP Date header) and use it as the
+  // proof's iat, so a skewed local clock doesn't break /register/start.
+  let iatSec = null;
+  try {
+    const r = await fetch(`${serverHttp}/auth/username-available/${encodeURIComponent(username)}`);
+    const d = r.headers.get('date');
+    if (d) iatSec = Math.floor(new Date(d).getTime() / 1000);
+  } catch {}
+  const localSec = Math.floor(Date.now() / 1000);
+  if (iatSec && Math.abs(iatSec - localSec) > 60) {
+    console.log(`  (clock skew detected: local is ${Math.round((localSec - iatSec) / 60)} min off server; signing with server time)`);
+  }
+
   const state = base64UrlEncode(randomBytes(16));
   const { jwt: hostProof, jwk } = await signHostProof({
     keyFilePath,
     aud:      serverHttp + '/register',
     username,
+    iatSec,
   });
   const jwkB64 = base64UrlEncode(Buffer.from(JSON.stringify(jwk)));
 
