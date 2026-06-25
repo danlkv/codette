@@ -4,7 +4,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="refresh" content="5;url=/">
+<meta http-equiv="refresh" content="6;url=/">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>codette — registered</title>
 <style>
@@ -71,7 +71,16 @@
   <div class="card">
     <div class="brand">codette</div>
     <p class="ok">Registered as <span class="uname">__USERNAME__</span>.</p>
-    <p class="hint">Redirecting to chat in 5 seconds… <a href="/">Go now</a>.</p>
+    <p class="hint">Redirecting to chat in <span id="cd">5</span> seconds… <a href="/">Go now</a>.</p>
   </div>
+  <script>
+    let n = 5;
+    const el = document.getElementById('cd');
+    const tick = setInterval(() => {
+      n--;
+      if (n <= 0) { clearInterval(tick); window.location = '/'; return; }
+      el.textContent = n;
+    }, 1000);
+  </script>
 </body>
 </html>
