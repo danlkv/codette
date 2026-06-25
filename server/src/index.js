@@ -399,6 +399,7 @@ wss.on('connection', async (ws, req) => {
     });
 
     if (!validated) {
+      console.log('[server] host WS rejected: handshake proof failed verification');
       ws.close(1008, 'Unauthorized');
       return;
     }
