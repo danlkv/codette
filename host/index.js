@@ -4,17 +4,19 @@
 
 import { execSync, execFileSync } from 'child_process';
 import { createSpawnSession, createSdkSession } from './session.js';
-import { generateKeyPairSync, createPrivateKey, createPublicKey, randomBytes } from 'crypto';
+import { randomBytes } from 'crypto';
 import { WebSocket } from 'ws';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync, existsSync } from 'fs';
 import { homedir } from 'os';
 import { join, resolve, relative, isAbsolute } from 'path';
-import { SignJWT, importPKCS8 } from 'jose';
+import { SignJWT } from 'jose';
 import { ClaudeRenderer, toolSummary } from './renderer.js';
 import { RpcServer } from './rpc.js';
 import { makeInlineFilePrompt, HTML_RENDER_PROMPT } from '../shared/prompts.js';
 import { hmacVerify, deriveKey, deriveNonceKey, deriveAuthKey, encrypt, encryptDet, decrypt } from '../shared/crypto.js';
 import { APP_NAME } from '../shared/constants.js';
+import { signHandshakeProof, loadOrGenerateKeyMaterial } from './auth.js';
+
 // ── Config loading ──────────────────────────────────────────────────────────
 // Precedence: CLI flags > env vars > credentials.json > defaults
 
@@ -58,10 +60,6 @@ const CLIENT_USERNAME = _cli.username
 const CLIENT_PASSWORD = _cli.password
   || process.env.CODETTE_PASSWORD || process.env.CLIENT_PASSWORD
   || _creds.password || 'changeme';
-// Token presented on /host WS. Normally written by install.sh into
-// credentials.json. Required — fail-fast happens after early-exit subcommands.
-const HOST_TOKEN = process.env.CODETTE_HOST_KEY || process.env.HOST_KEY
-  || _creds.hostKey || null;
 const CLAUDE_DIR       = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
 const E2E_ENABLED      = process.env.E2E !== '0';
 // Client-originated types that must arrive encrypted under e2e. Server-initiated
@@ -96,28 +94,8 @@ function saveName(id, name) {
 }
 
 // ── Host keypair ──────────────────────────────────────────────────────────────
-const KEY_FILE = join(DATA_DIR, 'host-key.pem');
-
-function loadOrGenerateKeypair() {
-  mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
-  try {
-    const privateKey = readFileSync(KEY_FILE, 'utf8');
-    const publicKey = createPublicKey(createPrivateKey(privateKey))
-      .export({ type: 'spki', format: 'pem' });
-    return { privateKey, publicKey };
-  } catch {
-    const kp = generateKeyPairSync('ec', {
-      namedCurve: 'P-256',
-      publicKeyEncoding:  { type: 'spki',  format: 'pem' },
-      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-    });
-    writeFileSync(KEY_FILE, kp.privateKey, { mode: 0o600 });
-    return kp;
-  }
-}
-
-const { privateKey: HOST_PRIV_KEY, publicKey: HOST_PUB_KEY } = loadOrGenerateKeypair();
-const HOST_PRIV_KEY_JOSE = await importPKCS8(HOST_PRIV_KEY, 'ES256');
+const HOST_KEY_PATH = join(DATA_DIR, 'host-key.pem');
+const { key: HOST_PRIV_KEY_JOSE, jkt: HOST_JKT, pemPublic: HOST_PUB_KEY } = await loadOrGenerateKeyMaterial(HOST_KEY_PATH);
 
 // ── E2E encryption keys ───────────────────────────────────────────────────────
 // Derived from CLIENT_PASSWORD + CLIENT_USERNAME (matches client derivation).
@@ -181,9 +159,23 @@ if (process.argv[2] === 'update') {
 // --no-dir-privacy: disable cwd-restriction check on get_fs / get_file
 const NO_DIR_PRIVACY = process.argv.includes('--no-dir-privacy');
 
+// ── login subcommand ──────────────────────────────────────────────────────────
+if (process.argv[2] === 'login') {
+  try {
+    const { runLogin, PromptAborted } = await import('./login.js');
+    await runLogin({ serverUrl: SERVER_URL, keyFilePath: HOST_KEY_PATH });
+    process.exit(0);
+  } catch (e) {
+    if (e?.name === 'PromptAborted') { process.exit(130); }
+    process.stderr.write(`Login failed: ${e.message}\n`);
+    process.exit(1);
+  }
+}
+
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
   process.stdout.write(`Usage: codette [options]
-       codette update          Pull latest source + reinstall dependencies
+       codette login            Register this host with the server
+       codette update           Pull latest source + reinstall dependencies
 
 Options:
   -s, --server <url>    Server WebSocket URL
@@ -198,20 +190,18 @@ Options:
 Config precedence: CLI flags > env vars > ~/.config/codette/credentials.json > defaults
 
 Environment variables:
-  CODETTE_SERVER_URL    WebSocket server URL          (default: ws://localhost:3000)
-  CODETTE_USERNAME      Username shown in chat        (default: whoami)
-  CODETTE_PASSWORD      Password for web login        (default: changeme)
-  CODETTE_HOST_KEY      Token issued by the server    (required; install.sh writes it)
+  CODETTE_SERVER_URL    WebSocket server URL (default: ws://localhost:3000)
+  CODETTE_USERNAME      Username shown in chat (default: whoami)
+  CODETTE_PASSWORD      Password for web login (default: changeme)
 
-Legacy env vars also supported: SERVER_URL, CLIENT_USERNAME, CLIENT_PASSWORD, HOST_KEY
+Legacy env vars also supported: SERVER_URL, CLIENT_USERNAME, CLIENT_PASSWORD
 `);
   process.exit(0);
 }
 
-if (!HOST_TOKEN) {
-  process.stderr.write('codette: no host token configured.\n');
-  process.stderr.write('  Run the installer:  curl -fsSL https://<your-server>/install.sh | sh\n');
-  process.stderr.write('  Or set CODETTE_HOST_KEY in the environment.\n');
+if (!_creds.username && !_cli.username && !process.env.CODETTE_USERNAME && !process.env.CLIENT_USERNAME) {
+  process.stderr.write('codette: no username configured.\n');
+  process.stderr.write('  Run:  codette login\n');
   process.exit(1);
 }
 
@@ -680,6 +670,8 @@ rpc.register('auth_verify', async (msg) => {
     .setProtectedHeader({ alg: 'ES256' })
     .setIssuedAt()
     .setExpirationTime('7d')
+    .setAudience('codette-chat')  // MUST match server/src/chat-auth.js CHAT_AUD
+    .setIssuer(`host:${HOST_JKT}`)
     .sign(HOST_PRIV_KEY_JOSE);
   await encKeyReady;
   log('info', 'auth_verify ok, token issued', { username });
@@ -706,8 +698,29 @@ async function checkUpdate() {
   } catch {}
 }
 
-function connect() {
-  ws = new WebSocket(`${SERVER_URL}/host?token=${encodeURIComponent(HOST_TOKEN)}&clientUsername=${encodeURIComponent(CLIENT_USERNAME)}`);
+async function connect() {
+  const serverHttp = SERVER_URL.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
+  // Read server's clock from its HTTP Date header so a skewed local clock
+  // doesn't make the handshake proof's iat/exp wrong from the server's view.
+  let iatSec = null;
+  try {
+    const r = await fetch(serverHttp + '/', { method: 'HEAD' });
+    const d = r.headers.get('date');
+    if (d) iatSec = Math.floor(new Date(d).getTime() / 1000);
+  } catch {}
+  let proof;
+  try {
+    proof = await signHandshakeProof({
+      keyFilePath: HOST_KEY_PATH,
+      aud:         serverHttp + '/host',
+      iatSec,
+    });
+  } catch (e) {
+    log('error', 'failed to sign handshake proof', { err: e.message });
+    setTimeout(connect, 3000);
+    return;
+  }
+  ws = new WebSocket(`${SERVER_URL}/host?proof=${encodeURIComponent(proof)}&clientUsername=${encodeURIComponent(CLIENT_USERNAME)}`);
 
   ws.on('open', () => {
     hr();
@@ -884,13 +897,13 @@ function connect() {
 
   ws.on('close', () => {
     log('warn', 'disconnected from server, reconnecting…');
-    setTimeout(connect, 3000);
+    setTimeout(() => connect().catch(e => log('error', 'reconnect failed', { err: e.message })), 3000);
   });
 
   ws.on('error', (e) => log('error', `ws error: ${e.message}`));
 }
 
-connect();
+connect().catch(e => { log('error', 'connect failed', { err: e.message }); process.exit(1); });
 
 // ── Graceful shutdown ─────────────────────────────────────────────────────────
 function shutdown() {

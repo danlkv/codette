@@ -42,7 +42,19 @@ claude --dangerously-skip-permissions \
 
 ---
 
-## Layer 2 — Host ↔ Server (WebSocket `/host?key=HOST_KEY`)
+## Layer 2 — Host ↔ Server (WebSocket `/host?proof=JWT&clientUsername=NAME`)
+
+### Registration REST API
+
+| method | path | query / body | response | notes |
+|--------|------|------|----------|-------|
+| `GET` | `/register/start` | `state`, `username`, `jwk` (b64url JSON), `host_proof` (JWT) | HTML (picker page) | validates host_proof, stores pending state, sets CSRF cookie. Picker shows one button per configured IdP (Google button omitted when `GOOGLE_OIDC_CLIENT_ID` unset). |
+| `POST` | `/register/finish-trial` | form: `csrf`, `state` | 302 → `/register/callback?state=…&id_token=…` | trial-IdP path. CSRF check, claim-limits check, self-issues id_token. |
+| `GET` | `/register/callback` | `state` + (`id_token` OR `code`) | HTML (done page) | `id_token` arrives from self-IdP redirect; `code` arrives from Google's redirect — server exchanges code at Google's token endpoint to obtain id_token. Then verifies via `verifyIdToken` dispatcher and claims binding. |
+| `GET` | `/register/status` | `state` | `{status: 'pending'\|'claimed'\|'expired'\|'error'}` | CLI polls this; returns immediately |
+| `GET` | `/auth/username-available/:name` | — | `{available: bool, reason?: 'invalid'\|'taken'}` | pre-flight check; advisory only |
+
+
 
 One persistent connection. Host reconnects on drop.
 

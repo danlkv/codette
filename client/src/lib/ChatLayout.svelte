@@ -311,8 +311,7 @@
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const username = accounts[activeIdx]?.username;
-    const sock = new WebSocket(`${proto}//${location.host}/ws?token=${encodeURIComponent(token)}&username=${encodeURIComponent(username)}`);
+    const sock = new WebSocket(`${proto}//${location.host}/ws?token=${encodeURIComponent(token)}`);
     ws = sock;
     sock.onopen  = () => {
       if (!destroyed && ws === sock) {

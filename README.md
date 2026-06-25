@@ -64,19 +64,41 @@ Multiple clients can connect to the same host. Multiple hosts (different usernam
 
 ## Environment variables
 
+### Server
+
 | Variable | Default | Description |
 |---|---|---|
-| `SERVER_URL` | `ws://localhost:3000` | Server WebSocket URL (host → server) |
-| `CLIENT_USERNAME` | `whoami` | Username for web login |
-| `CLIENT_PASSWORD` | `changeme` | Password for web login |
-| `HOST_KEY` (server) | _(none)_ | Optional master-shortcut secret. If set, any host presenting it authenticates without going through `/install.sh`. Unset = only per-IP tokens accepted. |
-| `CODETTE_HOST_KEY` (host) | _(none)_ | Token the host presents to the server. Normally written into `credentials.json` by `install.sh`. Required on the host side. |
 | `PORT` | `3000` | Server listen port |
-| `CODETTE_DATA_HOME` | platform default | Override data directory (host keys, session names) |
+| `SERVER_HOSTNAME` | _(required for `/install.sh`)_ | Hostname served in the install script |
+| `PUBLIC_URL` | `http://localhost:PORT` | Used as JWT issuer and audience root |
+| `CODETTE_DATA_DIR` | `/data/codette` | Stores `id-key.pem`, `username-owners.json`, `claim-limits.json` |
+| `TRIAL_MAX_CLAIMS` | `5` | Max registrations per claim-limit key in the window |
+| `TRIAL_WINDOW_MS` | `1296000000` (15d) | Sliding window for the claim-limits ledger |
 | `CODETTE_TRACE` | off | Set to `1` for protocol-level trace logging |
+
+External OIDC providers (Google, GitHub, …) are configured by uncommenting their entry in [`oidc-providers.jsonc`](oidc-providers.jsonc) and setting the env vars that entry references. The shipped template uses `<NAME>_OIDC_CLIENT_ID` / `<NAME>_OIDC_CLIENT_SECRET` per provider (e.g. `GOOGLE_OIDC_CLIENT_ID`, `GITHUB_OIDC_CLIENT_ID`). Any `${VAR}` referenced by an uncommented entry must be set — the server refuses to start otherwise, listing every missing variable.
+
+### Host
+
+| Variable | Default | Description |
+|---|---|---|
+| `CODETTE_SERVER_URL` | `ws://localhost:3000` | Server WebSocket URL |
+| `CODETTE_USERNAME` | `$(whoami)` | Username for web login |
+| `CODETTE_PASSWORD` | `changeme` | Password for web login (chat-domain HMAC) |
+| `CODETTE_DATA_HOME` | platform default | Host data directory (`host-key.pem`, session names) |
 | `E2E` | on | Set to `0` to disable e2e encryption (debug only) |
 
-Change every default before exposing the server to the public internet.
+Legacy env vars also supported on host: `SERVER_URL`, `CLIENT_USERNAME`, `CLIENT_PASSWORD`.
+
+## Registration
+
+After installing, run `codette login` to register the host's identity with the server. The CLI:
+1. Prompts for username and a browser password.
+2. Opens the server's picker page in your browser.
+3. After you pick an IdP — "Sign in with Google" or "Try without an account" — and complete it, polls until registration is confirmed.
+4. Writes `~/.config/codette/credentials.json`.
+
+The host receives no access or refresh tokens. The host's `host-key.pem` keypair is its identity; the IdP verification only authorizes the username binding.
 
 ## Related projects
 

@@ -1,0 +1,147 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 Danylo Lykov -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>codette — register</title>
+<style>
+  :root {
+    --bg-primary:   #0d0d0d;
+    --bg-secondary: #111111;
+    --bg-elevated:  #1c1c1c;
+    --border:       #2a2a2a;
+    --text:         #e0e0e0;
+    --text-muted:   #888;
+    --accent:       #cc5500;
+    --accent-light: #e06020;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg-primary:   #f5f5f5;
+      --bg-secondary: #ffffff;
+      --bg-elevated:  #e8e8e8;
+      --border:       #d0d0d0;
+      --text:         #1a1a1a;
+      --text-muted:   #666;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+    font-size: 14px;
+    background: var(--bg-primary);
+    color: var(--text);
+    min-height: 100svh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .card {
+    width: 520px;
+    max-width: 100%;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .brand {
+    color: var(--accent);
+    font-size: 1rem;
+    font-weight: 600;
+    text-align: center;
+    letter-spacing: .05em;
+  }
+  .lede {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: .82rem;
+    line-height: 1.6;
+  }
+  .uname {
+    color: var(--accent-light);
+    background: var(--bg-elevated);
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  form { display: flex; flex-direction: column; gap: 10px; margin: 0; }
+
+  /* Picker buttons — one base style; per-brand colours below. */
+  .gsi {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    height: 40px;
+    padding: 0 12px;
+    border-radius: 4px;
+    text-decoration: none;
+    font-family: 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+    font-weight: 500;
+    font-size: 14px;
+    letter-spacing: .25px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  .gsi svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+  /* Google — official brand colours per Identity guidelines. */
+  .gsi-google { background: #131314; color: #e3e3e3; border-color: #8e918f; }
+  .gsi-google:hover { background: #1f1f20; border-color: #c4c7c5; }
+  @media (prefers-color-scheme: light) {
+    .gsi-google { background: #ffffff; color: #1f1f1f; border-color: #747775; }
+    .gsi-google:hover { background: #f8faff; border-color: #4285f4; }
+  }
+
+  /* GitHub. */
+  .gsi-github { background: #24292f; color: #ffffff; border-color: #24292f; }
+  .gsi-github:hover { background: #32383f; }
+  @media (prefers-color-scheme: light) {
+    .gsi-github { background: #ffffff; color: #24292f; border-color: #d0d7de; }
+    .gsi-github:hover { background: #f6f8fa; border-color: #24292f; }
+  }
+
+  /* Microsoft. */
+  .gsi-microsoft { background: #2f2f2f; color: #ffffff; border-color: #8c8c8c; }
+  .gsi-microsoft:hover { background: #3a3a3a; }
+  @media (prefers-color-scheme: light) {
+    .gsi-microsoft { background: #ffffff; color: #5e5e5e; border-color: #8c8c8c; }
+    .gsi-microsoft:hover { background: #f5f5f5; }
+  }
+
+  /* Apple. */
+  .gsi-apple { background: #000000; color: #ffffff; border-color: #000000; }
+  .gsi-apple:hover { background: #1a1a1a; }
+
+  /* GitLab. */
+  .gsi-gitlab { background: #fc6d26; color: #ffffff; border-color: #fc6d26; }
+  .gsi-gitlab:hover { background: #e24329; }
+  @media (prefers-color-scheme: light) {
+    .gsi-gitlab { background: #ffffff; color: #380d75; border-color: #380d75; }
+    .gsi-gitlab:hover { background: #f5f0fa; }
+  }
+
+  /* Generic — neutral codette-themed for unknown issuers. */
+  .gsi-generic { background: var(--bg-elevated); color: var(--text); border-color: var(--border); }
+  .gsi-generic:hover { background: var(--bg-primary); border-color: var(--accent); }
+
+  /* Trial — codette-accent for the self-IdP "no account" path. */
+  .gsi-trial { background: transparent; color: var(--accent); border-color: var(--accent); }
+  .gsi-trial:hover { color: var(--accent-light); border-color: var(--accent-light); }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">codette</div>
+    <p class="lede">Register host as <span class="uname">__USERNAME__</span></p>
+    __BUTTONS__
+  </div>
+</body>
+</html>

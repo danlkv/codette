@@ -19,6 +19,7 @@ COPY server/ ./
 COPY shared/ /app/shared/
 COPY host/ /app/host/
 COPY install.sh /app/install.sh
+COPY oidc-providers.jsonc /app/oidc-providers.jsonc
 COPY --from=client-builder /app/client/dist /app/client/dist
 RUN mkdir -p /data
 EXPOSE 3000

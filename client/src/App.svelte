@@ -116,7 +116,6 @@
       activeIdx = accounts.length - 1;
     }
     addingAccount = false;
-    if (resolvedUsername) document.cookie = `username=${encodeURIComponent(resolvedUsername)}; path=/; SameSite=Strict`;
     persist();
   }
 
@@ -130,8 +129,6 @@
 
   function handleSwitch(idx) {
     resetStores();
-    const u = accounts[idx]?.username;
-    if (u) document.cookie = `username=${encodeURIComponent(u)}; path=/; SameSite=Strict`;
     activeIdx = idx;
     persist();
   }

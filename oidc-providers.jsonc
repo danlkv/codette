@@ -1,0 +1,90 @@
+{
+  // Identity providers exposed on the registration picker.
+  //
+  // Each entry is an OIDC provider (kind: "oidc", the default) or the
+  // server's built-in trial (kind: "trial"). Order in the array is the order
+  // shown to the user.
+  //
+  // To enable a provider:
+  //   1. Uncomment its entry.
+  //   2. For OIDC: register the redirect URI <PUBLIC_URL>/register/callback
+  //      with the provider's OAuth console.
+  //   3. Set the env vars the entry references.
+  //   4. Restart the server.
+  //
+  // Rules:
+  //   - JSONC: line and block comments are stripped before parsing.
+  //   - ${VAR} interpolates from process.env. Empty string counts as set;
+  //     undefined fails the server boot, listing every missing variable.
+  //   - The server fetches each OIDC issuer's .well-known/openid-configuration
+  //     at boot to learn endpoints + JWKS. Discovery failures fail-boot.
+  //   - client_secret is OPTIONAL. With it present, the entry is a
+  //     confidential client (server uses the secret in the token request).
+  //     Without it, the entry runs as a PKCE-only public client (server uses
+  //     a per-flow code_verifier instead). Register the same Web client in
+  //     the IdP console either way.
+  //   - Known issuers (google, github, microsoft, apple, gitlab) get default
+  //     label/brand/scope from the in-server registry. For other issuers,
+  //     supply `label` and `scope` explicitly; `brand` defaults to `generic`.
+  //   - To disable any entry: comment it out. There is no `enabled` flag.
+
+  "providers": [
+
+    // Trial — server self-issues an id_token after a consent click.
+    // No external IdP, no client_id/secret. Disable by commenting out.
+    {
+      "kind":  "trial",
+      "label": "Try without an account"
+    },
+
+    // Google — public sign-in.
+    // Disable: comment this entry out. Required env: GOOGLE_OIDC_CLIENT_ID, GOOGLE_OIDC_CLIENT_SECRET.
+    {
+      "issuer":        "https://accounts.google.com",
+      "client_id":     "${GOOGLE_OIDC_CLIENT_ID}",
+      "client_secret": "${GOOGLE_OIDC_CLIENT_SECRET}"
+    },
+
+    // GitHub.
+    // Enable: uncomment + set GITHUB_OIDC_CLIENT_ID, GITHUB_OIDC_CLIENT_SECRET.
+    // {
+    //   "issuer":        "https://github.com",
+    //   "client_id":     "${GITHUB_OIDC_CLIENT_ID}",
+    //   "client_secret": "${GITHUB_OIDC_CLIENT_SECRET}"
+    // },
+
+    // Microsoft (multi-tenant — any Microsoft account).
+    // For single-tenant: replace `common` with your tenant id.
+    // {
+    //   "issuer":        "https://login.microsoftonline.com/common/v2.0",
+    //   "client_id":     "${MICROSOFT_OIDC_CLIENT_ID}",
+    //   "client_secret": "${MICROSOFT_OIDC_CLIENT_SECRET}"
+    // },
+
+    // Apple. Apple's "client_secret" is a JWT signed with your private key —
+    // generate and place its value in APPLE_OIDC_CLIENT_SECRET.
+    // {
+    //   "issuer":        "https://appleid.apple.com",
+    //   "client_id":     "${APPLE_OIDC_CLIENT_ID}",
+    //   "client_secret": "${APPLE_OIDC_CLIENT_SECRET}",
+    //   "scope":         "openid name email"
+    // },
+
+    // GitLab.com.
+    // {
+    //   "issuer":        "https://gitlab.com",
+    //   "client_id":     "${GITLAB_OIDC_CLIENT_ID}",
+    //   "client_secret": "${GITLAB_OIDC_CLIENT_SECRET}"
+    // },
+
+    // Custom corporate SSO (Okta / Auth0 / Keycloak).
+    // {
+    //   "issuer":        "https://<tenant>.okta.com",
+    //   "client_id":     "${OKTA_OIDC_CLIENT_ID}",
+    //   "client_secret": "${OKTA_OIDC_CLIENT_SECRET}",
+    //   "label":         "Sign in with Company SSO",
+    //   "scope":         "openid email"
+    // }
+
+  ]
+}
