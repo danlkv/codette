@@ -16,10 +16,9 @@ import { escapeHtml } from '../util/render.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONSENT_HTML = readFileSync(path.join(__dirname, 'views/consent.html'), 'utf8');
+const NO_IDPS_HTML = readFileSync(path.join(__dirname, 'views/no-idps.html'), 'utf8');
 
-function renderProviderButton(provider, { state, nonce, redirectUri }) {
-  // Encode the picked issuer in state so /register/callback can pick the
-  // right provider for code exchange. Trial keeps the bare state.
+function renderOidcButton(provider, { state, nonce, redirectUri }) {
   const augmented = `${state}|${provider.issuer}`;
   const url = buildAuthorizeUrl(provider, { state: augmented, nonce, redirectUri });
   return `<a class="gsi gsi-${escapeHtml(provider.brand)}" href="${escapeHtml(url)}">` +
@@ -28,20 +27,31 @@ function renderProviderButton(provider, { state, nonce, redirectUri }) {
          `</a>`;
 }
 
+function renderTrialButton(provider, { state, csrf }) {
+  return `<form method="POST" action="/register/finish-trial">` +
+           `<input type="hidden" name="state" value="${escapeHtml(state)}">` +
+           `<input type="hidden" name="csrf" value="${escapeHtml(csrf)}">` +
+           `<button class="gsi gsi-${escapeHtml(provider.brand)}" type="submit">` +
+             `<span>${escapeHtml(provider.label)}</span>` +
+           `</button>` +
+         `</form>`;
+}
+
 export function renderPicker(res, { req, name, state, nonce, serverIssuer, providers }) {
+  if (!providers || providers.length === 0) {
+    return res.type('html').send(NO_IDPS_HTML);
+  }
   const csrf = issueCsrfCookie(res, req.secure);
   const redirectUri = serverIssuer + '/register/callback';
   const buttons = providers
-    .map(p => renderProviderButton(p, { state, nonce, redirectUri }))
+    .map(p => p.kind === 'trial'
+      ? renderTrialButton(p, { state, csrf })
+      : renderOidcButton(p, { state, nonce, redirectUri }))
     .join('\n    ');
-  const trialLabel = providers.length > 0 ? 'Try without an account' : 'Continue';
   return res.type('html').send(
     CONSENT_HTML
-      .replace('__USERNAME__',          escapeHtml(name))
-      .replace('__STATE__',             escapeHtml(state))
-      .replace('__CSRF__',              escapeHtml(csrf))
-      .replace('__PROVIDER_BUTTONS__',  buttons)
-      .replace('__TRIAL_LABEL__',       escapeHtml(trialLabel))
+      .replace('__USERNAME__', escapeHtml(name))
+      .replace('__BUTTONS__',  buttons)
   );
 }
 

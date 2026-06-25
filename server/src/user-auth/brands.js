@@ -64,6 +64,7 @@ const BRAND_SVGS = {
   apple:     APPLE_SVG,
   gitlab:    GITLAB_SVG,
   generic:   GENERIC_SVG,
+  trial:     '',   // trial button has no icon
 };
 
 export function defaultsForIssuer(issuer) {

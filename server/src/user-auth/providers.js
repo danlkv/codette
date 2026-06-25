@@ -26,14 +26,27 @@ export async function loadProviders(filePath) {
   if (entries.length === 0) return [];
 
   const providers = entries.map(normaliseEntry);
-  await Promise.all(providers.map(fetchDiscovery));
-  providers.forEach(attachJwks);
+  const trials = providers.filter(p => p.kind === 'trial');
+  if (trials.length > 1) {
+    throw new Error(`oidc-providers: at most one entry with kind:'trial' is allowed (found ${trials.length})`);
+  }
+  const oidc = providers.filter(p => p.kind === 'oidc');
+  await Promise.all(oidc.map(fetchDiscovery));
+  oidc.forEach(attachJwks);
   return providers;
 }
 
 function normaliseEntry(entry) {
-  if (!entry.issuer || typeof entry.issuer !== 'string') {
-    throw new Error(`oidc-providers: entry missing 'issuer' field`);
+  const kind = entry.kind || (entry.issuer ? 'oidc' : null);
+  if (kind === 'trial') {
+    return {
+      kind:  'trial',
+      label: entry.label || 'Try without an account',
+      brand: entry.brand || 'trial',
+    };
+  }
+  if (kind !== 'oidc') {
+    throw new Error(`oidc-providers: entry missing 'issuer' (or 'kind') — every entry must be kind:'oidc' or kind:'trial'`);
   }
   if (!entry.client_id) {
     throw new Error(`oidc-providers: '${entry.issuer}' missing 'client_id'`);
@@ -43,6 +56,7 @@ function normaliseEntry(entry) {
   }
   const def = defaultsForIssuer(entry.issuer);
   const merged = {
+    kind:          'oidc',
     issuer:        entry.issuer,
     client_id:     entry.client_id,
     client_secret: entry.client_secret,

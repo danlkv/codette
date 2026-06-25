@@ -12,7 +12,7 @@
 import { spawn } from 'child_process';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { mkdirSync, symlinkSync, openSync, readFileSync, rmSync, copyFileSync } from 'fs';
+import { mkdirSync, symlinkSync, openSync, readFileSync, rmSync, copyFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { headlessRegister, generateTestKeypair } from './enrollment-flow.js';
 
@@ -32,6 +32,13 @@ const enrollmentDataDir = join(dataDir, 'codette');
 rmSync(dataDir, { recursive: true, force: true });
 mkdirSync(claudeDir, { recursive: true });
 mkdirSync(enrollmentDataDir, { recursive: true });
+
+// Trial-only providers file for tests — no external IdPs to discover, no env
+// vars to set. The repo's oidc-providers.jsonc lists Google etc. which the
+// test env doesn't carry secrets for.
+const testProvidersFile = join(dataDir, 'oidc-providers.jsonc');
+writeFileSync(testProvidersFile,
+  `{ "providers": [ { "kind": "trial", "label": "Try without an account" } ] }\n`);
 
 const credSrc = join(homedir(), '.claude', '.credentials.json');
 const credDst = join(claudeDir, '.credentials.json');
@@ -62,9 +69,10 @@ server = spawn('node', ['server/src/index.js'], {
   env: {
     ...process.env,
     PORT,
-    CODETTE_DATA_DIR: enrollmentDataDir,
-    PUBLIC_URL:       `http://localhost:${PORT}`,
-    SERVER_HOSTNAME:  `localhost:${PORT}`,
+    CODETTE_DATA_DIR:           enrollmentDataDir,
+    CODETTE_OIDC_PROVIDERS_FILE: testProvidersFile,
+    PUBLIC_URL:                 `http://localhost:${PORT}`,
+    SERVER_HOSTNAME:            `localhost:${PORT}`,
   },
   stdio: ['ignore', serverLogFd, serverLogFd],
 });

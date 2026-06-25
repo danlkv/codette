@@ -71,21 +71,8 @@
     border: 1px solid var(--border);
   }
   form { display: flex; flex-direction: column; gap: 10px; margin: 0; }
-  button {
-    background: none;
-    border: 1px solid var(--accent);
-    color: var(--accent);
-    padding: 10px;
-    border-radius: 6px;
-    cursor: pointer;
-    font: inherit;
-    text-align: center;
-    transition: color .15s, border-color .15s;
-    display: block;
-  }
-  button:hover { color: var(--accent-light); border-color: var(--accent-light); }
 
-  /* OIDC sign-in buttons — one base style; per-brand colours below. */
+  /* Picker buttons — one base style; per-brand colours below. */
   .gsi {
     display: flex;
     align-items: center;
@@ -100,6 +87,7 @@
     font-size: 14px;
     letter-spacing: .25px;
     border: 1px solid transparent;
+    cursor: pointer;
     transition: background .15s, border-color .15s;
   }
   .gsi svg { width: 18px; height: 18px; flex-shrink: 0; }
@@ -112,7 +100,7 @@
     .gsi-google:hover { background: #f8faff; border-color: #4285f4; }
   }
 
-  /* GitHub — black on white / dark on white. */
+  /* GitHub. */
   .gsi-github { background: #24292f; color: #ffffff; border-color: #24292f; }
   .gsi-github:hover { background: #32383f; }
   @media (prefers-color-scheme: light) {
@@ -120,7 +108,7 @@
     .gsi-github:hover { background: #f6f8fa; border-color: #24292f; }
   }
 
-  /* Microsoft — per MS brand guidelines: white bg + #5e5e5e text + #8c8c8c border. */
+  /* Microsoft. */
   .gsi-microsoft { background: #2f2f2f; color: #ffffff; border-color: #8c8c8c; }
   .gsi-microsoft:hover { background: #3a3a3a; }
   @media (prefers-color-scheme: light) {
@@ -128,15 +116,11 @@
     .gsi-microsoft:hover { background: #f5f5f5; }
   }
 
-  /* Apple — black per Sign in with Apple guidelines. */
+  /* Apple. */
   .gsi-apple { background: #000000; color: #ffffff; border-color: #000000; }
   .gsi-apple:hover { background: #1a1a1a; }
-  @media (prefers-color-scheme: light) {
-    .gsi-apple { background: #000000; color: #ffffff; border-color: #000000; }
-    .gsi-apple:hover { background: #1a1a1a; }
-  }
 
-  /* GitLab — orange/purple per GitLab brand. */
+  /* GitLab. */
   .gsi-gitlab { background: #fc6d26; color: #ffffff; border-color: #fc6d26; }
   .gsi-gitlab:hover { background: #e24329; }
   @media (prefers-color-scheme: light) {
@@ -147,18 +131,17 @@
   /* Generic — neutral codette-themed for unknown issuers. */
   .gsi-generic { background: var(--bg-elevated); color: var(--text); border-color: var(--border); }
   .gsi-generic:hover { background: var(--bg-primary); border-color: var(--accent); }
+
+  /* Trial — codette-accent for the self-IdP "no account" path. */
+  .gsi-trial { background: transparent; color: var(--accent); border-color: var(--accent); }
+  .gsi-trial:hover { color: var(--accent-light); border-color: var(--accent-light); }
 </style>
 </head>
 <body>
   <div class="card">
     <div class="brand">codette</div>
     <p class="lede">Register host as <span class="uname">__USERNAME__</span></p>
-    __PROVIDER_BUTTONS__
-    <form method="POST" action="/register/finish-trial">
-      <input type="hidden" name="state" value="__STATE__">
-      <input type="hidden" name="csrf" value="__CSRF__">
-      <button type="submit">__TRIAL_LABEL__</button>
-    </form>
+    __BUTTONS__
   </div>
 </body>
 </html>

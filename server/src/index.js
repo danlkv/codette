@@ -62,7 +62,8 @@ app.use(express.json());
 app.use(cookieParser());
 
 // ── OIDC providers ────────────────────────────────────────────────────────────
-const PROVIDERS_FILE = path.resolve(__dirname, '../../oidc-providers.jsonc');
+const PROVIDERS_FILE = process.env.CODETTE_OIDC_PROVIDERS_FILE
+  || path.resolve(__dirname, '../../oidc-providers.jsonc');
 const providers = await loadProviders(PROVIDERS_FILE);
 const providersByIss = new Map(providers.map(p => [p.issuer, p]));
 if (providers.length > 0) {
