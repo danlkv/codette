@@ -67,12 +67,13 @@ export async function signHostProof({ keyFilePath, aud, username, iatSec }) {
  * Sign a WS handshake proof JWT for /host connections.
  * aud is <serverHttp>/host
  */
-export async function signHandshakeProof({ keyFilePath, aud }) {
+export async function signHandshakeProof({ keyFilePath, aud, iatSec }) {
   const { key, jkt } = await loadOrGenerateKeyMaterial(keyFilePath);
+  const iat = iatSec || Math.floor(Date.now() / 1000);
   return new SignJWT({})
     .setProtectedHeader({ alg: 'ES256' })
     .setIssuer(jkt).setAudience(aud)
-    .setIssuedAt().setExpirationTime('1m')
+    .setIssuedAt(iat).setExpirationTime(iat + 60)   // 1min from iat (server clock if iatSec given)
     .setJti(randomBytes(16).toString('hex'))
     .sign(key);
 }

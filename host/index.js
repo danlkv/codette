@@ -700,11 +700,20 @@ async function checkUpdate() {
 
 async function connect() {
   const serverHttp = SERVER_URL.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
+  // Read server's clock from its HTTP Date header so a skewed local clock
+  // doesn't make the handshake proof's iat/exp wrong from the server's view.
+  let iatSec = null;
+  try {
+    const r = await fetch(serverHttp + '/', { method: 'HEAD' });
+    const d = r.headers.get('date');
+    if (d) iatSec = Math.floor(new Date(d).getTime() / 1000);
+  } catch {}
   let proof;
   try {
     proof = await signHandshakeProof({
       keyFilePath: HOST_KEY_PATH,
       aud:         serverHttp + '/host',
+      iatSec,
     });
   } catch (e) {
     log('error', 'failed to sign handshake proof', { err: e.message });
