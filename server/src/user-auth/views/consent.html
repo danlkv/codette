@@ -71,7 +71,7 @@
     border: 1px solid var(--border);
   }
   form { display: flex; flex-direction: column; gap: 10px; margin: 0; }
-  button, .btn-primary {
+  button {
     background: none;
     border: 1px solid var(--accent);
     color: var(--accent);
@@ -79,20 +79,38 @@
     border-radius: 6px;
     cursor: pointer;
     font: inherit;
-    text-decoration: none;
     text-align: center;
     transition: color .15s, border-color .15s;
     display: block;
   }
-  button:hover, .btn-primary:hover { color: var(--accent-light); border-color: var(--accent-light); }
-  .btn-primary {
-    background: var(--accent);
-    color: var(--bg-primary);
+  button:hover { color: var(--accent-light); border-color: var(--accent-light); }
+
+  /* Google-branded sign-in button per Google's Identity branding guidelines.
+     Light mode: white bg, dark text. Dark mode: #131314 bg, white text. */
+  .gsi {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    height: 40px;
+    padding: 0 12px;
+    border-radius: 4px;
+    text-decoration: none;
+    font-family: 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+    font-weight: 500;
+    font-size: 14px;
+    letter-spacing: .25px;
+    background: #131314;
+    color: #e3e3e3;
+    border: 1px solid #8e918f;
+    transition: background .15s, border-color .15s;
   }
-  .btn-primary:hover {
-    background: var(--accent-light);
-    color: var(--bg-primary);
+  .gsi:hover { background: #1f1f20; border-color: #c4c7c5; }
+  @media (prefers-color-scheme: light) {
+    .gsi { background: #ffffff; color: #1f1f1f; border-color: #747775; }
+    .gsi:hover { background: #f8faff; border-color: #4285f4; }
   }
+  .gsi svg { width: 18px; height: 18px; flex-shrink: 0; }
 </style>
 </head>
 <body>
