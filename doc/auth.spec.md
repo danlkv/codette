@@ -2,7 +2,9 @@
 
 The host CLI owns a long-lived EC P-256 keypair (`host-key.pem`, also used for chat-domain JWT signing). In host enrollment, this keypair IS the host's identity. There are no bearer tokens, no PKCE, no refresh tokens.
 
-Registration binds `(username ↔ jkt, jwk)` after an end-user clears identity verification at one IdP. Configured IdPs surface as buttons on the picker page rendered by `/register/start`. The bound `idp` value is the OIDC `iss` URL verbatim (self: `<serverIssuer>`; Google: `https://accounts.google.com`).
+Registration binds `(username ↔ jkt, jwk)` after an end-user clears identity verification at one IdP. Configured IdPs surface as buttons on the picker page rendered by `/register/start`. The bound `idp` value is the OIDC `iss` URL verbatim (self: `<serverIssuer>`; any external IdP: that provider's `iss`, e.g. `https://accounts.google.com`).
+
+External IdPs are declared in the repo's `oidc-providers.jsonc` (see "Configuring external OIDC IdPs" below). Adding an IdP needs no code change — it's a new entry in that file plus the IdP's client_id/secret in env.
 
 ### Registration (browser-required, one-time per username)
 
@@ -15,9 +17,9 @@ Registration binds `(username ↔ jkt, jwk)` after an end-user clears identity v
 4. CLI opens browser at `GET /register/start?state=…&username=…&jwk=…&host_proof=…`.
 5. Server validates the `host_proof` signature against the supplied JWK, validates the username, generates a per-flow `nonce`, and stores
    `pending[state] = {username, jwk, jkt, nonce, expires: now+5min, ip: req.ip}`.
-6. Server renders the picker page: one entry per configured IdP. The page sets a CSRF cookie scoped to `/register/finish-trial`. Buttons:
-   - "Sign in with Google" — `<a>` to the pre-built Google authorize URL. Omitted when `GOOGLE_OIDC_CLIENT_ID` is unset.
-   - "Try without an account" — `<form method="POST" action="/register/finish-trial">` carrying `state` + `csrf`.
+6. Server renders the picker page: one button per provider loaded from `oidc-providers.jsonc` plus a "Try without an account" trial button. The page sets a CSRF cookie scoped to `/register/finish-trial`.
+   - External-IdP buttons are `<a>` to the IdP's pre-built authorize URL.
+   - Trial button is `<form method="POST" action="/register/finish-trial">` carrying `state` + `csrf`.
 
 **IdP — trial (self-IdP):**
 
@@ -26,31 +28,61 @@ Registration binds `(username ↔ jkt, jwk)` after an end-user clears identity v
     `{ iss: <serverIssuer>, sub: jkt, aud: <serverIssuer>/register/callback, iat, exp: now+5min, jti }`.
 9t. Server redirects browser to `/register/callback?state=…&id_token=…`.
 
-**IdP — Google OIDC:**
+**IdP — external OIDC (e.g. Google, GitHub, Microsoft):**
 
-7g. User clicks "Sign in with Google." Browser navigates to the pre-built authorize URL at `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=<GOOGLE_OIDC_CLIENT_ID>&scope=openid&redirect_uri=<serverIssuer>/register/callback&state=<state>&nonce=<pending.nonce>`.
-8g. User authenticates and consents at Google. Google redirects browser to `/register/callback?state=…&code=…`.
-9g. Server exchanges the code at Google's token endpoint using `GOOGLE_OIDC_CLIENT_SECRET` and `redirect_uri=<serverIssuer>/register/callback`, receives an id_token.
+7x. User clicks the IdP's button. Browser navigates to the pre-built authorize URL: `<authorize_url>?response_type=code&client_id=<provider.client_id>&scope=<provider.scope>&redirect_uri=<serverIssuer>/register/callback&state=<state>&nonce=<pending.nonce>`. `authorize_url` and other endpoints came from the IdP's OIDC discovery document fetched at server boot.
+8x. User authenticates and consents at the IdP. IdP redirects browser to `/register/callback?state=…&code=…`.
+9x. Server exchanges the code at the IdP's token endpoint using `provider.client_secret` and `redirect_uri=<serverIssuer>/register/callback`, receives an id_token.
 
 **Post-IdP (common):**
 
 10. `/register/callback` dispatches `verifyIdToken` by `iss`:
     - `iss === <serverIssuer>` → self branch; verifies signature against the server-owned id-token keypair.
-    - `iss === 'https://accounts.google.com'` → Google branch; verifies signature against Google's JWKS, asserts `aud === GOOGLE_OIDC_CLIENT_ID`, asserts `nonce === pending[state].nonce`.
-    For both branches `verifyIdToken` checks `requiredClaims: ['exp', 'iat', 'sub']` and returns `{sub, idp, claims}`.
-11. Server checks claim-limits keyed by `idp:<idp>:<sub>` against `TRIAL_MAX_CLAIMS/TRIAL_WINDOW_MS`. For self-IdP the `ip:<pending.ip>` counter was already recorded at step 8t; Google bypasses the IP counter.
+    - `iss === <provider.issuer>` for any loaded provider → external branch; verifies signature against the provider's JWKS (fetched at boot from the discovery doc), asserts `aud === provider.client_id`, asserts `nonce === pending[state].nonce`.
+    Unknown `iss` is rejected. For all branches `verifyIdToken` checks `requiredClaims: ['exp', 'iat', 'sub']` and returns `{sub, idp, claims}`.
+11. Server checks claim-limits keyed by `idp:<idp>:<sub>` against `TRIAL_MAX_CLAIMS/TRIAL_WINDOW_MS`. For self-IdP the `ip:<pending.ip>` counter was already recorded at step 8t; external IdPs bypass the IP counter.
 12. Server calls `claimBinding(username, jkt, jwk, {idp, idp_sub: sub})` — atomically writes `username-owners.json`. Renders a "Registered — close this tab" page.
 13. CLI polls `GET /register/status?state=…` every 500 ms until status is `"claimed"` or 5-min timeout. On success, writes `credentials.json { server, username, password }` (password is for the chat-domain HMAC browser-auth flow).
 
 **No tokens property:** the host never receives an access_token or refresh_token from the server. Registration only establishes the `(username ↔ jkt)` binding.
 
-**Adding an IdP** is a new `verifyIdToken` branch keyed by the IdP's `iss`, plus a button on the picker page. `/register/callback` and `claimBinding` are IdP-agnostic.
-
 `$CODETTE_DATA_DIR/username-owners.json` keeps the binding store: `byName[<username>] = {fp: <jkt>, claimedAt, idp: <iss>, idp_sub: <sub>}` and `byPubkey[<jkt>] = {username, jwk}`. Atomic read-modify-write per claim; `claimBinding` returns `'claimed' | 'name-taken' | 'pubkey-taken'`.
 
-`$CODETTE_DATA_DIR/claim-limits.json` keeps the sliding-window claim ledger: `{"ip:<addr>": [<ts>, …], "idp:<iss>:<sub>": [<ts>, …]}`. Self-IdP claims record both `ip:` and `idp:` keys; Google claims record only `idp:`. Cap `TRIAL_MAX_CLAIMS` (default 5), window `TRIAL_WINDOW_MS` (default 15 days). Bare `<ip>` keys from earlier ledger versions get rewritten to `ip:<ip>` on first read.
+`$CODETTE_DATA_DIR/claim-limits.json` keeps the sliding-window claim ledger: `{"ip:<addr>": [<ts>, …], "idp:<iss>:<sub>": [<ts>, …]}`. Self-IdP claims record both `ip:` and `idp:` keys; external IdPs record only the `idp:` key (the IdP's identity verification is the abuse cost). Cap `TRIAL_MAX_CLAIMS` (default 5), window `TRIAL_WINDOW_MS` (default 15 days). Bare `<ip>` keys from earlier ledger versions get rewritten to `ip:<ip>` on first read.
 
-Google OIDC is enabled by setting `GOOGLE_OIDC_CLIENT_ID` and `GOOGLE_OIDC_CLIENT_SECRET`; unset → Google branch disabled and button hidden.
+### Configuring external OIDC IdPs
+
+`oidc-providers.jsonc` (at the repo root) lists the IdPs codette supports. The file ships with every entry commented out; operators uncomment what they want enabled and set the referenced env vars.
+
+```jsonc
+{
+  "providers": [
+    // Google — public sign-in.
+    // Enable: uncomment + set GOOGLE_OIDC_CLIENT_ID / _CLIENT_SECRET.
+    // {
+    //   "issuer":        "https://accounts.google.com",
+    //   "client_id":     "${GOOGLE_OIDC_CLIENT_ID}",
+    //   "client_secret": "${GOOGLE_OIDC_CLIENT_SECRET}"
+    // }
+  ]
+}
+```
+
+**Parsing.** JSONC: line and block comments are stripped before `JSON.parse`. Comment chars inside string values are preserved.
+
+**Env-var interpolation.** Only `${VAR}` syntax (no `$VAR`, no defaults, no nesting). For every `${VAR}` reference in the parsed file, `process.env[VAR]` must be set (empty string counts as set). Any unresolved reference fails-boot with a message listing every missing variable at once.
+
+**Discovery.** For each entry, the server fetches `<issuer>/.well-known/openid-configuration` once at boot to learn `authorization_endpoint`, `token_endpoint`, `jwks_uri`, and `id_token_signing_alg_values_supported`. Discovery failure fails-boot, naming the issuer URL.
+
+**Per-issuer defaults.** A small in-server registry supplies `label`, `brand`, and default `scope` for popular issuer URLs (Google, GitHub, Microsoft, Apple, GitLab). For issuers not in the registry (e.g. corporate Okta or Auth0 tenants), each entry must include `label` and `scope` explicitly; `brand` defaults to `generic`.
+
+**Picker rendering.** Each loaded provider becomes a button with the brand's icon + text (e.g. Google's 4-color G + "Sign in with Google" per Google's Identity branding guidelines). `generic` brand renders a neutral codette-themed button using the entry's `label`.
+
+**Adding an IdP.** Two cases:
+- *In the known set* — uncomment the entry in `oidc-providers.jsonc`, set the referenced env vars, restart.
+- *Custom (e.g. corporate Okta)* — add an entry with `issuer`, `client_id`, `client_secret`, `label`, `scope`. PR upstream or maintain a deployment fork.
+
+`/register/callback` and `claimBinding` are IdP-agnostic; adding an IdP needs no server code change.
 
 ### Connect (every WS connect)
 

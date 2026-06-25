@@ -72,11 +72,11 @@ Multiple clients can connect to the same host. Multiple hosts (different usernam
 | `SERVER_HOSTNAME` | _(required for `/install.sh`)_ | Hostname served in the install script |
 | `PUBLIC_URL` | `http://localhost:PORT` | Used as JWT issuer and audience root |
 | `CODETTE_DATA_DIR` | `/data/codette` | Stores `id-key.pem`, `username-owners.json`, `claim-limits.json` |
-| `GOOGLE_OIDC_CLIENT_ID` | _(unset)_ | Google OAuth client ID. Unset hides the Google button on the picker. |
-| `GOOGLE_OIDC_CLIENT_SECRET` | _(unset)_ | Google OAuth client secret. Required with `GOOGLE_OIDC_CLIENT_ID`. |
 | `TRIAL_MAX_CLAIMS` | `5` | Max registrations per claim-limit key in the window |
 | `TRIAL_WINDOW_MS` | `1296000000` (15d) | Sliding window for the claim-limits ledger |
 | `CODETTE_TRACE` | off | Set to `1` for protocol-level trace logging |
+
+External OIDC providers (Google, GitHub, …) are configured by uncommenting their entry in [`oidc-providers.jsonc`](oidc-providers.jsonc) and setting the env vars that entry references. The shipped template uses `<NAME>_OIDC_CLIENT_ID` / `<NAME>_OIDC_CLIENT_SECRET` per provider (e.g. `GOOGLE_OIDC_CLIENT_ID`, `GITHUB_OIDC_CLIENT_ID`). Any `${VAR}` referenced by an uncommented entry must be set — the server refuses to start otherwise, listing every missing variable.
 
 ### Host
 

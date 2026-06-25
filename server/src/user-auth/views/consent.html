@@ -85,8 +85,7 @@
   }
   button:hover { color: var(--accent-light); border-color: var(--accent-light); }
 
-  /* Google-branded sign-in button per Google's Identity branding guidelines.
-     Light mode: white bg, dark text. Dark mode: #131314 bg, white text. */
+  /* OIDC sign-in buttons — one base style; per-brand colours below. */
   .gsi {
     display: flex;
     align-items: center;
@@ -100,24 +99,61 @@
     font-weight: 500;
     font-size: 14px;
     letter-spacing: .25px;
-    background: #131314;
-    color: #e3e3e3;
-    border: 1px solid #8e918f;
+    border: 1px solid transparent;
     transition: background .15s, border-color .15s;
   }
-  .gsi:hover { background: #1f1f20; border-color: #c4c7c5; }
-  @media (prefers-color-scheme: light) {
-    .gsi { background: #ffffff; color: #1f1f1f; border-color: #747775; }
-    .gsi:hover { background: #f8faff; border-color: #4285f4; }
-  }
   .gsi svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+  /* Google — official brand colours per Identity guidelines. */
+  .gsi-google { background: #131314; color: #e3e3e3; border-color: #8e918f; }
+  .gsi-google:hover { background: #1f1f20; border-color: #c4c7c5; }
+  @media (prefers-color-scheme: light) {
+    .gsi-google { background: #ffffff; color: #1f1f1f; border-color: #747775; }
+    .gsi-google:hover { background: #f8faff; border-color: #4285f4; }
+  }
+
+  /* GitHub — black on white / dark on white. */
+  .gsi-github { background: #24292f; color: #ffffff; border-color: #24292f; }
+  .gsi-github:hover { background: #32383f; }
+  @media (prefers-color-scheme: light) {
+    .gsi-github { background: #ffffff; color: #24292f; border-color: #d0d7de; }
+    .gsi-github:hover { background: #f6f8fa; border-color: #24292f; }
+  }
+
+  /* Microsoft — per MS brand guidelines: white bg + #5e5e5e text + #8c8c8c border. */
+  .gsi-microsoft { background: #2f2f2f; color: #ffffff; border-color: #8c8c8c; }
+  .gsi-microsoft:hover { background: #3a3a3a; }
+  @media (prefers-color-scheme: light) {
+    .gsi-microsoft { background: #ffffff; color: #5e5e5e; border-color: #8c8c8c; }
+    .gsi-microsoft:hover { background: #f5f5f5; }
+  }
+
+  /* Apple — black per Sign in with Apple guidelines. */
+  .gsi-apple { background: #000000; color: #ffffff; border-color: #000000; }
+  .gsi-apple:hover { background: #1a1a1a; }
+  @media (prefers-color-scheme: light) {
+    .gsi-apple { background: #000000; color: #ffffff; border-color: #000000; }
+    .gsi-apple:hover { background: #1a1a1a; }
+  }
+
+  /* GitLab — orange/purple per GitLab brand. */
+  .gsi-gitlab { background: #fc6d26; color: #ffffff; border-color: #fc6d26; }
+  .gsi-gitlab:hover { background: #e24329; }
+  @media (prefers-color-scheme: light) {
+    .gsi-gitlab { background: #ffffff; color: #380d75; border-color: #380d75; }
+    .gsi-gitlab:hover { background: #f5f0fa; }
+  }
+
+  /* Generic — neutral codette-themed for unknown issuers. */
+  .gsi-generic { background: var(--bg-elevated); color: var(--text); border-color: var(--border); }
+  .gsi-generic:hover { background: var(--bg-primary); border-color: var(--accent); }
 </style>
 </head>
 <body>
   <div class="card">
     <div class="brand">codette</div>
     <p class="lede">Register host as <span class="uname">__USERNAME__</span></p>
-    __GOOGLE_BLOCK__
+    __PROVIDER_BUTTONS__
     <form method="POST" action="/register/finish-trial">
       <input type="hidden" name="state" value="__STATE__">
       <input type="hidden" name="csrf" value="__CSRF__">

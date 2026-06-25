@@ -13,7 +13,7 @@ import cookieParser from 'cookie-parser';
 import { RpcClient } from './rpc.js';
 import { unpackParam } from '../../shared/crypto.js';
 import { mountHostEnrollmentRoutes, pendingStore } from './host-enrollment/register.js';
-import { verifyIdToken, mountConsentRoute, exchangeGoogleOidcCode } from './user-auth/index.js';
+import { makeVerifyIdToken, mountConsentRoute, loadProviders, exchangeCode } from './user-auth/index.js';
 import { renderError } from './util/render.js';
 import { lookupByPubkey } from './host-enrollment/owners.js';
 import { verifyHandshakeProof } from './host-enrollment/ws-auth.js';
@@ -61,11 +61,25 @@ app.set('trust proxy', true);
 app.use(express.json());
 app.use(cookieParser());
 
+// ── OIDC providers ────────────────────────────────────────────────────────────
+const PROVIDERS_FILE = path.resolve(__dirname, '../../oidc-providers.jsonc');
+const providers = await loadProviders(PROVIDERS_FILE);
+const providersByIss = new Map(providers.map(p => [p.issuer, p]));
+if (providers.length > 0) {
+  console.log(`[user-auth] loaded ${providers.length} OIDC provider(s):`,
+    providers.map(p => p.issuer).join(', '));
+} else {
+  console.log('[user-auth] no external OIDC providers configured; picker shows trial only');
+}
+const verifyIdToken = makeVerifyIdToken({ serverIssuer: SERVER_ISSUER, providersByIss });
+
 // ── host-enrollment registration routes ───────────────────────────────────────
 mountHostEnrollmentRoutes(app, {
   serverIssuer:    SERVER_ISSUER,
   verifyIdToken,
-  exchangeOidcCode: exchangeGoogleOidcCode,
+  exchangeOidcCode: exchangeCode,
+  providers,
+  providersByIss,
 });
 mountConsentRoute(app, { serverIssuer: SERVER_ISSUER, pendingStore, renderError });
 

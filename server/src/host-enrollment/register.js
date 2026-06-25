@@ -48,11 +48,13 @@ setInterval(() => {
 /**
  * @param {import('express').Application} app
  * @param {object} opts
- *   serverIssuer    — base URL used as iss for self-IdP and to build redirect_uri
- *   verifyIdToken   — fn({idToken, serverIssuer, nonce}) → {sub, idp, claims}
- *   exchangeOidcCode — fn(code, redirectUri) → Promise<idToken>
+ *   serverIssuer     — base URL used as iss for self-IdP and to build redirect_uri
+ *   verifyIdToken    — fn({idToken, nonce}) → {sub, idp, claims}
+ *   exchangeOidcCode — fn(provider, code, redirectUri) → Promise<idToken>
+ *   providers        — array of loaded provider records
+ *   providersByIss   — Map<string, Provider>
  */
-export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken, exchangeOidcCode }) {
+export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken, exchangeOidcCode, providers, providersByIss }) {
 
   // ── GET /register/start ─────────────────────────────────────────────────────
   app.get('/register/start', async (req, res) => {
@@ -132,19 +134,30 @@ export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken, ex
     });
     statusMap.set(state, 'pending');
 
-    return renderPicker(res, { req, name, state, nonce, serverIssuer });
+    return renderPicker(res, { req, name, state, nonce, serverIssuer, providers });
   });
 
   // ── GET /register/callback ───────────────────────────────────────────────────
   app.get('/register/callback', async (req, res) => {
-    const { state, id_token, code } = req.query;
+    const { state: stateParam, id_token, code } = req.query;
 
-    if (!state || (!id_token && !code)) {
+    if (!stateParam || (!id_token && !code)) {
       return renderError(res, {
         title:   'Missing parameters',
         message: 'state and either id_token or code are required.',
         hint:    'Run <kbd>codette login</kbd> to start again.',
       });
+    }
+
+    // External-IdP picker buttons encode the picked issuer as `<state>|<iss>`
+    // so the callback can pick the right provider for code exchange.
+    let state, pickedIssuer = null;
+    const sep = String(stateParam).indexOf('|');
+    if (sep < 0) {
+      state = String(stateParam);
+    } else {
+      state = String(stateParam).slice(0, sep);
+      pickedIssuer = String(stateParam).slice(sep + 1);
     }
 
     const entry = pending.get(state);
@@ -160,15 +173,17 @@ export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken, ex
     // Code-flow IdPs land here without an id_token; exchange first.
     let idToken = id_token;
     if (!idToken && code) {
-      if (!exchangeOidcCode) {
+      const provider = pickedIssuer && providersByIss && providersByIss.get(pickedIssuer);
+      if (!provider) {
+        statusMap.set(state, 'error');
         return renderError(res, {
-          title:   'OIDC code flow not configured',
-          message: 'The server received an OIDC authorization code but no IdP is wired to exchange it.',
+          title:   'Unknown IdP',
+          message: `No provider configured for issuer "${escapeHtml(pickedIssuer || '')}".`,
           hint:    'Run <kbd>codette login</kbd> to start again.',
         });
       }
       try {
-        idToken = await exchangeOidcCode(code, serverIssuer + '/register/callback');
+        idToken = await exchangeOidcCode(provider, code, serverIssuer + '/register/callback');
       } catch (e) {
         statusMap.set(state, 'error');
         return renderError(res, {
@@ -183,7 +198,6 @@ export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken, ex
     try {
       ({ sub, idp } = await verifyIdToken({
         idToken,
-        serverIssuer,
         nonce: entry.nonce,
       }));
     } catch (e) {
