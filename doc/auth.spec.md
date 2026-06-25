@@ -30,9 +30,9 @@ External IdPs are declared in the repo's `oidc-providers.jsonc` (see "Configurin
 
 **IdP — external OIDC (e.g. Google, GitHub, Microsoft):**
 
-7x. User clicks the IdP's button. Browser navigates to the pre-built authorize URL: `<authorize_url>?response_type=code&client_id=<provider.client_id>&scope=<provider.scope>&redirect_uri=<serverIssuer>/register/callback&state=<state>&nonce=<pending.nonce>`. `authorize_url` and other endpoints came from the IdP's OIDC discovery document fetched at server boot.
+7x. User clicks the IdP's button. Browser navigates to the pre-built authorize URL: `<authorize_url>?response_type=code&client_id=<provider.client_id>&scope=<provider.scope>&redirect_uri=<serverIssuer>/register/callback&state=<state>&nonce=<pending.nonce>` (PKCE-only entries additionally carry `code_challenge=<S256(pending.codeVerifier)>&code_challenge_method=S256`). `authorize_url` and other endpoints came from the IdP's OIDC discovery document fetched at server boot.
 8x. User authenticates and consents at the IdP. IdP redirects browser to `/register/callback?state=…&code=…`.
-9x. Server exchanges the code at the IdP's token endpoint using `provider.client_secret` and `redirect_uri=<serverIssuer>/register/callback`, receives an id_token.
+9x. Server exchanges the code at the IdP's token endpoint and receives an id_token. Confidential clients (entry has `client_secret`) authenticate with the secret. Public clients (entry omits `client_secret`) authenticate with the per-flow `code_verifier` instead.
 
 **Post-IdP (common):**
 

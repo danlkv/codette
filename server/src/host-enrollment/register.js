@@ -122,19 +122,21 @@ export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken, ex
       });
     }
 
-    const nonce = randomBytes(16).toString('hex');
+    const nonce        = randomBytes(16).toString('hex');
+    const codeVerifier = randomBytes(32).toString('base64url');   // RFC 7636 PKCE
     pending.set(state, {
       username: name,
       jwk,
       jkt,
       nonce,
+      codeVerifier,
       expires:     Date.now() + 5 * 60 * 1000,
       ip:          req.ip,
       claimedKeys: null,
     });
     statusMap.set(state, 'pending');
 
-    return renderPicker(res, { req, name, state, nonce, serverIssuer, providers });
+    return renderPicker(res, { req, name, state, nonce, codeVerifier, serverIssuer, providers });
   });
 
   // ── GET /register/callback ───────────────────────────────────────────────────
@@ -183,7 +185,7 @@ export function mountHostEnrollmentRoutes(app, { serverIssuer, verifyIdToken, ex
         });
       }
       try {
-        idToken = await exchangeOidcCode(provider, code, serverIssuer + '/register/callback');
+        idToken = await exchangeOidcCode(provider, code, serverIssuer + '/register/callback', entry.codeVerifier);
       } catch (e) {
         statusMap.set(state, 'error');
         return renderError(res, {

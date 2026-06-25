@@ -18,9 +18,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONSENT_HTML = readFileSync(path.join(__dirname, 'views/consent.html'), 'utf8');
 const NO_IDPS_HTML = readFileSync(path.join(__dirname, 'views/no-idps.html'), 'utf8');
 
-function renderOidcButton(provider, { state, nonce, redirectUri }) {
+function renderOidcButton(provider, { state, nonce, redirectUri, codeVerifier }) {
   const augmented = `${state}|${provider.issuer}`;
-  const url = buildAuthorizeUrl(provider, { state: augmented, nonce, redirectUri });
+  const url = buildAuthorizeUrl(provider, { state: augmented, nonce, redirectUri, codeVerifier });
   return `<a class="gsi gsi-${escapeHtml(provider.brand)}" href="${escapeHtml(url)}">` +
            providerSvg(provider) +
            `<span>${escapeHtml(provider.label)}</span>` +
@@ -37,7 +37,7 @@ function renderTrialButton(provider, { state, csrf }) {
          `</form>`;
 }
 
-export function renderPicker(res, { req, name, state, nonce, serverIssuer, providers }) {
+export function renderPicker(res, { req, name, state, nonce, codeVerifier, serverIssuer, providers }) {
   if (!providers || providers.length === 0) {
     return res.type('html').send(NO_IDPS_HTML);
   }
@@ -46,7 +46,7 @@ export function renderPicker(res, { req, name, state, nonce, serverIssuer, provi
   const buttons = providers
     .map(p => p.kind === 'trial'
       ? renderTrialButton(p, { state, csrf })
-      : renderOidcButton(p, { state, nonce, redirectUri }))
+      : renderOidcButton(p, { state, nonce, redirectUri, codeVerifier }))
     .join('\n    ');
   return res.type('html').send(
     CONSENT_HTML

@@ -51,15 +51,14 @@ function normaliseEntry(entry) {
   if (!entry.client_id) {
     throw new Error(`oidc-providers: '${entry.issuer}' missing 'client_id'`);
   }
-  if (!entry.client_secret) {
-    throw new Error(`oidc-providers: '${entry.issuer}' missing 'client_secret'`);
-  }
+  // client_secret is optional: when present, code-exchange uses
+  // confidential-client auth; when absent, PKCE is used at both ends.
   const def = defaultsForIssuer(entry.issuer);
   const merged = {
     kind:          'oidc',
     issuer:        entry.issuer,
     client_id:     entry.client_id,
-    client_secret: entry.client_secret,
+    client_secret: entry.client_secret || null,
     label:         entry.label || def.label,
     brand:         entry.brand || def.brand,
     scope:         entry.scope || def.scope,

@@ -18,6 +18,11 @@
   //     undefined fails the server boot, listing every missing variable.
   //   - The server fetches each OIDC issuer's .well-known/openid-configuration
   //     at boot to learn endpoints + JWKS. Discovery failures fail-boot.
+  //   - client_secret is OPTIONAL. With it present, the entry is a
+  //     confidential client (server uses the secret in the token request).
+  //     Without it, the entry runs as a PKCE-only public client (server uses
+  //     a per-flow code_verifier instead). Register the same Web client in
+  //     the IdP console either way.
   //   - Known issuers (google, github, microsoft, apple, gitlab) get default
   //     label/brand/scope from the in-server registry. For other issuers,
   //     supply `label` and `scope` explicitly; `brand` defaults to `generic`.
