@@ -8,6 +8,7 @@
   let { onLogin, onCancel } = $props();
   let username = $state(''), password = $state(''), error = $state(''), loading = $state(false);
   let hostDown = $state(false);
+  let showPassword = $state(false);
 
   async function submit() {
     loading = true; error = ''; hostDown = false;
@@ -51,7 +52,26 @@
       </label>
       <label>
         <span>Password</span>
-        <input bind:value={password} type="password" autocomplete="current-password" required />
+        <div class="pw-wrap">
+          <button type="button" class="pw-toggle" onclick={() => showPassword = !showPassword}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  title={showPassword ? 'Hide password' : 'Show password'}>
+            {#if showPassword}
+              <!-- eye-off -->
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a19.6 19.6 0 0 1 5.06-5.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a19.6 19.6 0 0 1-3.17 4.19M14.12 14.12a3 3 0 1 1-4.24-4.24" />
+                <line x1="1" y1="1" x2="23" y2="23" />
+              </svg>
+            {:else}
+              <!-- eye -->
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            {/if}
+          </button>
+          <input bind:value={password} type={showPassword ? 'text' : 'password'} autocomplete="current-password" required />
+        </div>
       </label>
       {#if error}<p class="err">{error}</p>{/if}
       {#if hostDown}<p class="err">Host not connected</p>{/if}
@@ -102,4 +122,17 @@
     word-break: break-all; user-select: all; cursor: text;
   }
   .cancel { border-color: var(--border); color: var(--text-dim); margin-top: 0; }
+  .pw-wrap { position: relative; display: flex; }
+  /* Just enough padding for the eye itself. Bitwarden reads padding-right to
+     decide its overlay position and will park immediately inboard of the eye. */
+  .pw-wrap input { flex: 1; padding-right: 32px; }
+  .pw-toggle {
+    position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+    background: none; border: none; color: var(--text-muted); padding: 4px;
+    cursor: pointer; margin-top: 0; border-radius: 4px;
+    display: inline-flex; align-items: center;
+  }
+  .pw-toggle:hover { color: var(--text); border-color: transparent; }
+  /* Hide Edge's built-in reveal so it doesn't duplicate our button. */
+  .pw-wrap input::-ms-reveal { display: none; }
 </style>
