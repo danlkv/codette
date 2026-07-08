@@ -65,11 +65,24 @@ echo "==> Starting server on :$PORT  ($SERVER_LOG)"
 (cd "$ROOT/server" && CODETTE_DATA_DIR="$CODETTE_DATA" node src/index.js) >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
-# Wait for server to be ready
+# Wait for server to be ready.
+# Fail loud if the process dies or the port never binds — a silent fall-through
+# leaves subsequent steps (register/host spawn) hitting ECONNREFUSED with no clue why.
+SERVER_READY=0
 for i in $(seq 1 20); do
   sleep 0.3
-  if curl -sf "http://localhost:$PORT/" >/dev/null 2>&1; then break; fi
+  if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+    echo "==> Server process died during startup. Last 40 lines of $SERVER_LOG:" >&2
+    tail -n 40 "$SERVER_LOG" >&2
+    exit 1
+  fi
+  if curl -sf "http://localhost:$PORT/" >/dev/null 2>&1; then SERVER_READY=1; break; fi
 done
+if [ "$SERVER_READY" != "1" ]; then
+  echo "==> Server did not become ready on :$PORT within 6s. Last 40 lines of $SERVER_LOG:" >&2
+  tail -n 40 "$SERVER_LOG" >&2
+  exit 1
+fi
 
 if [ "$SERVER_ONLY" = "1" ]; then
   printf '%s\n' "$SERVER_PID" > "$PIDFILE"

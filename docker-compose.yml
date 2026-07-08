@@ -10,6 +10,9 @@ services:
       CODETTE_DATA_DIR: /data/codette
       GOOGLE_OIDC_CLIENT_ID: ${GOOGLE_OIDC_CLIENT_ID:-}
       GOOGLE_OIDC_CLIENT_SECRET: ${GOOGLE_OIDC_CLIENT_SECRET:-}
+      # Point at the operator-owned deploy overlay (e.g. /app/oidc-providers.deploy.jsonc).
+      # Unset in local dev → server falls back to the committed oidc-providers.jsonc.
+      CODETTE_OIDC_PROVIDERS_FILE: ${CODETTE_OIDC_PROVIDERS_FILE:-}
     volumes:
       - server-data:/data
     restart: unless-stopped

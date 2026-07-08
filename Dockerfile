@@ -19,7 +19,9 @@ COPY server/ ./
 COPY shared/ /app/shared/
 COPY host/ /app/host/
 COPY install.sh /app/install.sh
-COPY oidc-providers.jsonc /app/oidc-providers.jsonc
+# Copy the committed template plus any operator overlay (e.g. oidc-providers.deploy.jsonc)
+# present in the build context. Prod points CODETTE_OIDC_PROVIDERS_FILE at the overlay.
+COPY oidc-providers*.jsonc /app/
 COPY --from=client-builder /app/client/dist /app/client/dist
 RUN mkdir -p /data
 EXPOSE 3000

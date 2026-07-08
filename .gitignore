@@ -5,3 +5,6 @@ _worktrees/
 .dev-data/
 test-results/
 .last-run.json
+# Operator-owned overlays for prod deploys — Google/OIDC creds go here.
+oidc-providers.deploy.jsonc
+oidc-providers.*.deploy.jsonc

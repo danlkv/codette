@@ -38,12 +38,15 @@
     },
 
     // Google — public sign-in.
-    // Disable: comment this entry out. Required env: GOOGLE_OIDC_CLIENT_ID, GOOGLE_OIDC_CLIENT_SECRET.
-    {
-      "issuer":        "https://accounts.google.com",
-      "client_id":     "${GOOGLE_OIDC_CLIENT_ID}",
-      "client_secret": "${GOOGLE_OIDC_CLIENT_SECRET}"
-    },
+    // Enable: uncomment + set GOOGLE_OIDC_CLIENT_ID, GOOGLE_OIDC_CLIENT_SECRET.
+    // For lykov.tech and similar deployments, keep this commented and place an
+    // operator-specific `oidc-providers.deploy.jsonc` (gitignored) with Google
+    // uncommented; point CODETTE_OIDC_PROVIDERS_FILE at it in the prod .env.
+    // {
+    //   "issuer":        "https://accounts.google.com",
+    //   "client_id":     "${GOOGLE_OIDC_CLIENT_ID}",
+    //   "client_secret": "${GOOGLE_OIDC_CLIENT_SECRET}"
+    // },
 
     // GitHub.
     // Enable: uncomment + set GITHUB_OIDC_CLIENT_ID, GITHUB_OIDC_CLIENT_SECRET.
