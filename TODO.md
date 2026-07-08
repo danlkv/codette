@@ -52,6 +52,14 @@ Theme: no way to show someone a session without giving them account access.
    - Share link opens a view-only render — no auth required, no input controls.
    - Expiry and revocation controlled by the owner.
 
+7. Message subthreads
+Theme: side questions and clarifications derail the main turn — no branching.
+   - Slack-style thread panel per message.
+   - Mobile: tap message opens the thread. Desktop: hover message → thread icon → click.
+   - Subthread messages stay out of main conversation history (side-channel, not injected).
+   - Persisted per-message; unread indicator on the parent message.
+   - Depends on the sub-message evolution from Polish #11 — a "message" needs a stable boundary to hang a thread off.
+
 5. [x] E2E encryption & device trust
 Theme: the server is a relay — it sees all session traffic in plaintext, so a compromised relay exposes full history.
    - Encrypt messages on the client before sending; decrypt on receive — relay sees only ciphertext.
@@ -109,3 +117,10 @@ Theme: large or repeatedly-edited files bloat the chat and have no dedicated vie
    - Fullscreen toggle for file content (like the existing mermaid fullscreen) — code, HTML preview, etc.
    - HTML rendering caps: truncate or collapse inline file content beyond a threshold.
    - When Claude edits the same HTML file multiple times, prefer inline file attachment over repeated full dumps.
+
+11. Keyboard navigation
+Theme: no fast way to skim a long session — mouse scroll only.
+   - `K` / `J` (capital) jump to prev / next message boundary.
+   - Depends on sub-messages — an evolution of the existing message unit: long assistant turns split so boundaries land ~one screen apart.
+     - Auto-split: paragraph/heading boundary nearest viewport-height threshold.
+     - Alternative behind a feature flag: prompt the agent to emit an explicit divider fence (e.g. ```` ```divider ````).
