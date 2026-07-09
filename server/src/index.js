@@ -12,6 +12,7 @@ import { execFileSync } from 'child_process';
 import cookieParser from 'cookie-parser';
 import { RpcClient } from './rpc.js';
 import { unpackParam } from '../../shared/crypto.js';
+import { WS_CLOSE_TAKEN_OVER, WS_TAKEN_OVER_REASON } from '../../shared/constants.js';
 import { mountHostEnrollmentRoutes, pendingStore } from './host-enrollment/register.js';
 import { makeVerifyIdToken, mountConsentRoute, loadProviders, exchangeCode } from './user-auth/index.js';
 import { renderError } from './util/render.js';
@@ -411,9 +412,19 @@ wss.on('connection', async (ws, req) => {
       ws.close(1008, 'clientUsername mismatch');
       return;
     }
-    if (hosts.has(validated.username)) {
-      ws.close(1008, 'Host already connected for this username');
-      return;
+    // Takeover: a fresh valid proof signed by the SAME key proves this is the
+    // same host (reconnect after network drop, ghost connection, restart).
+    // Evict the old connection with a code the host recognizes as "do not
+    // auto-reconnect". A different key for the same username can't happen
+    // (owners.js binds one pubkey per username) — reject as defense-in-depth.
+    const prev = hosts.get(validated.username);
+    if (prev) {
+      if (prev.jkt !== validated.jkt) {
+        ws.close(1008, 'Host already connected for this username');
+        return;
+      }
+      console.log(`[server] host takeover: ${validated.username} (evicting previous connection)`);
+      try { prev.ws.close(WS_CLOSE_TAKEN_OVER, WS_TAKEN_OVER_REASON); } catch {}
     }
 
     const host = new HostContext(validated.username, ws);
@@ -483,8 +494,11 @@ wss.on('connection', async (ws, req) => {
     });
 
     ws.on('close', () => {
-      hosts.delete(validated.username);
       host.rpc.flush();
+      // Superseded by a takeover: the map now points at the new connection —
+      // don't unregister it or tell clients the host went away.
+      if (hosts.get(validated.username) !== host) return;
+      hosts.delete(validated.username);
       console.log(`[server] host disconnected: ${validated.username} (${hosts.size} remaining)`);
       wtrace('host', 'server', 'disconnect', { username: validated.username });
       host.broadcast({ type: 'host_status', connected: false });
