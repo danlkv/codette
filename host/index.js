@@ -14,7 +14,7 @@ import { ClaudeRenderer, toolSummary } from './renderer.js';
 import { RpcServer } from './rpc.js';
 import { makeInlineFilePrompt, HTML_RENDER_PROMPT } from '../shared/prompts.js';
 import { hmacVerify, deriveKey, deriveNonceKey, deriveAuthKey, encrypt, encryptDet, decrypt } from '../shared/crypto.js';
-import { APP_NAME } from '../shared/constants.js';
+import { APP_NAME, WS_CLOSE_TAKEN_OVER } from '../shared/constants.js';
 import { signHandshakeProof, loadOrGenerateKeyMaterial } from './auth.js';
 
 // ── Config loading ──────────────────────────────────────────────────────────
@@ -895,8 +895,13 @@ async function connect() {
     }
   });
 
-  ws.on('close', () => {
-    log('warn', 'disconnected from server, reconnecting…');
+  ws.on('close', (code, reason) => {
+    if (code === WS_CLOSE_TAKEN_OVER) {
+      log('error', 'this host was taken over by another host connection using the same key (another codette instance?) — exiting');
+      process.exit(1);
+    }
+    const r = reason?.toString();
+    log('warn', `disconnected from server (${code}${r ? `: ${r}` : ''}), reconnecting…`);
     setTimeout(() => connect().catch(e => log('error', 'reconnect failed', { err: e.message })), 3000);
   });
 
