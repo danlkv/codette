@@ -7,7 +7,7 @@
 
   import { makeInlineFilePrompt, HTML_RENDER_PROMPT } from '../../../shared/prompts.js';
   import { messages, lastCost, lastUsage, lastContextUsage, hostStatus, wsOk, colorScheme, highContrast, vibrateOnDone, fontStyle, syntaxTheme, accentColor,
-           sessions, currentSessionId, sessionData, showFileChips, slashRegistry } from '../store.js';
+           sessions, currentSessionId, sessionData, showFileChips, slashRegistry, modelRegistry } from '../store.js';
   import { createParser } from './parser.js';
   import { decide } from './commands.js';
   import { fetchHistory, deleteSession } from '../utils/api.js';
@@ -358,6 +358,7 @@
           return incoming.map(s => filesMap.has(s.id) ? { ...s, files: filesMap.get(s.id) } : s);
         });
         if (msg.hostCwd) hostCwd = msg.hostCwd;
+        if (Array.isArray(msg.models) && msg.models.length) modelRegistry.set(msg.models);
         // Sessions arrive via WS only — do initial navigation if not yet done
         if (incoming.length > 0 && !get(currentSessionId)) {
           const { sessionId: hashId, file: hashFile } = parseHash();

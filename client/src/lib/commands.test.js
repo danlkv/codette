@@ -5,7 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decide, CODETTE_COMMANDS, SDK_MAPPED } from './commands.js';
+import { decide, modelArgs, CODETTE_COMMANDS, SDK_MAPPED } from './commands.js';
 
 const ctx = (registry = []) => ({ registry });
 
@@ -70,4 +70,15 @@ test('non-slash text is a normal message', () => {
 test('exported command lists drive suggestions', () => {
   assert.ok(CODETTE_COMMANDS.some(c => c.cmd === '/codette-status'));
   assert.ok(SDK_MAPPED.some(c => c.cmd === '/model'));
+});
+
+// ── /model argument list ──────────────────────────────────────────────────────
+
+test('modelArgs uses the fetched model list when available', () => {
+  const args = modelArgs([{ value: 'claude-fable-5', displayName: 'Fable' }]);
+  assert.deepEqual(args, ['claude-fable-5']);
+});
+
+test('modelArgs falls back to aliases when no list was fetched', () => {
+  assert.deepEqual(modelArgs([]), ['sonnet', 'opus', 'haiku']);
 });

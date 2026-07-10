@@ -3,8 +3,8 @@
 
 <script>
   import { tick } from 'svelte';
-  import { slashRegistry } from '../store.js';
-  import { CODETTE_COMMANDS, SDK_MAPPED } from './commands.js';
+  import { slashRegistry, modelRegistry } from '../store.js';
+  import { CODETTE_COMMANDS, SDK_MAPPED, modelArgs } from './commands.js';
   let { disabled = false, placeholder = 'Message Claude…', sendLabel = 'send', onSend, header } = $props();
 
   let value = $state('');
@@ -15,14 +15,16 @@
   let slashCmds = $derived([
     ...CODETTE_COMMANDS.map(c => ({ cmd: c.cmd, desc: c.desc })),
     ...SDK_MAPPED.filter(c => !$slashRegistry.includes(c.cmd.slice(1)))
-      .map(c => ({ cmd: c.cmd, desc: c.desc, args: c.args })),
+      .map(c => ({ cmd: c.cmd, desc: c.desc,
+        args: c.cmd === '/model' ? modelArgs($modelRegistry) : c.args })),
     ...$slashRegistry.map(n => ({ cmd: '/' + n, desc: '' })),
   ]);
 
   let prefix = $derived(value.split(' ')[0]);
   let argText = $derived(value.includes(' ') ? value.slice(value.indexOf(' ') + 1) : null);
+  let dismissed = $state(false);
   let matches = $derived.by(() => {
-    if (!value.startsWith('/')) return [];
+    if (dismissed || !value.startsWith('/')) return [];
     if (argText !== null) {
       const args = slashCmds.find(c => c.cmd === prefix)?.args ?? [];
       return args.filter(a => a.startsWith(argText))
@@ -31,9 +33,21 @@
     return slashCmds.filter(c => c.cmd.startsWith(prefix));
   });
 
+  // Keyboard selection: -1 = none (Enter sends as usual).
+  let selected = $state(-1);
+  $effect(() => { matches; selected = -1; });  // reset on list change
+  let itemEls = $state([]);
+
   function complete(cmd) {
     value = cmd + ' ';
+    selected = -1;
     el?.focus();
+  }
+
+  function moveSelection(delta) {
+    if (!matches.length) return;
+    selected = (selected + delta + matches.length) % matches.length;
+    itemEls[selected]?.scrollIntoView({ block: 'nearest' });
   }
 
   function send() {
@@ -45,11 +59,18 @@
 
   function keydown(e) {
     const isPhone = window.matchMedia('(pointer: coarse)').matches && window.innerWidth < 768;
-    if (e.key === 'Enter' && !e.shiftKey && !isPhone) { e.preventDefault(); send(); }
-    if (e.key === 'Tab' && matches.length) {
-      e.preventDefault();
-      complete(matches[0].cmd);
+    if (matches.length) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); moveSelection(1); return; }
+      if (e.key === 'ArrowUp')   { e.preventDefault(); moveSelection(-1); return; }
+      if (e.key === 'Escape')    { e.preventDefault(); dismissed = true; return; }
+      if (e.key === 'Enter' && !e.shiftKey && selected >= 0) {
+        e.preventDefault(); complete(matches[selected].cmd); return;
+      }
+      if (e.key === 'Tab') {
+        e.preventDefault(); complete(matches[Math.max(selected, 0)].cmd); return;
+      }
     }
+    if (e.key === 'Enter' && !e.shiftKey && !isPhone) { e.preventDefault(); send(); }
   }
 
   function resize() {
@@ -62,8 +83,9 @@
 <div class="wrap">
   {#if matches.length}
     <div class="cmds">
-      {#each matches as m}
-        <button class="cmd-item" onclick={() => complete(m.cmd)}>
+      {#each matches as m, i}
+        <button class="cmd-item" class:selected={i === selected}
+          bind:this={itemEls[i]} onclick={() => complete(m.cmd)}>
           <span class="cmd">{m.cmd}</span>
           <span class="desc">{m.desc}</span>
         </button>
@@ -74,7 +96,7 @@
   <div class="bar">
     <textarea
       bind:this={el} bind:value
-      onkeydown={keydown} oninput={resize}
+      onkeydown={keydown} oninput={() => { dismissed = false; resize(); }}
       {placeholder} rows="1"
     ></textarea>
     <button onclick={send} disabled={!value.trim() || disabled}>{sendLabel}</button>
@@ -117,6 +139,7 @@
   .cmds {
     max-width: 740px; margin: 0 auto 6px;
     display: flex; flex-direction: column; gap: 2px;
+    max-height: 40vh; overflow-y: auto;
   }
   .cmd-item {
     display: flex; align-items: baseline; gap: 10px;
@@ -125,7 +148,7 @@
     font: inherit; width: 100%;
     transition: background .1s;
   }
-  .cmd-item:hover { background: var(--bg-elevated); }
+  .cmd-item:hover, .cmd-item.selected { background: var(--bg-elevated); }
   .cmd  { color: var(--accent-light); font-size: .8rem; min-width: 80px; }
   .desc { color: var(--text-dim); font-size: .75rem; }
 </style>

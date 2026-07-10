@@ -17,9 +17,14 @@ export const CODETTE_COMMANDS = [
 // the active registry.
 export const SDK_MAPPED = [
   { cmd: '/model', event: 'set_model', argKey: 'model',
-    args: ['default', 'sonnet', 'opus', 'haiku'],
     desc: 'switch model', hint: 'usage: /model <alias|model-id>' },
 ];
+
+// Completion arguments for /model: the host-fetched model list
+// (SDK supportedModels()), falling back to aliases before the fetch lands.
+export function modelArgs(models) {
+  return models?.length ? models.map(m => m.value) : ['sonnet', 'opus', 'haiku'];
+}
 
 /**
  * Decide what to do with input-bar text.

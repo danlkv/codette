@@ -68,7 +68,9 @@ Claude Code command types per [`claude-code-cli.md`](claude-code-cli.md).
 The current model is read from the last assistant message's `model` field.
 
 **Completion.** Suggestions = active registry ∪ codette commands ∪ SDK-mapped
-commands; `/model` also completes its argument (model aliases, free-form id).
+commands; `/model` completes its argument from the host-fetched model list
+(SDK `supportedModels()`, carried in `session_list`), with alias fallback
+before the fetch lands; free-form ids are accepted.
 
 **Rendering.** Local command output arrives as synthetic assistant messages
 (result `num_turns: 0`; no cost footer). Compact progress arrives as

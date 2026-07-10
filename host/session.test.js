@@ -6,7 +6,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createSdkSession } from './session.js';
+import { createSdkSession, fetchSupportedModels } from './session.js';
 
 function fakeQuery() {
   const calls = { options: null, setModel: [] };
@@ -41,4 +41,20 @@ test('session.setModel delegates to the live query', async () => {
   await session.setModel('haiku');
   assert.deepEqual(calls.setModel, ['haiku']);
   session.stop();
+});
+
+
+test('fetchSupportedModels uses a throwaway query and aborts it', async () => {
+  const models = [{ value: 'claude-fable-5[1m]', displayName: 'Fable' }];
+  let aborted = false;
+  const fn = ({ options }) => {
+    options.abortController.signal.addEventListener('abort', () => { aborted = true; });
+    return {
+      async *[Symbol.asyncIterator]() {},
+      supportedModels() { return Promise.resolve(models); },
+    };
+  };
+  const got = await fetchSupportedModels({ queryFn: fn });
+  assert.deepEqual(got, models);
+  assert.equal(aborted, true);
 });

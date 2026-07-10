@@ -11,6 +11,25 @@
 import { spawn } from 'child_process';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
+// One-shot model-list fetch via a throwaway query (no conversation, no API
+// call). Used at host startup so /model completion works before any agent runs.
+export async function fetchSupportedModels({ queryFn = query } = {}) {
+  const abortController = new AbortController();
+  const q = queryFn({
+    prompt: (async function* () { await new Promise(() => {}); })(),
+    options: {
+      abortController,
+      permissionMode: 'bypassPermissions',
+      allowDangerouslySkipPermissions: true,
+    },
+  });
+  try {
+    return await q.supportedModels();
+  } finally {
+    abortController.abort('stop');
+  }
+}
+
 export function createSpawnSession(args, cwd) {
   const proc = spawn(args[0], args.slice(1), {
     stdio: ['pipe', 'pipe', 'pipe'],

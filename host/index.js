@@ -3,7 +3,7 @@
 // Copyright 2026 Danylo Lykov
 
 import { execSync, execFileSync } from 'child_process';
-import { createSpawnSession, createSdkSession } from './session.js';
+import { createSpawnSession, createSdkSession, fetchSupportedModels } from './session.js';
 import { randomBytes } from 'crypto';
 import { WebSocket } from 'ws';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync, existsSync } from 'fs';
@@ -338,9 +338,30 @@ async function hostSend(obj) {
   ws.send(JSON.stringify(obj));
 }
 
+// Model list from the SDK (supportedModels()), fetched eagerly at startup
+// via a throwaway query and included in session_list broadcasts for /model
+// completion.
+let modelList = [];
+
 function sendSessionList() {
-  hostSend({ type: 'session_list', sessions: listSessions(), hostCwd: process.cwd() });
+  hostSend({ type: 'session_list', sessions: listSessions(), hostCwd: process.cwd(), models: modelList });
 }
+
+function setModelList(models) {
+  if (!models?.length) return;
+  modelList = models.map(m => ({ value: m.value, displayName: m.displayName }));
+  sendSessionList();
+}
+
+let modelFetchStarted = false;
+function ensureModelList() {
+  if (modelFetchStarted || (_cli.backend || 'sdk') !== 'sdk') return;
+  modelFetchStarted = true;
+  fetchSupportedModels()
+    .then(setModelList)
+    .catch(e => { modelFetchStarted = false; log('warn', 'supportedModels failed', { err: e.message }); });
+}
+
 
 // ── Agent registry ────────────────────────────────────────────────────────────
 // Map<sessionId, session>
@@ -434,7 +455,7 @@ function startSession(extraArgs = [], sessionIdHint = null, overrideCwd = null, 
       if (!list.find(s => s.id === newId)) {
         list.unshift({ id: newId, title: '', ts: Date.now(), agentState: 'idle', msgCount: 0, cwd: ev.cwd || null });
       }
-      hostSend({ type: 'session_list', sessions: list, hostCwd: process.cwd() });
+      hostSend({ type: 'session_list', sessions: list, hostCwd: process.cwd(), models: modelList });
     }
   };
 
@@ -741,6 +762,7 @@ async function connect() {
     }
     if (Object.keys(states).length > 0) hostSend({ type: 'agent_event', states });
     checkUpdate();
+    ensureModelList();
   });
 
   ws.on('message', async (data) => {
