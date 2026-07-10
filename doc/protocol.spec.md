@@ -68,6 +68,7 @@ close except `4001`, on which it exits.
 | `log` | `level`, `msg`, `data?`, `ts` | server buffers last 500 |
 | `claude_line` | `sessionId`, `line` | every stdout line; server broadcasts to all WS clients |
 | `agent_event` | `sessionId`, `event` | state transition; server broadcasts and updates agent map |
+| `agent_ctl_result` | `sessionId`, `event`, `ok`, event-specific fields, `error?` | outcome of an `agent_ctl` action; server broadcasts to clients |
 | `session_list` | `sessions: Session[]`, `hostCwd: string`, `models: {value, displayName}[]` | response to `list_sessions`; server caches and returns via REST. `models` from SDK `supportedModels()`, fetched once from the first live agent |
 | `permission_request` | `sessionId`, `toolUseId`, `toolName`, `input`, `title?`, `displayName?`, `description?` | SDK `canUseTool` callback; server broadcasts to clients. Host stores `{handler, input}` in `pendingPermissions` keyed by `toolUseId` |
 
@@ -120,6 +121,7 @@ Push events and stateful commands only. No capability negotiation on connect —
 | `session_list` | `sessions: Session[]` | any session change; `hostCwd` is REST-only |
 | `claude_line` | `sessionId`, `line` | clients route to per-session message store |
 | `agent_event` | `sessionId`, `event` | clients update `agentActive` |
+| `agent_ctl_result` | `sessionId`, `event`, `ok`, event-specific fields, `error?` | clients render the confirmed outcome (e.g. `model → <id>`) |
 | `host_status` | `connected: bool` | host connect/disconnect |
 | `permission_request` | `sessionId`, `toolUseId`, `toolName`, `input`, `title?`, `displayName?`, `description?` | passthrough from host; client renders interactive block based on `toolName` |
 

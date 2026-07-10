@@ -63,7 +63,7 @@ Claude Code command types per [`claude-code-cli.md`](claude-code-cli.md).
 
 | Command | SDK method |
 |---------|-----------|
-| `/model <alias\|id>` | `setModel()`; idle session → applied via resume; before the session exists → deferred and applied at session start. Acknowledged locally as `model → <id>` |
+| `/model <alias\|id>` | `setModel()`; idle session → applied via resume; before the session exists → queued and applied at session start. Outcome is host-confirmed via `agent_ctl_result` — the client never displays success locally. Each live agent start renders `model: <id>` from the init event |
 
 The current model is read from the last assistant message's `model` field.
 

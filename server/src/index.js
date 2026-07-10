@@ -469,6 +469,12 @@ wss.on('connection', async (ws, req) => {
         return;
       }
 
+      if (ev?.type === 'agent_ctl_result') {
+        wtrace('host', 'server', 'agent_ctl_result', { sessionId: ev.sessionId?.slice(0, 8) ?? null });
+        host.broadcast(ev);
+        return;
+      }
+
       if (ev?.type === 'session_list') {
         wtrace('host', 'server', 'session_list');
         if (ev.ciphertext) {

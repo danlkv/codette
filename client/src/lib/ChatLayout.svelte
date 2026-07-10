@@ -352,6 +352,13 @@
         wtrace('server', 'client', msg.type, msg.sessionId);
       }
 
+      if (msg.type === 'agent_ctl_result') {
+        if (msg.event === 'set_model') {
+          sysMsg(msg.ok ? `model → ${msg.model}` : `model switch failed: ${msg.error ?? 'unknown error'}`);
+        }
+        return;
+      }
+
       if (msg.type === 'session_list') {
         const incoming = dedupById(msg.sessions ?? []);
         sessions.update(list => {
@@ -534,7 +541,7 @@
         // at session start via codette_settings; other controls need an agent.
         if (decision.event === 'set_model') {
           pendingModel = decision.model;
-          sysMsg(`model → ${decision.model} (applies to the new session)`);
+          sysMsg(`model ${decision.model} queued for the new session`);
         } else {
           sysMsg('no active session');
         }
@@ -542,7 +549,7 @@
       }
       const { kind: _k, ...ctl } = decision;
       wsSend({ type: 'agent_ctl', sessionId: sid, ...ctl });
-      if (decision.event === 'set_model') sysMsg(`model → ${decision.model}`);
+      // No local ack — confirmation arrives as agent_ctl_result from the host.
       clearFn?.(); return;
     }
     // 'passthrough' and 'message': ordinary user message

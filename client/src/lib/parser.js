@@ -69,6 +69,9 @@ export function createParser({ messages, currentSessionId, lastCost, lastUsage, 
     if (ev.type === 'system' && ev.subtype === 'init' && ev.session_id) {
       if (!get(currentSessionId)) currentSessionId.set(ev.session_id);
       if (slashRegistry && Array.isArray(ev.slash_commands)) slashRegistry.set(ev.slash_commands);
+      // Surface the active model when an agent starts — host-confirmed data,
+      // not a client assumption. Suppressed on history replay.
+      if (live && ev.model) mutMsg(ms => [...ms, { id: uid(), role: 'system', text: `model: ${ev.model}` }]);
       return;
     }
 

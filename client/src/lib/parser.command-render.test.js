@@ -81,3 +81,18 @@ test('result from a real turn still updates cost', () => {
   parser.parseLine(line({ type: 'result', num_turns: 1, total_cost_usd: 0.5, usage: { input_tokens: 10 } }));
   assert.equal(get(lastCost), 0.5);
 });
+
+test('live session init renders the active model', () => {
+  const { parser, messages } = freshParser();
+  parser.parseLine(line({ type: 'system', subtype: 'init', session_id: 's1', model: 'claude-fable-5' }), true);
+  const ms = get(messages);
+  assert.equal(ms.length, 1);
+  assert.equal(ms[0].role, 'system');
+  assert.equal(ms[0].text, 'model: claude-fable-5');
+});
+
+test('history replay init renders nothing', () => {
+  const { parser, messages } = freshParser();
+  parser.parseLine(line({ type: 'system', subtype: 'init', session_id: 's1', model: 'claude-fable-5' }), false);
+  assert.equal(get(messages).length, 0);
+});

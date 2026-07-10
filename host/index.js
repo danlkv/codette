@@ -825,12 +825,24 @@ async function connect() {
       if (event === 'set_model') {
         if (!msg.model) return;
         log('info', 'set_model', { sessionId: String(sessionId).slice(0, 8), model: msg.model });
+        const confirm = (ok, extra = {}) =>
+          hostSend({ type: 'agent_ctl_result', sessionId, event: 'set_model', ok, model: msg.model, ...extra });
         if (session?.setModel) {
-          session.setModel(msg.model).catch(e => log('error', 'set_model failed', { err: e.message }));
+          session.setModel(msg.model)
+            .then(() => confirm(true))
+            .catch(e => { log('error', 'set_model failed', { err: e.message }); confirm(false, { error: e.message }); });
         } else if (!session) {
-          startSession(['--resume', sessionId], sessionId, null, { model: msg.model });
+          // Resume with the model; confirm from the resumed agent's init,
+          // which reports the model actually in effect.
+          const resumed = startSession(['--resume', sessionId], sessionId, null, { model: msg.model });
+          const origInit = resumed.onInit;
+          resumed.onInit = (newId, ev) => {
+            origInit?.(newId, ev);
+            hostSend({ type: 'agent_ctl_result', sessionId: newId, event: 'set_model', ok: true, model: ev.model ?? msg.model });
+          };
         } else {
           log('warn', 'set_model: not supported by this backend');
+          confirm(false, { error: 'not supported by this backend' });
         }
         return;
       }
