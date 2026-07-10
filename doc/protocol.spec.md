@@ -56,7 +56,10 @@ claude --dangerously-skip-permissions \
 
 
 
-One persistent connection. Host reconnects on drop.
+One persistent connection. Close codes: `1008` — authentication rejection
+(invalid proof, username mismatch); `4001` — superseded by a newer connection
+presenting a valid proof for the same key. Host reconnects after 3 s on any
+close except `4001`, on which it exits.
 
 ### Host → Server
 
@@ -83,7 +86,7 @@ One persistent connection. Host reconnects on drop.
 |------|-----------|-------|
 | `list_sessions` | — | on host connect; response populates server's session cache |
 | `delete_session` | `sessionId`, `nonce?`, `ciphertext?` | delete `.jsonl` file; host sends updated `session_list`. Under e2e the request carries an encrypted empty `{}` body — host rejects plaintext when `encKey` is derived |
-| `agent_ctl` | `sessionId`, `event: 'stop'\|'interrupt'` | `stop`: kill process · `interrupt`: SIGUSR1 |
+| `agent_ctl` | `sessionId`, `event`, event-specific fields | `stop`: kill process · `interrupt`: SIGUSR1 · `set_model {model}`: apply to the live agent via the SDK, or on the auto-resume triggered by the session's next message. Unknown events are ignored |
 | `user` | `sessionId`, `message: {role, content}`, `cwd?`, `codette_settings?` | forward to claude stdin; host auto-resumes if no agent running. `sessionId === '__new__'` spawns a fresh claude using `cwd` (validated against `process.cwd()` + `ALLOWED_PREFIXES`, override with `--no-dir-privacy`) |
 | `permission_response` | `toolUseId`, `allow: bool`, `message?`, `updatedInput?` | client decision; host merges `{...originalInput, ...updatedInput}` before resolving SDK promise (SDK replaces, not merges) |
 
@@ -125,7 +128,7 @@ Push events and stateful commands only. No capability negotiation on connect —
 | type | key fields | notes |
 |------|-----------|-------|
 | `list_sessions` | — | client requests session list; first message after WS open |
-| `agent_ctl` | `sessionId`, `event: 'stop'\|'interrupt'` | forwarded to host |
+| `agent_ctl` | `sessionId`, `event`, event-specific fields | forwarded to host verbatim |
 | `user` | `sessionId`, `message: {role, content}` | server forwards to host stdin; **host** echoes back as `claude_line({type:'user'})` to all clients |
 | `permission_response` | `toolUseId`, `allow: bool`, `message?`, `updatedInput?` | server forwards to host blindly; `updatedInput` is a partial overlay (e.g. `{answers}` for AskUserQuestion) |
 

@@ -14,7 +14,7 @@ import { toolSummary } from '../utils/tools.js';
  *   (caller should call messages.set(result)).
  * - resetTurnState / finalizeIncomplete: lifecycle helpers for callers.
  */
-export function createParser({ messages, currentSessionId, lastCost, lastUsage, lastContextUsage, onContextWindow }) {
+export function createParser({ messages, currentSessionId, lastCost, lastUsage, lastContextUsage, onContextWindow, slashRegistry = null }) {
   // Per-turn streaming state
   let seenToolIds = new Set();
   let liveClaudeId = null;
@@ -68,11 +68,36 @@ export function createParser({ messages, currentSessionId, lastCost, lastUsage, 
 
     if (ev.type === 'system' && ev.subtype === 'init' && ev.session_id) {
       if (!get(currentSessionId)) currentSessionId.set(ev.session_id);
+      if (slashRegistry && Array.isArray(ev.slash_commands)) slashRegistry.set(ev.slash_commands);
+      return;
+    }
+
+    // Local-command artifacts (see doc/main.spec.md "Slash commands").
+    if (ev.type === 'system' && ev.subtype === 'local_command') {
+      const out = /<local-command-std(?:out|err)>([\s\S]*?)<\/local-command-std(?:out|err)>/.exec(ev.content ?? '');
+      const text = (out ? out[1] : String(ev.content ?? '')).trim();
+      if (text) mutMsg(ms => [...ms, { id: uid(), role: 'system', text }]);
+      return;
+    }
+    if (ev.type === 'system' && ev.subtype === 'status') {
+      let text = null;
+      if (ev.status === 'compacting') text = 'compacting…';
+      else if (ev.compact_result === 'success') text = 'compacted';
+      else if (ev.compact_result === 'failed') text = `compact failed: ${ev.compact_error ?? 'unknown error'}`;
+      if (text) mutMsg(ms => [...ms, { id: uid(), role: 'system', text }]);
       return;
     }
 
     if (ev.type === 'user') {
       const content = ev.message?.content;
+      if (typeof content === 'string' && content.includes('<local-command-caveat>')) return;
+      if (typeof content === 'string' && content.includes('<command-name>')) {
+        const name = /<command-name>([\s\S]*?)<\/command-name>/.exec(content)?.[1]?.trim() ?? '';
+        const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(content)?.[1]?.trim() ?? '';
+        const text = args ? `${name} ${args}` : name;
+        if (text) mutMsg(ms => [...ms, { id: uid(), role: 'user', text, isCommand: true, ts: ev.timestamp ?? null }]);
+        return;
+      }
       if (typeof content === 'string' && content.trim()) {
         mutMsg(ms => [...ms, { id: uid(), role: 'user', text: content, ts: ev.timestamp ?? null }]);
       } else if (Array.isArray(content)) {
@@ -192,8 +217,10 @@ export function createParser({ messages, currentSessionId, lastCost, lastUsage, 
       mutMsg(ms => ms.map(m =>
         m.role === 'tool' && m.running ? { ...m, running: false } : m
       ));
-      if (ev.total_cost_usd != null) lastCost.set(ev.total_cost_usd);
-      if (ev.usage != null) lastUsage.set(ev.usage);
+      // Local commands complete with num_turns 0 — no model call, nothing to bill.
+      const isLocalTurn = ev.num_turns === 0;
+      if (!isLocalTurn && ev.total_cost_usd != null) lastCost.set(ev.total_cost_usd);
+      if (!isLocalTurn && ev.usage != null) lastUsage.set(ev.usage);
       // result.modelUsage provides the definitive contextWindow (denominator).
       // Use lastAssistantUsage for per-call token counts — result.usage is cumulative across turns.
       // With --include-partial-messages, the final complete assistant event may not reach the live

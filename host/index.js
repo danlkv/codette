@@ -358,7 +358,7 @@ function sendAgentEvent(sessionId, event) {
 // Creates a Claude session via the session abstraction layer.
 // sessionIdHint: the --resume sessionId, or null for new session
 // cwd: optional working directory override
-function startSession(extraArgs = [], sessionIdHint = null, overrideCwd = null) {
+function startSession(extraArgs = [], sessionIdHint = null, overrideCwd = null, { model } = {}) {
   const resumeIdx = extraArgs.indexOf('--resume');
   const resumeId  = resumeIdx !== -1 ? extraArgs[resumeIdx + 1] : null;
   let spawnCwd   = overrideCwd || (resumeId ? getSessionCwd(resumeId) : null);
@@ -385,6 +385,7 @@ function startSession(extraArgs = [], sessionIdHint = null, overrideCwd = null) 
       permissionMode: _cli.permissionMode || 'bypassPermissions',
       resume: resumeId || undefined,
       systemPrompt,
+      model,
     });
   } else {
     const permFlag = _cli.permissionMode
@@ -392,6 +393,7 @@ function startSession(extraArgs = [], sessionIdHint = null, overrideCwd = null) 
       : ['--dangerously-skip-permissions'];
     session = createSpawnSession([
       'claude',
+      ...(model ? ['--model', model] : []),
       ...permFlag,
       '--input-format', 'stream-json',
       '--output-format', 'stream-json',
@@ -796,6 +798,20 @@ async function connect() {
     if (msg.type === 'agent_ctl') {
       const { sessionId, event } = msg;
       const session = agents.get(sessionId);
+      // set_model works without a live agent: resume the session with the
+      // model; native resume preserves it afterwards.
+      if (event === 'set_model') {
+        if (!msg.model) return;
+        log('info', 'set_model', { sessionId: String(sessionId).slice(0, 8), model: msg.model });
+        if (session?.setModel) {
+          session.setModel(msg.model).catch(e => log('error', 'set_model failed', { err: e.message }));
+        } else if (!session) {
+          startSession(['--resume', sessionId], sessionId, null, { model: msg.model });
+        } else {
+          log('warn', 'set_model: not supported by this backend');
+        }
+        return;
+      }
       if (!session) {
         log('warn', 'agent_ctl: no agent for session', { sessionId: String(sessionId).slice(0, 8), event });
         return;

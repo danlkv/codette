@@ -9,6 +9,7 @@ export const lastCost       = writable(null);
 export const lastUsage          = writable(null); // { input_tokens, output_tokens, cache_read_input_tokens }
 export const lastContextUsage   = writable(null); // { used: number, total: number } from modelUsage
 export const hostStatus     = writable('disconnected');
+export const slashRegistry  = writable([]); // active backend's init.slash_commands
 export const wsOk           = writable(false);
 export const colorScheme    = writable(getSettings('colorScheme'));
 export const highContrast   = writable(getSettings('highContrast'));

@@ -75,7 +75,7 @@ export function createSpawnSession(args, cwd) {
   return session;
 }
 
-export function createSdkSession({ cwd, permissionMode, resume, allowedTools, systemPrompt } = {}) {
+export function createSdkSession({ cwd, permissionMode, resume, allowedTools, systemPrompt, model, queryFn = query } = {}) {
   let inputResolve = null;
   const inputQueue = [];
 
@@ -97,8 +97,9 @@ export function createSdkSession({ cwd, permissionMode, resume, allowedTools, sy
       });
       inputResolve?.();
     },
-    stop()      { abortController.abort('stop'); },
+    stop()      { abortController.abort('stop'); inputResolve?.(); },
     interrupt() { q?.interrupt(); },
+    setModel(m) { return q.setModel(m); },
   };
 
   const abortController = new AbortController();
@@ -122,6 +123,7 @@ export function createSdkSession({ cwd, permissionMode, resume, allowedTools, sy
     abortController,
     ...(cwd && { cwd }),
     ...(resume && { resume }),
+    ...(model && { model }),
     ...(allowedTools && { allowedTools }),
     ...(systemPrompt && { systemPrompt }),
     canUseTool: async (toolName, input, ctx) => {
@@ -135,7 +137,7 @@ export function createSdkSession({ cwd, permissionMode, resume, allowedTools, sy
     },
   };
 
-  const q = query({ prompt: messageGenerator(), options });
+  const q = queryFn({ prompt: messageGenerator(), options });
 
   // Run the SDK loop in the background
   (async () => {

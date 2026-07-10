@@ -3,25 +3,33 @@
 
 <script>
   import { tick } from 'svelte';
+  import { slashRegistry } from '../store.js';
+  import { CODETTE_COMMANDS, SDK_MAPPED } from './commands.js';
   let { disabled = false, placeholder = 'Message Claude…', sendLabel = 'send', onSend, header } = $props();
 
   let value = $state('');
   let el = $state();
 
-  const SLASH_CMDS = [
-    { cmd: '/clear',   desc: 'clear conversation' },
-    { cmd: '/context', desc: 'token usage + cost' },
-    { cmd: '/status',  desc: 'connection status' },
-    { cmd: '/btw',     desc: 'side message (not in history)' },
-    { cmd: '/reload',  desc: 'clear cache and refetch full history' },
-    { cmd: '/codette-inline-files', desc: 'instruct agent to use inline file viewer' },
-    { cmd: '/codette-html-render', desc: 'enable live HTML rendering' },
-  ];
+  // Suggestions = codette commands ∪ SDK-mapped commands (when the active
+  // registry lacks them) ∪ active registry. See doc/main.spec.md.
+  let slashCmds = $derived([
+    ...CODETTE_COMMANDS.map(c => ({ cmd: c.cmd, desc: c.desc })),
+    ...SDK_MAPPED.filter(c => !$slashRegistry.includes(c.cmd.slice(1)))
+      .map(c => ({ cmd: c.cmd, desc: c.desc, args: c.args })),
+    ...$slashRegistry.map(n => ({ cmd: '/' + n, desc: '' })),
+  ]);
 
   let prefix = $derived(value.split(' ')[0]);
-  let matches = $derived(value.startsWith('/')
-    ? SLASH_CMDS.filter(c => c.cmd.startsWith(prefix))
-    : []);
+  let argText = $derived(value.includes(' ') ? value.slice(value.indexOf(' ') + 1) : null);
+  let matches = $derived.by(() => {
+    if (!value.startsWith('/')) return [];
+    if (argText !== null) {
+      const args = slashCmds.find(c => c.cmd === prefix)?.args ?? [];
+      return args.filter(a => a.startsWith(argText))
+        .map(a => ({ cmd: `${prefix} ${a}`, desc: '' }));
+    }
+    return slashCmds.filter(c => c.cmd.startsWith(prefix));
+  });
 
   function complete(cmd) {
     value = cmd + ' ';
