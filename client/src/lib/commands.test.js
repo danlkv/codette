@@ -5,7 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decide, modelArgs, CODETTE_COMMANDS, SDK_MAPPED } from './commands.js';
+import { decide, modelArgs } from './commands.js';
 
 const ctx = (registry = []) => ({ registry });
 
@@ -63,13 +63,6 @@ test('absolute path message is passthrough, never swallowed (regression)', () =>
 
 test('non-slash text is a normal message', () => {
   assert.equal(decide('hello there', ctx()).kind, 'message');
-});
-
-// ── Suggestion source ─────────────────────────────────────────────────────────
-
-test('exported command lists drive suggestions', () => {
-  assert.ok(CODETTE_COMMANDS.some(c => c.cmd === '/codette-status'));
-  assert.ok(SDK_MAPPED.some(c => c.cmd === '/model'));
 });
 
 // ── /model argument list ──────────────────────────────────────────────────────

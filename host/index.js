@@ -747,7 +747,7 @@ async function connect() {
 
   ws.on('open', () => {
     hr();
-    w(`${A.bold}${A.cyan}Claude Web Host${A.reset}  ${A.gray}${SERVER_URL}${A.reset}\n`);
+    w(`${A.bold}${A.cyan}Claude Web Host${A.reset} ${A.dim}v${HOST_VERSION}${A.reset}  ${A.gray}${SERVER_URL}${A.reset}\n`);
     w(`${A.dim}Serving clients as: ${A.reset}${A.bold}${CLIENT_USERNAME}${A.reset}\n`);
     if (_passwordFromCreds) w(`${A.dim}credentials: ${A.reset}${CREDS_PATH}\n`);
     if (NO_DIR_PRIVACY) w(`${A.yellow}[warn] --no-dir-privacy: file access unrestricted${A.reset}\n`);

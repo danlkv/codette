@@ -69,7 +69,7 @@ close except `4001`, on which it exits.
 | `claude_line` | `sessionId`, `line` | every stdout line; server broadcasts to all WS clients |
 | `agent_event` | `sessionId`, `event` | state transition; server broadcasts and updates agent map |
 | `agent_ctl_result` | `sessionId`, `event`, `ok`, event-specific fields, `error?` | outcome of an `agent_ctl` action; server broadcasts to clients |
-| `session_list` | `sessions: Session[]`, `hostCwd: string`, `models: {value, displayName}[]` | response to `list_sessions`; server caches and returns via REST. `models` from SDK `supportedModels()`, fetched once from the first live agent |
+| `session_list` | `sessions: Session[]`, `hostCwd: string`, `models: {value, displayName}[]` | response to `list_sessions`; server caches and returns via REST. `models` from SDK `supportedModels()`, fetched eagerly at host startup |
 | `permission_request` | `sessionId`, `toolUseId`, `toolName`, `input`, `title?`, `displayName?`, `description?` | SDK `canUseTool` callback; server broadcasts to clients. Host stores `{handler, input}` in `pendingPermissions` keyed by `toolUseId` |
 
 **`agent_event` values:** `started` · `streaming` · `idle` · `stopped`

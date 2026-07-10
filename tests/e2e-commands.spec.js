@@ -43,7 +43,7 @@ test('slash-prefixed path is sent as a message, not swallowed', async ({ loggedI
   await expect(page.locator('.user-text', { hasText: '/tmp is a directory' })).toBeVisible({ timeout: 60000 });
 });
 
-test('/model is host-confirmed: queued pre-session, init line, agent_ctl_result', async ({ loggedInPage: page }) => {
+test('/model is host-confirmed: queued pre-session, agent_ctl_result on switch', async ({ loggedInPage: page }) => {
   await newSession(page);
   // Before any message: only an honest local "queued" note.
   await send(page, '/model haiku');
@@ -51,9 +51,6 @@ test('/model is host-confirmed: queued pre-session, init line, agent_ctl_result'
 
   await send(page, 'Reply with exactly: ok');
   await expect(page.locator('.prose', { hasText: 'ok' }).first()).toBeVisible({ timeout: 60000 });
-  // Host-confirmed: live init reports the model actually in effect.
-  await expect(page.getByText(/model: .*haiku/).first()).toBeVisible({ timeout: 10000 });
-
   // Existing session: no local ack; text arrives only via agent_ctl_result.
   await send(page, '/model sonnet');
   await expect(page.getByText(/model → sonnet/).first()).toBeVisible({ timeout: 15000 });

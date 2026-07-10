@@ -82,17 +82,16 @@ test('result from a real turn still updates cost', () => {
   assert.equal(get(lastCost), 0.5);
 });
 
-test('live session init renders the active model', () => {
+test('init renders no transcript line', () => {
   const { parser, messages } = freshParser();
   parser.parseLine(line({ type: 'system', subtype: 'init', session_id: 's1', model: 'claude-fable-5' }), true);
-  const ms = get(messages);
-  assert.equal(ms.length, 1);
-  assert.equal(ms[0].role, 'system');
-  assert.equal(ms[0].text, 'model: claude-fable-5');
+  assert.equal(get(messages).length, 0);
 });
 
-test('history replay init renders nothing', () => {
-  const { parser, messages } = freshParser();
-  parser.parseLine(line({ type: 'system', subtype: 'init', session_id: 's1', model: 'claude-fable-5' }), false);
-  assert.equal(get(messages).length, 0);
+test('assistant events track the current model in context usage', () => {
+  const { parser, lastContextUsage } = freshParser();
+  parser.parseLine(line({ type: 'assistant', message: { id: 'm1', model: 'claude-fable-5',
+    content: [{ type: 'text', text: 'hi' }], stop_reason: 'end_turn',
+    usage: { input_tokens: 10, output_tokens: 2 } } }), true);
+  assert.equal(get(lastContextUsage).model, 'claude-fable-5');
 });

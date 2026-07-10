@@ -21,6 +21,7 @@ export function createParser({ messages, currentSessionId, lastCost, lastUsage, 
   let liveUid = null;
   let msgCounter = 0;
   let lastAssistantUsage = null; // last seen assistant message usage (any stop_reason)
+  let lastAssistantModel = null; // last seen assistant message model
 
   // Batch accumulator: null = write to store directly, array = accumulate for atomic set
   let _batch = null;
@@ -69,9 +70,6 @@ export function createParser({ messages, currentSessionId, lastCost, lastUsage, 
     if (ev.type === 'system' && ev.subtype === 'init' && ev.session_id) {
       if (!get(currentSessionId)) currentSessionId.set(ev.session_id);
       if (slashRegistry && Array.isArray(ev.slash_commands)) slashRegistry.set(ev.slash_commands);
-      // Surface the active model when an agent starts — host-confirmed data,
-      // not a client assumption. Suppressed on history replay.
-      if (live && ev.model) mutMsg(ms => [...ms, { id: uid(), role: 'system', text: `model: ${ev.model}` }]);
       return;
     }
 
@@ -198,6 +196,7 @@ export function createParser({ messages, currentSessionId, lastCost, lastUsage, 
       const stopReason = ev.message?.stop_reason;
       const usage = ev.message?.usage;
       if (usage) lastAssistantUsage = usage; // track last seen usage for result handler fallback
+      if (ev.message?.model) lastAssistantModel = ev.message.model;
       if (stopReason != null && usage && lastContextUsage) {
         const inputTotal = (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0);
         const val = {
@@ -205,6 +204,7 @@ export function createParser({ messages, currentSessionId, lastCost, lastUsage, 
           total: 200000, // all current Claude models; overwritten when result event provides contextWindow
           cacheRead: usage.cache_read_input_tokens ?? 0,
           out: usage.output_tokens ?? 0,
+          model: lastAssistantModel,
         };
         lastContextUsage.set(val);
       }
@@ -240,6 +240,7 @@ export function createParser({ messages, currentSessionId, lastCost, lastUsage, 
             total: cw ?? 200000,
             cacheRead: u.cache_read_input_tokens ?? 0,
             out: u.output_tokens ?? 0,
+            model: lastAssistantModel,
           });
           if (cw != null) onContextWindow?.(cw);
         } else if (cw != null) {

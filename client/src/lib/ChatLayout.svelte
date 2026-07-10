@@ -766,6 +766,7 @@
         <div class="ctx-above">
           <div class="ctx-above-inner">
             {#if $lastContextUsage}
+              {#if $lastContextUsage.model}<em>{$lastContextUsage.model}</em> <span class="ctx-sep">·</span>{/if}
               ctx <em>{Math.round($lastContextUsage.used / 1000)}k / {Math.round($lastContextUsage.total / 1000)}k</em>
               {#if $lastContextUsage.out}
                 <span class="ctx-sep">·</span> last out: <em>{($lastContextUsage.out / 1000).toFixed(1)}k</em>

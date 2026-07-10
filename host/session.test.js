@@ -21,18 +21,14 @@ function fakeQuery() {
   return { fn, calls };
 }
 
-test('model option is passed to the SDK query options', () => {
+test('model option is passed to SDK query options only when provided', () => {
   const { fn, calls } = fakeQuery();
-  const s = createSdkSession({ model: 'opus', queryFn: fn });
+  const s1 = createSdkSession({ model: 'opus', queryFn: fn });
   assert.equal(calls.options.model, 'opus');
-  s.stop();
-});
-
-test('no model option → model absent from SDK query options', () => {
-  const { fn, calls } = fakeQuery();
-  const s = createSdkSession({ queryFn: fn });
+  s1.stop();
+  const s2 = createSdkSession({ queryFn: fn });
   assert.ok(!('model' in calls.options));
-  s.stop();
+  s2.stop();
 });
 
 test('session.setModel delegates to the live query', async () => {
