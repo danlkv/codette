@@ -95,7 +95,10 @@ External IdPs are declared in the repo's `oidc-providers.jsonc` (see "Configurin
    - Checks `iat` freshness (within 5 min), `exp` not past, `jti` not seen recently.
    - Checks `iat >= SERVER_START_TIME` (kill-switch: invalidates all handshakes on server restart).
    - Confirms `clientUsername === username` (sanity).
-   - Enforces single-host slot: rejects if `hosts.has(username)`.
+   - Enforces single-host slot: a fresh, replay-protected proof signed by the
+     currently-connected key identifies the same host, so the slot is
+     transferred to the new connection; a different key for the same username
+     is rejected (close codes: [`protocol.spec.md`](protocol.spec.md)).
    - Accepts and places the connection in the hosts map.
 
 **Replay defenses:** jti dedup (in-memory Map with TTL eviction), iat freshness window,

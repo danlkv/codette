@@ -7,8 +7,9 @@
 
   import { makeInlineFilePrompt, HTML_RENDER_PROMPT } from '../../../shared/prompts.js';
   import { messages, lastCost, lastUsage, lastContextUsage, hostStatus, wsOk, colorScheme, highContrast, vibrateOnDone, fontStyle, syntaxTheme, accentColor,
-           sessions, currentSessionId, sessionData, showFileChips } from '../store.js';
+           sessions, currentSessionId, sessionData, showFileChips, slashRegistry } from '../store.js';
   import { createParser } from './parser.js';
+  import { decide } from './commands.js';
   import { fetchHistory, deleteSession } from '../utils/api.js';
   import { getHistory, saveHistory, removeHistory, hasHistory, getSettings, saveSettings } from '../utils/storage.js';
   import { wtrace } from '../utils/trace.js';
@@ -100,7 +101,7 @@
 
   let storedContextWindow = null;
   const parser = createParser({ messages, currentSessionId, lastCost, lastUsage, lastContextUsage,
-    onContextWindow(cw) { storedContextWindow = cw; } });
+    onContextWindow(cw) { storedContextWindow = cw; }, slashRegistry });
 
   let ws;
   let destroyed = false;
@@ -496,73 +497,42 @@
     messages.update(ms => [...ms, { id: 'sys-' + ++sysCounter, role: 'system', text }]);
   }
 
-  async function handleSlash(text) {
-    const [cmd, ...rest] = text.trim().split(/\s+/);
-    const arg = rest.join(' ');
-    switch (cmd) {
-      case '/clear':
-        messages.set([]); lastCost.set(null);
-        parser.resetTurnState();
-        wsSend({ type: 'clear' });
-        return true;
-      case '/status': {
+  function runCodetteCommand(name) {
+    switch (name) {
+      case 'codette-status': {
         const h = get(hostStatus);
         const w = get(wsOk);
         sysMsg(`host: ${h}  ·  websocket: ${w ? 'connected' : 'disconnected'}`);
-        return true;
+        return;
       }
-      case '/usage':
-      case '/context': {
-        const c = get(lastCost);
-        const u = get(lastUsage);
-        const lines = [];
-        if (u) {
-          const total = (u.input_tokens ?? 0) + (u.output_tokens ?? 0);
-          lines.push(`tokens  in:${u.input_tokens ?? '?'}  out:${u.output_tokens ?? '?'}  total:${total}`);
-          if (u.cache_read_input_tokens) lines.push(`cache read: ${u.cache_read_input_tokens}`);
-          if (u.cache_creation_input_tokens) lines.push(`cache write: ${u.cache_creation_input_tokens}`);
-        }
-        if (c != null) lines.push(`cost: $${c.toFixed(4)}`);
-        sysMsg(lines.length ? lines.join('  ·  ') : 'no usage data yet — complete a turn first');
-        return true;
-      }
-      case '/reload': {
-        const id = get(currentSessionId);
-        if (id && id !== '__new__') {
-          removeHistory(id);
-          currentLines = [];
-          rawLinesLoaded = 0;
-          messages.set([]);
-          parser.resetTurnState();
-          sysMsg('cache cleared — refetching…');
-          await loadSessionHistory(id);
-        }
-        return true;
-      }
-      case '/btw':
-        if (arg) wsSend({ type: 'user', sessionId: get(currentSessionId), message: { role: 'user', content: arg } });
-        return true;
-      case '/codette-inline-files': {
+      case 'codette-inline-files': {
         const sid = get(currentSessionId);
         const cwd = get(sessions).find(s => s.id === sid)?.cwd ?? null;
-        const prompt = makeInlineFilePrompt(cwd);
-        wsSend({ type: 'user', sessionId: sid, message: { role: 'user', content: prompt } });
+        wsSend({ type: 'user', sessionId: sid, message: { role: 'user', content: makeInlineFilePrompt(cwd) } });
         sysMsg('inline file viewer enabled');
-        return true;
+        return;
       }
-      case '/codette-html-render': {
+      case 'codette-html-render': {
         const sid = get(currentSessionId);
         wsSend({ type: 'user', sessionId: sid, message: { role: 'user', content: HTML_RENDER_PROMPT } });
         sysMsg('html render enabled');
-        return true;
+        return;
       }
-      default:
-        return false;
     }
   }
 
   async function handleSend(text, clearFn) {
-    if (text.startsWith('/') && handleSlash(text)) { clearFn?.(); return; }
+    const decision = decide(text, { registry: get(slashRegistry) });
+    if (decision.kind === 'codette') { runCodetteCommand(decision.name); clearFn?.(); return; }
+    if (decision.kind === 'hint') { sysMsg(decision.text); clearFn?.(); return; }
+    if (decision.kind === 'agent_ctl') {
+      const sid = get(currentSessionId);
+      if (!sid || sid === '__new__') { sysMsg('no active session'); clearFn?.(); return; }
+      const { kind: _k, ...ctl } = decision;
+      wsSend({ type: 'agent_ctl', sessionId: sid, ...ctl });
+      clearFn?.(); return;
+    }
+    // 'passthrough' and 'message': ordinary user message
 
     const sid = get(currentSessionId);
     if (!sid || sid === '__new__') {

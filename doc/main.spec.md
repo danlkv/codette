@@ -34,17 +34,47 @@ Certain tools render as interactive blocks instead of the standard tool row:
 Active (unresolved) blocks have a colored border (amber for question/permission, blue for plan). Resolved blocks fade to neutral border + reduced opacity. See [`protocol.spec.md`](protocol.spec.md) for permission mode behavior by backend and history replay semantics.
 
 ### Slash commands
-Typed in the input bar; handled client-side before sending to claude.
 
-| Command | Effect |
-|---------|--------|
-| `/clear` | Clear local message history |
-| `/compact [hint]` | Send compact instruction to claude |
-| `/usage` | Show session cost from last result event |
-| `/status` | Show host/ws connection status |
-| `/model <name>` | Switch model (sends claude `/model` command) |
-| `/btw <question>` | Side question — not added to conversation history |
-| `/inline-files` | Instruct agent to use inline file viewer in current session |
+Claude Code owns command semantics; codette-specific behavior is spelled
+`/codette-*`. Backends (`sdk`/`spawn`) per [`protocol.spec.md`](protocol.spec.md);
+Claude Code command types per [`claude-code-cli.md`](claude-code-cli.md).
+
+**Terms.**
+- *Registry* — commands the running backend accepts (`init.slash_commands`). Opaque to codette.
+- *Passthrough* — a slash message forwarded unmodified as a user message; Claude Code produces the outcome, including `Unknown command: /x` and `/x isn't available in this environment.`
+- *Codette command* — `/codette-*`, defined here. View kind: client-only. Action kind: effect reaches the host/agent.
+- *SDK-mapped command* — a Claude Code command absent from the `sdk` backend's registry because the SDK exposes a dedicated method; codette routes it to that method.
+
+**Dispatch order** (input bar):
+1. Codette command (exact match) → per its kind.
+2. SDK-mapped command, when absent from the active backend's registry → `agent_ctl` (see [`protocol.spec.md`](protocol.spec.md)).
+3. Any other `/`-prefixed text → passthrough.
+4. Otherwise → normal message.
+
+**Codette commands**
+
+| Command | Kind | Effect |
+|---------|------|--------|
+| `/codette-status` | view | host/ws connection status |
+| `/codette-inline-files` | action | send inline-file-viewer prompt |
+| `/codette-html-render` | action | send HTML-render prompt |
+
+**SDK-mapped commands**
+
+| Command | SDK method |
+|---------|-----------|
+| `/model <alias\|id>` | `setModel()`; on an idle session, applied on next auto-resume |
+
+The current model is read from the last assistant message's `model` field.
+
+**Completion.** Suggestions = active registry ∪ codette commands ∪ SDK-mapped
+commands; `/model` also completes its argument (model aliases, free-form id).
+
+**Rendering.** Local command output arrives as synthetic assistant messages
+(result `num_turns: 0`; no cost footer). Compact progress arrives as
+`system/status` events. Replayed history contains `system/local_command`
+lines and `<command-name>`/`<local-command-stdout>` markup; both render as
+command chips + output, not raw markup.
 
 
 ### Session management
