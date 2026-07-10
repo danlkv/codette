@@ -123,6 +123,7 @@
   const pendingPerms = new Map(); // toolUseId → permFields; drained after commitTool
   let pendingCwd = null;
   let pendingSettings = null;
+  let pendingModel = null;   // /model picked before the session exists
 
   let currentAgentState = $derived($sessions.find(s => s.id === $currentSessionId)?.agentState ?? null);
   let currentAgentActive = $derived(!!currentAgentState);
@@ -528,9 +529,20 @@
     if (decision.kind === 'hint') { sysMsg(decision.text); clearFn?.(); return; }
     if (decision.kind === 'agent_ctl') {
       const sid = get(currentSessionId);
-      if (!sid || sid === '__new__') { sysMsg('no active session'); clearFn?.(); return; }
+      if (!sid || sid === '__new__') {
+        // Before the session exists, a model choice is deferred and applied
+        // at session start via codette_settings; other controls need an agent.
+        if (decision.event === 'set_model') {
+          pendingModel = decision.model;
+          sysMsg(`model → ${decision.model} (applies to the new session)`);
+        } else {
+          sysMsg('no active session');
+        }
+        clearFn?.(); return;
+      }
       const { kind: _k, ...ctl } = decision;
       wsSend({ type: 'agent_ctl', sessionId: sid, ...ctl });
+      if (decision.event === 'set_model') sysMsg(`model → ${decision.model}`);
       clearFn?.(); return;
     }
     // 'passthrough' and 'message': ordinary user message
@@ -539,7 +551,11 @@
     if (!sid || sid === '__new__') {
       awaitingNewSession = true;
       clearFn?.();
-      wsSend({ type: 'user', sessionId: '__new__', message: { role: 'user', content: text }, cwd: pendingCwd ?? hostCwd, codette_settings: pendingSettings ?? undefined });
+      const settings = (pendingSettings || pendingModel)
+        ? { ...(pendingSettings ?? {}), ...(pendingModel && { model: pendingModel }) }
+        : undefined;
+      pendingModel = null;
+      wsSend({ type: 'user', sessionId: '__new__', message: { role: 'user', content: text }, cwd: pendingCwd ?? hostCwd, codette_settings: settings });
       return;
     }
 

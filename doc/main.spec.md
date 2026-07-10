@@ -63,7 +63,7 @@ Claude Code command types per [`claude-code-cli.md`](claude-code-cli.md).
 
 | Command | SDK method |
 |---------|-----------|
-| `/model <alias\|id>` | `setModel()`; on an idle session, applied on next auto-resume |
+| `/model <alias\|id>` | `setModel()`; idle session → applied via resume; before the session exists → deferred and applied at session start. Acknowledged locally as `model → <id>` |
 
 The current model is read from the last assistant message's `model` field.
 

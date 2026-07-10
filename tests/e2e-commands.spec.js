@@ -42,3 +42,17 @@ test('slash-prefixed path is sent as a message, not swallowed', async ({ loggedI
   // Regression for the Promise-truthiness swallow: message must render as sent.
   await expect(page.locator('.user-text', { hasText: '/tmp is a directory' })).toBeVisible({ timeout: 60000 });
 });
+
+test('/model acks locally and applies to a new session', async ({ loggedInPage: page }) => {
+  await newSession(page);
+  // Before any message: picks the model for the upcoming session.
+  await send(page, '/model haiku');
+  await expect(page.getByText(/model → haiku/).first()).toBeVisible({ timeout: 10000 });
+
+  await send(page, 'Reply with exactly: ok');
+  await expect(page.locator('.prose', { hasText: 'ok' }).first()).toBeVisible({ timeout: 60000 });
+
+  // After the session exists (idle agent or live): ack again.
+  await send(page, '/model sonnet');
+  await expect(page.getByText(/model → sonnet/).first()).toBeVisible({ timeout: 10000 });
+});
