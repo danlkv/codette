@@ -40,8 +40,10 @@ marked.use({
     level: 'inline',
     start(src) { return src.indexOf('$'); },
     tokenizer(src) {
-      // avoid matching $$ and don't span newlines
-      const m = src.match(/^\$(?!\$)([^$\n]+?)\$/);
+      // avoid matching $$ and don't span newlines; pandoc boundary rules:
+      // non-space after opening $, non-space before closing $, no digit
+      // after closing $ — so currency pairs ("$2 and $3") stay literal
+      const m = src.match(/^\$(?!\$)((?=\S)[^$\n]*?\S|\S)\$(?!\d)/);
       if (m) return { type: 'math_inline', raw: m[0], text: m[1] };
     },
     renderer(token) {
